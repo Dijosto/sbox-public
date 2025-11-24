@@ -1,0 +1,29 @@
+
+#include "scenesystem/iscenesystem.h"
+
+[Handle:Sandbox.SceneWorld]
+native class ISceneWorld as NativeEngine.ISceneWorld
+{
+	void DeleteAllObjects();
+	void Release();
+	int GetSceneObjectCount();
+	bool IsEmpty();
+	string GetWorldDebugName();
+
+	void SetDeleteAtEndOfFrame( bool bDelete );
+	bool GetDeleteAtEndOfFrame();
+
+	void DeleteEndOfFrameObjects();
+
+	inline bool MeshTrace( MeshTraceInput input, ref MeshTraceOutput output )
+	{
+		return self->MeshTrace( input, *output );
+	}
+
+	IPVS GetPVS();
+	void SetPVS( IPVS pPVS );
+
+	void Add3DSkyboxWorld( ISceneWorld world );
+	void Remove3DSkyboxWorld( ISceneWorld world );
+	void Set3DSkyboxParameters( Vector3 origin, Angles angle, float scale );
+}

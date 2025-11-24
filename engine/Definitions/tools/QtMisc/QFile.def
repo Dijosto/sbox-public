@@ -1,0 +1,13 @@
+native class QFileInfo
+{
+	static QFileInfo Create( string filePath ); [new]
+
+	inline QPixmap GetIcon( int width, int height )
+	{
+		QFileIconProvider iconProvider;
+		QIcon icon = iconProvider.icon( *self );
+		QPixmap pixmap = icon.pixmap( icon.actualSize( QSize( width, height ) ) );
+		
+		return new QPixmap( pixmap );
+	}
+}

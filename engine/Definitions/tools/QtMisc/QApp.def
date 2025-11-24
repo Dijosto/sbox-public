@@ -1,0 +1,112 @@
+﻿#include "qcontrols/qt_includes.h"
+#include "qcontrols/qutils.h"
+#include "sbox_widgets.h"
+
+native accessor qApp as Native.QApp
+{
+	void setStyleSheet( qstring style );
+	void beep();
+	void alert( QWidget widget, int msec );
+
+	Editor.QtKeyboardModifiers queryKeyboardModifiers();
+	Sandbox.MouseButtons mouseButtons();
+	
+	QWidget focusWidget();
+
+	inline void SetClipboardText( qstring text )
+	{
+		qApp->clipboard()->setText( text );
+	}
+
+	inline qstring GetClipboardText()
+	{
+		return qApp->clipboard()->text();
+	}
+
+	inline void redrawActiveWindow()
+	{
+		if ( qApp->activeWindow() )
+		{
+			qApp->activeWindow()->update();
+		}
+	}
+
+	inline float DpiPixelRatio()
+	{
+		return qApp->desktop()->devicePixelRatioF();
+	}
+
+	inline QPointF CursorPosition()
+	{
+		return QCursor::pos();
+	}
+
+	inline void SetCursorPosition( QPoint pos )
+	{
+		QCursor::setPos( pos );
+	}
+
+	inline QPointF NativeCursorPosition()
+	{
+		return CQUtils::GetNativeCursorPos();
+	}
+
+	inline void SetNativeCursorPosition( QPoint pos )
+	{
+		CQUtils::SetNativeCursorPos( pos );
+	}
+
+	void processEvents();
+	void exec();
+
+	inline static void Initialize()
+	{
+		InitQtPluginsDir();
+
+		qputenv( "QT_QPA_PLATFORM", "windows:darkmode=2" );
+
+		QApplication::setAttribute( Qt::AA_EnableHighDpiScaling );
+		QApplication::setAttribute( Qt::AA_UseHighDpiPixmaps );
+		QApplication::setHighDpiScaleFactorRoundingPolicy( Qt::HighDpiScaleFactorRoundingPolicy::PassThrough );
+
+		int argc = CommandLine()->ParmCount();
+		char **argv = (char**)CommandLine()->GetParms();
+		new QApplication( argc, argv );
+	}
+		
+	inline void ReloadTabbedStyle()
+	{
+		CToolFramework2::ReloadTabbedStyle( qApp, false );
+	}
+
+	inline void exit()
+	{
+		Plat_ExitProcess( 0 );
+	}
+
+	inline QWidget HoveredWidget()
+	{
+		return qApp->widgetAt( QCursor::pos() );
+	}
+
+    inline int ScreenCount() 
+    {
+        return qApp->screens().count();
+    }
+    inline QScreen GetScreen( int id ) 
+    {
+        return qApp->screens().value( id );
+    }
+}
+
+native class QScreen as Native.QScreen
+{
+    QRectF geometry();
+
+    inline QPixmap getCapture()
+    {
+        QRect screenRect = self->geometry();
+        QPixmap capture = self->grabWindow( QApplication::desktop()->winId(), screenRect.x(), screenRect.y(), screenRect.width(), screenRect.height() );
+        return new QPixmap( capture );
+    }
+}

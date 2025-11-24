@@ -1,0 +1,43 @@
+
+<Project>
+
+	<PropertyGroup Condition="'$(OS)' == 'Windows_NT'">
+		<CodeGeneratorExe Condition="'$(CodeGeneratorExe)' == ''">..\\Tools\\CodeGen\\bin\\CodeGen.exe</CodeGeneratorExe>
+	</PropertyGroup>
+
+	<PropertyGroup Condition="'$(OS)' != 'Windows_NT'">
+        <CodeGeneratorExe Condition="'$(CodeGeneratorExe)' == ''">../Tools/CodeGen/bin/CodeGen</CodeGeneratorExe>
+    </PropertyGroup>
+
+	<Target Name="CleanCodeGen" AfterTargets="Clean">
+		<RemoveDir Directories="obj/.generated" />
+	</Target>
+
+	<ItemGroup>
+		<ProjectReference Include="../Tools/CodeGen/CodeGen.csproj" OutputItemType="CodeGenTool" ReferenceOutputAssembly="false" Private="true" />
+	</ItemGroup>
+	
+	<Target Name="CodeGenFiles" BeforeTargets="CoreCompile" Condition="'$(DesignTimeBuild)' != 'true'">
+
+		<Message Importance="high" Text="Running Code Generation.."></Message>
+		<Exec Command="$(CodeGeneratorExe)"  />
+		<Message Importance="high" Text="Code Generation Complete"></Message>
+
+		<ItemGroup>
+			<!-- Include all files in .generated directory but exclude assembly info files -->
+			<GeneratedFiles Include="obj/.generated/**/*.cs" Exclude="obj/.generated/obj/**/*.cs" />
+		</ItemGroup>
+
+		<!-- For each generated file, remove the corresponding file from Compile -->
+		<ItemGroup>
+			<Compile Remove="@(GeneratedFiles->'%(RecursiveDir)%(Filename)%(Extension)')" />
+		</ItemGroup>
+		
+		<!-- Build -->
+		<ItemGroup>
+			<Compile Include="@(GeneratedFiles)" />
+		</ItemGroup>
+		
+	</Target>
+
+</Project>

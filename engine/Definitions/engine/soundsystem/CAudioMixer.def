@@ -1,0 +1,57 @@
+
+native class CAudioMixer
+{
+	[nogc]
+	void Dispose(); [delete]
+
+	[nogc]
+	int GetSamplePosition();
+
+	[nogc]
+	bool ShouldContinueMixing();
+
+	void SetSamplePosition( int position );
+
+	[nogc]
+	void SetSampleEnd( uint nEndSample );
+
+	[nogc]
+	void DelayOrSkipSamples( int nDelaySamples );
+
+	bool IsReadyToMix();
+	
+	[nogc]
+	int GetPositionForSave();
+
+	void SetPositionFromSaved( int savedPosition );
+
+	void UpdateMixerState( audio_source_indexstate_t state );
+
+	inline audio_source_indexstate_t GetIndexState()
+	{
+		return self->GetMixerData()->m_indexState;
+	}
+
+	[nogc]
+	CSfxTable GetSfxTable();
+
+	[nogc]
+	int GetSampleCount();
+
+	[nogc]
+	inline int GetChannelCount()
+	{
+		if ( self->GetSource() == nullptr ) return 1;
+		return self->GetSource()->ChannelCount();
+	}
+
+	[nogc]
+	bool SetTimeScale( float flTimeScale );
+
+	[nogc]
+	void EnableLooping( bool bEnable );
+
+	void ReadToBuffer( float pitch, CAudioMixDeviceBuffers buffers );
+}
+
+native struct audio_source_indexstate_t;

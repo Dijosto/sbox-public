@@ -1,0 +1,51 @@
+native struct SteamNetConnectionRealTimeStatus_t as Steamworks.Data.SteamNetConnectionRealTimeStatus_t;
+
+native class ISteamNetworkingMessages
+{
+	inline int SendMessageToUser( ulong steamid, void* data, int dataSize, int flags, int channel )
+	{
+		SteamNetworkingIdentity ident;
+		ident.SetSteamID( steamid );
+
+		EResult result = self->SendMessageToUser( ident, data, dataSize, flags, channel );
+		return result;
+	}
+
+	inline int ReceiveMessagesOnChannel( int channel, void* array_of_pointers, int maxmessages )
+	{
+		return self->ReceiveMessagesOnChannel( channel, (SteamNetworkingMessage_t**)array_of_pointers, maxmessages );
+	}
+
+	inline bool AcceptSessionWithUser( ulong steamid )
+	{
+		SteamNetworkingIdentity ident;
+		ident.SetSteamID( steamid );
+
+		return self->AcceptSessionWithUser( ident );
+	}
+
+	inline bool CloseChannelWithUser( ulong steamid, int nLocalChannel )
+	{
+		SteamNetworkingIdentity ident;
+		ident.SetSteamID( steamid );
+
+		return self->CloseChannelWithUser( ident, nLocalChannel );
+	}
+
+	inline void ReleaseMessage( void* message )
+	{
+		SteamNetworkingMessage_t* msg = (SteamNetworkingMessage_t*)message;
+		msg->Release();
+	}
+	
+	inline SteamNetConnectionRealTimeStatus_t GetConnectionInfo( ulong steamid )
+	{
+		SteamNetworkingIdentity ident;
+		ident.SetSteamID( steamid );
+		
+		SteamNetConnectionInfo_t info;
+		SteamNetConnectionRealTimeStatus_t status;
+		self->GetSessionConnectionInfo( ident, &info, &status );
+		return status;
+	}
+}

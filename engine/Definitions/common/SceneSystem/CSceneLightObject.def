@@ -1,0 +1,80 @@
+native enum LightSourceShape_t is NativeEngine.LightSourceShape_t;
+
+[Handle:Sandbox.SceneLight]
+native class CSceneLightObject as NativeEngine.CSceneLightObject : CSceneObject
+{
+	void SetWorldPosition( Vector3 pos );
+	Vector3 GetWorldPosition();
+
+	void SetWorldDirection( Rotation dir );
+	Vector3 GetWorldDirection();
+
+	void SetColor( Vector3 color );
+	void SetBounceColor( Vector3 color );
+	Vector3 GetColor();
+
+	void SetRadius( float radius );
+	float GetRadius();	
+	
+	void SetTheta( float f );
+	float GetTheta();
+
+	void SetPhi( float f );
+	float GetPhi();
+
+	void SetFallOff( float f );
+	float GetFallOff();
+
+	int GetShadowTextureResolution();
+	void SetShadowTextureResolution( int v );
+
+	bool GetShadows();
+	void SetShadows( bool v );
+
+	void SetConstantAttn(float f);
+
+	float GetConstantAttn();
+
+	void SetLinearAttn( float f );
+	float GetLinearAttn();
+
+	void SetQuadraticAttn( float f );
+	float GetQuadraticAttn();
+
+	void SetLightCookie( ITexture f );
+	ITexture GetLightCookie();
+
+	int GetShadowCascades();
+	void SetShadowCascades( int v );
+
+	float GetCascadeDistanceScale();
+	void SetCascadeDistanceScale( float dist );
+
+	float GetFogContributionStength();
+	void SetFogContributionStength( float v );
+
+	int GetFogLightingMode();
+	void SetFogLightingMode( int v );
+
+	void SetBakeLightIndex( int v );
+	void SetBakeLightIndexScale( float v );
+	void SetUsesIndexedBakedLighting( bool v );
+	void SetRenderDiffuse( bool v );
+	void SetRenderSpecular( bool v );
+	void SetRenderTransmissive( bool v );
+	void SetLightSourceSize0( float v );
+	void SetLightSourceSize1( float v );
+	void SetShadowTextureWidth( int v );
+	void SetShadowTextureHeight( int v );
+	int GetShadowTextureWidth();
+	int GetShadowTextureHeight();
+
+	uint GetLightFlags();
+	void SetLightFlags( uint flags );
+
+	LightSourceShape_t GetLightShape();
+	void SetLightShape( LightSourceShape_t shape );
+
+	void SetLightSourceDim0( float v );
+	void SetLightSourceDim1( float v );
+}

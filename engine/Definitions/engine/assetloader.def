@@ -1,0 +1,17 @@
+
+native class IRD_RegisterResourceDataUtils as NativeEngine.ResourceDataUtils
+{
+	void SetDataRegistrationFailed();
+	bool IsReloading();
+	void SetFinalResourceData( void* pPtr );
+	bool GetDataRegistrationFailed();
+	void* GetFinalResourceData();
+	long GetResultBufferSize();
+}
+
+native class IAsyncResourceDataRequest as NativeEngine.IAsyncResourceDataRequest
+{
+	string GetFileName();
+	void* GetResultBuffer();
+	long GetResultBufferSize();
+}

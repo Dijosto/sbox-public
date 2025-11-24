@@ -1,0 +1,10 @@
+#include "mapdoclib/materialinfo.h"
+
+// interopgen fucking my ass, trick it to include it "again"
+#include "./sbox/resourcehandles.h"
+
+native static class global as NativeHammer.Global
+{
+	int MaterialGetMappingWidth( IMaterial material );
+	int MaterialGetMappingHeight( IMaterial material );
+}

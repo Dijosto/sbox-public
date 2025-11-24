@@ -1,0 +1,20 @@
+﻿
+#include "toolentity.h"
+
+managed class Editor.MapEditor.IEntityTool
+{
+	void CreateUI( QWidget container );
+	string GetCurrentEntityClassName();
+}
+
+// Glue for the entity tool, we could do the entire thing in C# with some more APIs exposed and avoid all this.
+managed static class Editor.MapEditor.EntityToolGlue
+{
+	Editor.MapEditor.IEntityTool Create( CToolEntity tool );
+}
+
+native class CToolEntity
+{
+    void StartBlockEntityCreation( string className );
+}
+

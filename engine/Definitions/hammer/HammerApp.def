@@ -1,0 +1,145 @@
+﻿
+#include "hammerapp.h"
+
+native class CHammerApp as NativeHammer.CHammerApp
+{
+	void RefreshEntitiesGameData();
+
+	inline IMaterial GetCurrentMaterial()
+	{
+		return self->GetActiveMaterial().GetResourceHandle();
+	}
+
+	inline void SetCurrentTexture( string assetFilename )
+	{
+		CHammerEditorSession* pEditorSession = self->GetActiveHammerEditorSession();
+		if ( pEditorSession == nullptr )
+			return;
+
+		// Grabbing the IAsset from the filename since I can't use IAsset outside of assetsystem interop (yet?)
+		IAsset* pAsset = g_pAssetSystem->FindAssetByFilename( assetFilename );
+		
+		if ( pAsset != nullptr )
+			pEditorSession->SetCurrentTexture( pAsset );
+	}
+
+	// We can return the IAsset but.. doesn't work with how interop is setup
+	inline int GetActiveMapAsset()
+	{
+		CHammerEditorSession* pEditorSession = self->GetActiveHammerEditorSession();
+		if ( pEditorSession == nullptr )
+			return -1;
+		if ( pEditorSession->GetMapAsset() == nullptr )
+			return -1;
+		return pEditorSession->GetMapAsset()->GetAssetIndexInt();
+	}
+
+	inline CMapDoc GetActiveMapDoc()
+	{
+		CHammerEditorSession* pEditorSession = self->GetActiveHammerEditorSession();
+		if ( pEditorSession == nullptr )
+			return (CMapDoc*)nullptr;
+	
+		return pEditorSession->GetMapDoc();
+	}
+
+	inline void MarkAllViewHudsDirty()
+	{
+		auto editorSession = self->GetActiveHammerEditorSession();
+		if ( editorSession == nullptr ) return;
+		auto mapViewManager = editorSession->GetViewManager();
+		if ( mapViewManager == nullptr ) return;
+		mapViewManager->MarkAllViewHudsDirty();
+	}
+
+	inline void SelectObjectsUsingAsset( string assetFilename )
+	{
+		CHammerEditorSession* pEditorSession = self->GetActiveHammerEditorSession();
+		if ( pEditorSession == nullptr ) return;
+
+		IAsset* pAsset = g_pAssetSystem->FindAssetByFilename( assetFilename );
+		if ( pAsset != nullptr )
+			pEditorSession->SelectObjectsUsingAsset( pAsset );
+	}
+
+	inline void SelectFacesUsingMaterial( string assetFilename )
+	{
+		CHammerEditorSession* pEditorSession = self->GetActiveHammerEditorSession();
+		if ( pEditorSession == nullptr ) return;
+		
+		IAsset* pAsset = g_pAssetSystem->FindAssetByFilename( assetFilename );
+		if ( pAsset != nullptr )
+			pEditorSession->SelectFacesUsingMaterial( pAsset );
+	}
+
+	inline void AssignAssetToSelection( string assetFilename )
+	{
+		CHammerEditorSession* pEditorSession = self->GetActiveHammerEditorSession();
+		if ( pEditorSession == nullptr ) return;
+
+		IAsset* pAsset = g_pAssetSystem->FindAssetByFilename( assetFilename );
+		if ( pAsset != nullptr )
+			pEditorSession->AssignAssetToSelection( pAsset );
+	}
+
+	inline void ShowEntityReportForAsset( string assetFilename )
+	{
+		IAsset* pAsset = g_pAssetSystem->FindAssetByFilename( assetFilename );
+		if ( pAsset != nullptr )
+			self->ShowEntityReportForAsset( pAsset );
+	}
+
+	void OnFileReload();
+}
+
+native static class NativeHammer.Options
+{
+	inline bool GetShowHelpers()
+	{
+		return Options.GetShowHelpers();
+	}
+
+	inline bool GetShowGameObjectsOnly()
+	{
+		return Options.GetShowGameObjectsOnly();
+	}
+}
+
+managed static class Editor.MapEditor.Hammer
+{
+	void Init( CHammerApp app );
+	void RunFrame();
+	void Shutdown();
+
+	// Called from CHammerApp::SetActiveMaterial
+	void UpdateActiveMaterial( IMaterial material );
+
+	void RenderMapViewHUD( CMapView mapView, CToolRenderContext renderContext );
+
+	void PreSaveMap( CMapDoc mapDoc );
+	void PostLoadMap( CMapDoc mapDoc );
+
+	void MapAssetSaved( int asset, CMapDoc mapDoc );
+
+	void OnMapViewOpenContextMenu( CMapView view, QMenu menu );
+	void OnCreateGameObjectMenu();
+}
+
+managed static class Editor.MapEditor.HammerEvents
+{
+	void OnMapNodeDescriptionChanged( CMapNode mapNode );
+	void OnObjectAddedToDocument( CMapNode mapNode, CMapWorld mapWorld );
+	void OnObjectRemovedFromDocument( CMapNode mapNode, CMapWorld mapWorld );
+	void OnMeshesTiedToGameObject( CMapGameObject mapGameObject );
+}
+
+managed static class Editor.MapEditor.MapViewDropTarget
+{
+	bool OnDragEnter( QDragEnterEvent e, CMapView mapView );
+	bool OnDragMove( QDragMoveEvent e, CMapView mapView );
+	bool OnDrop( QDropEvent e, CMapView mapView );
+	void OnDragLeave( CMapView mapView );
+
+	// Used by various native tools to adjust behaviour
+	bool GetDragAndDropActive();
+}

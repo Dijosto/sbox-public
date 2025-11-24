@@ -1,0 +1,14 @@
+﻿
+
+native class QDrag : QObject 
+{
+	static QDrag Create( QObject dragSource ); [new]
+
+	void setPixmap( cref QPixmap icon );
+	void setHotSpot( QPoint hotspot );
+
+	void setMimeData(QMimeData data);
+    QMimeData mimeData();
+
+	Editor.DropAction exec();
+}

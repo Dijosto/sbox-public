@@ -1,0 +1,48 @@
+﻿using Sandbox;
+using System;
+
+[AttributeUsage( AttributeTargets.Property )]
+[CodeGenerator( CodeGeneratorFlags.WrapPropertyGet | CodeGeneratorFlags.Instance, "OnWrapGet" )]
+[CodeGenerator( CodeGeneratorFlags.WrapPropertyGet | CodeGeneratorFlags.Static, "WrapGet.OnWrapGetStatic" )]
+public class WrapGet : Attribute
+{
+	public static T OnWrapGetStatic<T>( WrappedPropertyGet<T> p )
+	{
+		return null;
+	}
+}
+
+public class MyTestClass
+{
+	
+}
+
+public partial class TestWrapGet
+{
+	[WrapGet]
+	public static bool StaticProperty { get; set; }
+	
+	[WrapGet]
+	public bool InstanceProperty { get; set; } = true;
+
+	[WrapGet]
+	public bool Test
+	{
+		get
+		{
+			return true;
+		}
+		set
+		{
+			InstanceProperty = true;
+		}
+	}
+	
+	[WrapGet]
+	public MyTestClass InstanceProperty2 { get; }
+
+	internal T OnWrapGet<T>( WrappedPropertyGet<T> p )
+	{
+		return p.Value;
+	}
+}

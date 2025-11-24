@@ -1,0 +1,55 @@
+﻿
+
+native class QMenu as Native.QMenu : QWidget
+{
+	static QMenu Create( QWidget parent ); [new]
+
+	void insertAction(QAction before, QAction action);
+	QAction addSeparator();
+	bool isEmpty();
+    void clear();
+
+	QString title();
+    void setTitle(QString title);
+
+	void setIcon(QIcon icon);
+	inline void setIconFromPixmap( QPixmap icon )
+	{
+		QIcon qicon( *icon );
+		self->setIcon( qicon );
+	}
+	
+	void exec( QPoint pos );
+	QAction activeAction();
+
+	QAction addMenu(QMenu menu);
+	QAction insertMenu(QAction before, QMenu menu);
+
+	void setTearOffEnabled(bool b);
+	bool isTearOffEnabled();
+
+	void setToolTipsVisible(bool visible);
+	bool toolTipsVisible();
+}
+
+
+native class QMenuBar as Native.QMenuBar : QWidget
+{
+	void insertAction(QAction before, QAction action);
+
+	QAction addMenu(QMenu menu);
+	QAction insertMenu(QAction before, QMenu menu);
+
+	QAction addSeparator();
+    void clear();
+}
+
+native class CMenuBar
+{
+	static QMenuBar Create( QWidget parent, Editor.MenuBar menubar ); [new]
+}
+
+managed class Editor.MenuBar : Editor.Widget
+{
+
+}

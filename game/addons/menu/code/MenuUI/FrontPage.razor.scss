@@ -1,0 +1,90 @@
+FrontPage
+{
+    flex-direction: row;
+    max-width: 1700px;
+    margin: 0 auto;
+}
+
+
+FrontPage .left
+{
+    height: 100%;
+    pointer-events: all;
+    align-items: flex-end;
+    justify-content: flex-start;
+    flex-grow: 0;
+    flex-shrink: 0;
+    flex-direction: column;
+    gap: 16px;
+    padding: 32px;
+}
+
+
+FrontPage .center
+{
+    flex-shrink: 0;
+    flex-grow: 1;
+}
+
+FrontPage .right
+{
+    height: 100%;
+    pointer-events: all;
+    align-items: flex-end;
+    justify-content: flex-end;
+    flex-grow: 0;
+    flex-shrink: 0;
+    flex-direction: column;
+    gap: 16px;
+    padding: 32px;
+}
+
+FrontPage button.button
+{
+    border: 1px solid #2e344b44;
+    border-radius: 16px;
+    font-weight: bold;
+    font-family: Poppins;
+    text-shadow: none;
+    gap: 16px;
+    padding: 16px 32px;
+    width: 270px;
+    background-color: #1e1f2855;
+    backdrop-filter: blur( 20px );
+    transition: all 0.1s linear;
+    color: #aab3cc;
+
+    .icon
+    {
+        font-size: 3rem;
+        flex-shrink: 0;
+        color: #08f;
+    }
+
+    .button-text
+    {
+        font-size: 2rem;
+        white-space: nowrap;
+    }
+
+    .button-help
+    {
+        font-size: 1rem;
+        font-weight: 400;
+        color: #8287b2;
+    }
+}
+
+FrontPage button.button:hover
+{
+    background-color: #1e1f28cc;
+    border: 1px solid #08f;
+    color: white;
+}
+
+button.button .iconpanel
+{
+    color: #457ce2;
+    text-shadow: none;
+    font-size: 32px;
+}

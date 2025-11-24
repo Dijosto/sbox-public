@@ -1,0 +1,6 @@
+// THIS FILE IS AUTO-GENERATED
+
+Layer0
+{
+	shader "shaders/envmap_filtering_cs.shader"
+}

@@ -1,0 +1,47 @@
+﻿
+native class CUtlVector<IAssetType*> as NativeEngine.CUtlVectorAssetType
+{
+	void DeleteThis(); [delete]
+	static CUtlVectorAssetType Create( int growsize, int initialcapacity ); [new]
+
+	int Count();
+	IAssetType Element( int i );
+}
+
+managed static class Editor.AssetSystem
+{
+	void PreInitialize();
+	void AssetAdded( IAsset asset );
+	void AssetRemoved( uint index );
+	void AssetChanged( uint index );
+	void UpdateAssetAutoTags( uint index );
+	void RecordAssetOpen( uint index );
+	void AssetScanComplete();
+	void RegisterAssetType( int, IAssetType assetType );
+	void InitializeCompilerForFilename( IResourceCompilerContext context, string filename );
+	bool TryManagedCompile( IResourceCompilerContext context );
+	void OnSoundReload( string filename );
+	void OnSoundReloaded( string filename );
+	void OnDemandRecompile( uint index, string reason );
+
+	// Lots of parameters, a struct would be nice but pointers are weird in structs
+	void OpenPicker( QWidget pParentWidget, CUtlVectorAssetType assetTypes, IAssetPickerListener callback, int viewmode, IAsset selectedAsset, string titleAndSettingsName, bool cloudAllowed, string initialSearchText );
+	void PopulateAssetMenu( QMenu qMenu, IAsset asset );
+}
+
+// Wraps a AssetPickedInfo_t struct, least bullshit way to do it and we only use it once
+native class AssetPickedWrapper
+{
+	void DeleteThis(); [delete]
+	static AssetPickedWrapper Create(); [new]
+
+	void AddAsset( IAsset asset );
+}
+
+native class IAssetPickerListener
+{
+	inline void NotifyAssetPicked( AssetPickedWrapper wrapper )
+	{
+		self->NotifyAssetPicked( wrapper->m_info );
+	}
+}

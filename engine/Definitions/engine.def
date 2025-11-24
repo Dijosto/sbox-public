@@ -1,0 +1,35 @@
+ident "engine"
+nativedll engine2.dll
+
+// A static function to report exceptions to in C#
+exceptions	"Sandbox.Interop.BindingException"
+
+// Management classes will appear under this namespace
+namespace "Managed.SandboxEngine"
+
+// Paths are relative to the def file
+cpp "../../src/engine2/interop.engine.cpp"
+hpp "../../src/engine2/interop.engine.h"
+cs	"../Sandbox.Engine/Interop.Engine.cs"
+
+
+include "dbg.h"
+include "color.h"
+
+include "engine/*"
+include "tier3"
+include "common/*"
+include "resources"
+
+
+managed static class Sandbox.Engine.Bootstrap
+{
+	static void EnvironmentExit( int nCode );
+}
+
+
+managed static class Sandbox.Engine.SystemInfo
+{
+	static void Set( string cpu, ushort processorCount, ulong frequency, ulong totalMemory );
+	static void SetGpu( string driver, string version, ulong memory );
+}

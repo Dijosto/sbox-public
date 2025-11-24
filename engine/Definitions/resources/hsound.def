@@ -1,0 +1,15 @@
+include "soundsystem/soundschema.h"
+
+native enum vsound_format_t is Sandbox.SoundFormat;
+
+[ResourceHandle:HSound]
+native class VSound_t as NativeEngine.VSound_t
+{
+	vsound_format_t format();
+	int BitsPerSample();
+	int channels();
+	int BytesPerSample();
+	int m_sampleFrameSize();
+	int m_rate();
+	float Duration();
+}

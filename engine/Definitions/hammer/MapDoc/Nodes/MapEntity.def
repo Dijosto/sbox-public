@@ -1,0 +1,27 @@
+﻿
+#include "mapdoclib/mapentity.h"
+
+#include "mapdoclib/alignedboxhelper.h"
+
+[Handle:Editor.MapDoc.MapEntity]
+native class CMapEntity as NativeMapDoc.CMapEntity : CMapNode
+{
+    // all we care about for now
+    string GetClassName();
+
+    void SetClass( string classname );
+    void SetKeyValue( string key, string value );
+    string GetKeyValue( string key );
+
+    bool TargetNameMatches( string name );
+
+    // Set the bounds for when we have no model attached
+    inline void SetDefaultBounds( Vector3 minBounds, Vector3 maxBounds )
+    {
+        CAlignedBoxHelper *pAlignedBoxHelper = self->GetAlignedBoxHelper();
+        if ( pAlignedBoxHelper == nullptr )
+            return;
+
+	    self->GetAlignedBoxHelper()->SetBounds( minBounds, maxBounds );
+    }
+}

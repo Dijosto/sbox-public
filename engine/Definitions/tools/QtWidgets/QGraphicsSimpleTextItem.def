@@ -1,0 +1,8 @@
+﻿
+native class QGraphicsSimpleTextItem as Native.QGraphicsSimpleTextItem : QGraphicsItem
+{
+	static QGraphicsSimpleTextItem Create( qstring text, QGraphicsItem parent ); [new]
+
+	void setText(QString text);
+    QString text();
+}

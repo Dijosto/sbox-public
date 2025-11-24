@@ -1,0 +1,42 @@
+
+#include "soundsystem/snd_sfx.h"
+#include "soundsystem/snd_audio_source.h"
+
+native class CSfxTable
+{
+	inline int GetCacheStatus()
+	{
+		return self->GetCacheStatus();
+	}
+
+	inline int GetSampleCount()
+	{
+		if ( !self->pSource ) return 0;
+		return self->pSource->SampleCount();
+	}
+
+	inline bool GetSamples( CastTo[short*] void* samples, uint numSamples )
+	{
+		if ( !self->pSource ) return false;
+		CUtlVector<short> outputSamples;
+		bool bResult = self->pSource->CopySamples16( outputSamples );
+		memcpy( samples, outputSamples.Base(), numSamples * sizeof( short ) );
+		return bResult;
+	}
+
+	[nogc]
+	inline VSound_t GetSound()
+	{
+		return self->m_hSound;
+	}
+
+	bool IsValidForPlayback();
+
+	bool FailedResourceLoad();
+
+	inline CAudioMixer CreateMixer()
+	{
+		if ( !self->IsValidForPlayback() ) return nullptr;
+		return self->pSource->CreateMixer();
+	}
+}

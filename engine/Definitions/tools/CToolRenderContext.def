@@ -1,0 +1,52 @@
+﻿
+#include "toolrenderutils/toolrendercontext.h"
+
+native class CToolRenderContext
+{
+	bool IsScreenSpace();
+
+	bool IsOrthographic();
+	bool IsWireframe();
+	bool IsActiveView();
+	bool Is3D();
+
+	// CToolCamera *GetCamera()
+
+	// void PushTransform( const matrix3x4_t &mat );
+	// void PopTransform();
+
+	// void AddSceneObject( class IToolSceneObjectContainer *pObject );
+
+	void SetCurrentMaterial( IMaterial material );
+	void SetDrawColor( Color clr );
+
+	//
+	// 2D drawing functions
+	//	
+
+	void Draw2DRectangleFilled( Vector2 ul, Vector2 lr, Color clr );
+	void Draw2DRectangleOutline( Vector2 ul, Vector2 lr, Color clr );
+	void Draw2DCircle( Vector2 vCenter, float fRadius, int nSegments, Color color );
+	void Draw2DCross( Vector2 ul, Vector2 lr, Color color );
+
+	void Draw2DRectangleTextured( Vector2 ul, Vector2 lr, ITexture hTexture, bool bAlpha, bool bSrgb );
+
+	//
+	// Handles
+	//
+	// void SetHandleStyle( int size, RenderHandleType_t type );
+	// void SetHandleColor( VertexColor_t clr );
+	// void SetHandleColor( unsigned char r, unsigned char g, unsigned char b );
+	// void DrawHandle( const Vector &vCenter, const Vector &vBoxHalfDims, float flMinSize, bool bNoZ = true, bool bBorder = true, bool bTranslucent = false );
+	// void DrawHandle( float flRadius, RenderHandleType_t type, VertexColor_t clr, const Vector &vCenter, bool bNoZ = true, bool bBorder = true, bool bTranslucent = false );
+
+	void DrawLine( Vector vStart, Vector vEnd, Color startColor, Color endColor );
+
+	void DrawBox( Vector3 Mins, Vector3 Maxs, Color clr );
+
+	void DrawScreenText( string text, Vector2 pos, Color drawColor );
+	void DrawWorldSpaceText( string text, Vector3 pos, Vector2 pixelOffset2D, Color drawColor, float flMinZoomLevelToRender );
+
+	// Vector2 WorldSpaceToScreenSpace( Vector3 vWorld );
+	// bool WorldSpaceToScreenSpace( Vector3 vWorld, Vector2 vOut );
+}

@@ -1,0 +1,70 @@
+﻿#include "qcontrols/qinputbindmenu.h"
+
+native enum Qt::ShortcutContext is Editor.ShortcutContext;
+
+native class QAction as Native.QAction : QObject
+{
+    void setText(QString text);
+    QString text();
+
+    void setIcon(QIcon icon);
+	inline void setIconFromPixmap( QPixmap icon )
+	{
+		QIcon qicon( *icon );
+		self->setIcon( qicon );
+	}
+
+	void setToolTip(QString tip);
+    QString toolTip();
+
+    void setStatusTip(QString statusTip);
+    QString statusTip();
+
+    void setSeparator(bool b);
+    bool isSeparator();
+
+    void setCheckable(bool B);
+    bool isCheckable();
+
+    bool isChecked();
+    bool isEnabled();
+    bool isVisible();
+    void setChecked( bool b );
+    void setEnabled( bool b );
+
+    void setIconVisibleInMenu(bool visible);
+    bool isIconVisibleInMenu();
+
+    void setShortcutVisibleInContextMenu(bool show);
+    bool isShortcutVisibleInContextMenu();
+
+    void trigger();
+
+    void setMenu( QMenu menu );
+
+    void setShortcut( QString str );
+
+    void setShortcutContext( Qt::ShortcutContext context );
+    Qt::ShortcutContext shortcutContext();
+
+    void setIconText(QString text);
+    QString iconText();
+}
+
+native class CQNoDeleteWidgetAction as Native.CQNoDeleteWidgetAction : QAction
+{
+    static CQNoDeleteWidgetAction Create( QObject parent ); [new]
+
+    void setDefaultWidget( QWidget w );
+}
+
+native class CAction as Native.CAction : QAction
+{
+	static CAction Create( QObject parent, Option action ); [new]
+}
+
+managed class Editor.Option
+{
+    public void InternalTriggered();
+    public void InternalToggled( bool b );
+}

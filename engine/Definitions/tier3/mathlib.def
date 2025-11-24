@@ -1,0 +1,26 @@
+
+include "mathlib/mathlib.h"
+include "mathlib/noise.h"
+include "mathlib/aabb.h"
+include "mathlib/transform.h"
+include "physicslib/serialize.h"
+
+native struct Vector is Vector3
+
+native struct Vector4D is Vector4
+native struct QAngle is Angles
+native struct Quaternion is Rotation
+native struct CTransformUnaligned is Transform
+native struct Rect_t is NativeRect
+native struct Rect3D_t is Rect3D
+native struct AABB_t is BBox
+native struct VMatrix is Matrix
+native struct RnCapsule_t is Capsule
+native struct RnSphere_t is Sandbox.Sphere;
+native struct Vector2D is Vector2
+
+[small]
+native struct Color is Color32
+
+[small]
+native struct color24 is Color24

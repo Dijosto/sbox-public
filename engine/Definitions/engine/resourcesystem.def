@@ -1,0 +1,35 @@
+
+include "resourcesystem/iresourcesystem.h"
+
+native accessor g_pResourceSystem as NativeEngine.g_pResourceSystem
+{
+	void ReloadSymlinkedResidentResources();
+	void UpdateSimple();
+	bool HasPendingWork();
+
+	inline HResourceManifest LoadResourceInManifest( string name )
+	{
+		ResourceManifestCreationInfo_t info( 1, &name, RESOURCE_MANIFEST_TYPE_DEFAULT, RESOURCE_MANIFEST_LOAD_STREAMING_DATA, name );
+		return g_pResourceSystem->CreateResourceManifest( info );
+	}
+
+	void DestroyResourceManifest( HResourceManifest manifest );
+	bool IsManifestLoaded( HResourceManifest manifest );
+
+	inline void GetAllCodeManifests( CUtlVectorString values )
+	{
+		g_pResourceSystem->GetCodeResourceManifestManager()->GetAllCodeManifests( *values );
+	}
+}
+
+
+managed class Sandbox.Resource
+{
+	static void OnResourceReloaded( string name, void* resourceBinding );
+}
+
+
+native class HResourceManifest__ as HResourceManifest
+{
+	// nothing
+}

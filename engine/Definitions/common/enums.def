@@ -1,0 +1,11 @@
+
+native enum TextureDecodingFlags_t is NativeEngine.TextureDecodingFlags;
+native enum ImageFormat is Sandbox.ImageFormat;
+native enum RuntimeTextureSpecificationFlags_t is NativeEngine.RuntimeTextureSpecificationFlags;
+native enum RenderMultisampleType_t is NativeEngine.RenderMultisampleType;
+native enum TextureUsage_t is NativeEngine.TextureUsage;
+native enum TextureScope_t is NativeEngine.TextureScope;
+native enum TextureOnDiskCompressionType_t is NativeEngine.TextureOnDiskCompressionType;
+native enum RenderSystemAssetFileLoadMode_t is NativeEngine.RenderSystemAssetFileLoadMode;
+native enum ColorFormat_t is NativeEngine.ColorFormat;
+native enum SwapChainBuffer_t is NativeEngine.SwapChainBuffer;

@@ -1,0 +1,28 @@
+ident "hammer"
+nativedll tools/hammer.dll
+inherit "engine.def"
+inherit "tools.def"
+skipall "tools.def"
+inherit "tools.assetsystem.def"
+skipall "tools.assetsystem.def"
+
+
+// A static function to report exceptions to in C#
+exceptions	"Sandbox.Interop.BindingException"
+
+// Management classes will appear under this namespace
+namespace "Managed.SourceHammer"
+
+// Paths are relative to the def file
+cpp "../../src/tools/hammer/interop.hammer.cpp"
+hpp "../../src/tools/hammer/interop.hammer.h"
+cs	"../Sandbox.Tools/Interop.Hammer.cs"
+
+pch "hammerpch.h"
+
+include "tier3"
+include "common/*"
+include "resources"
+include "tools/*"
+include "assetsystem/*"
+include "hammer/*"

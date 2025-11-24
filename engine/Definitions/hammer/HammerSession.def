@@ -1,0 +1,23 @@
+
+#include "qhammermainwnd.h"
+
+native class CHammerEditorSession
+{
+	void ShowLoadingProgressBar();
+	void HideLoadingProgressBar();
+	IAsset GetMapAsset();
+	CMapDoc GetMapDoc();
+}
+
+managed class Editor.MapEditor.HammerSession
+{
+	static HammerSession Create( CHammerEditorSession native, CHammerApp hammer );
+
+	void Destroyed();
+	void LaunchMapInEngine();
+
+	void OnPreCompileFinished();
+	void OnPostCompileFinished();
+
+	bool OnPaste();
+}

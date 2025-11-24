@@ -1,0 +1,100 @@
+﻿
+#include "mapdoclib/mapnode.h"
+
+#include "mapdoclib/alignedboxhelper.h"
+
+native enum TransformOperationMode_t is Editor.MapDoc.TransformOperationMode;
+native enum TransformFlags_t is Editor.MapDoc.TransformFlags;
+native enum MapNodeGetRootDocument_t is Editor.MapDoc.MapNodeGetRootDocument;
+
+native struct EnumChildrenPos_t is NativeMapDoc.EnumChildrenPos;
+
+[Handle:Editor.MapDoc.MapNode]
+native class CMapNode as NativeMapDoc.CMapNode
+{
+    // This is unique within a CMapWorld, will not be unique across prefabs that differ CMapWorld
+    int GetNodeID();
+
+    string GetName();
+    void SetName( string name );
+
+    CMapNode GetParent();
+    void SetParent( CMapNode parent );
+
+    CMapWorld GetParentWorld();
+
+    CMapDoc GetRootDocument( MapNodeGetRootDocument_t nDocumentLoaded );
+
+    // Returns stuff like Entity: entity_name, Mesh - 6 faces
+    inline string GetDescription()
+    {
+        CUtlString desc;
+        GetMapNodeDescription( self, &desc );
+        return desc;
+    }
+
+    string GetTypeString();
+
+    CMapNode Copy();
+
+    bool IsVisible();
+    void SetVisible( bool bVisible );
+
+    bool IsSelected();
+
+    // Probably not needed, lets try to manage our children internally
+    int GetChildCount();
+    CMapNode GetChild( int i );
+    
+    //
+    // Lets you iterate over all descendents (including in subworlds)
+    // There's probably a better way to dereference the pos
+    //
+    inline CMapNode GetFirstDescendent( ref EnumChildrenPos pos )
+    {
+        return self->GetFirstDescendent( *pos );
+    }
+    inline CMapNode GetNextDescendent( ref EnumChildrenPos pos )
+    {
+        return self->GetNextDescendent( *pos );
+    }
+
+    // Not needed once we initialize these in managed space nicely
+    CMapEntity AsMapEntity();
+
+    Vector3 GetOrigin();
+    Angles GetAngles();
+    Vector3 GetScales();
+    
+    void SetOrigin( Vector3 origin );
+    void SetAngles( Angles angles );
+    void SetScales( Vector3 scales );
+
+    void BeginTransformOperation( TransformOperationMode_t nTransformType, TransformFlags_t nFlags );
+    void Transform( Matrix matrix, TransformFlags_t nFlags );
+    void EndTransformOperation();
+
+    void MarkBoundsDirty();
+    void FullBoundsUpdate();
+
+    inline void SetModifiedFlag()
+    {
+        CMapRootElement* pMapRootElement = self->GetMapRootElement();
+        if ( pMapRootElement == nullptr )
+            return;
+
+        pMapRootElement->SetModifiedFlag();
+    }
+
+    bool GeneratesEntityModelGeometry();
+
+    inline void DescriptionChanged()
+    {
+        CToolEventManager::DispatchEvent( self->GetRootDocument(), EventMapNodeDescriptionChanged_t( self ) );
+    }
+
+    inline void CoreAttributeChanged()
+    {
+		CToolEventManager::DispatchEvent( self->GetRootDocument(), EventPropertyEditorCoreAttributeChange_t() );
+    }
+}

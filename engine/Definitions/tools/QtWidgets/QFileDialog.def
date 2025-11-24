@@ -1,0 +1,41 @@
+﻿native enum QFileDialog::FileMode is Editor.FileDialog.FileMode;
+native enum QFileDialog::ViewMode is Editor.FileDialog.ViewMode;
+native enum QFileDialog::DialogLabel is Editor.FileDialog.DialogLabel;
+native enum QFileDialog::Option is Editor.FileDialog.Option;
+native enum QFileDialog::AcceptMode is Editor.FileDialog.AcceptMode;
+
+native class QFileDialog : QWidget
+{
+	static QFileDialog Create( QWidget parent ); [new]
+
+    // QDialog
+    int exec();
+    void setModal(bool modal);
+    void setResult(int r);
+
+    // QFileDialog
+	void setDirectory( QString directory );
+    QDir directory();
+
+	void selectFile( QString filename );
+
+    void setNameFilter( QString filter );
+   // void setNameFilters( QStringList filters );
+    QStringList nameFilters();
+    void selectNameFilter( QString filter );
+    QString selectedMimeTypeFilter();
+    QString selectedNameFilter();
+
+    void setAcceptMode(AcceptMode mode);
+    AcceptMode acceptMode();
+
+    void setDefaultSuffix( QString suffix);
+    QString defaultSuffix();
+
+    QStringList selectedFiles();
+
+    void setFileMode(Editor.FileDialog.FileMode mode);
+    Editor.FileDialog.FileMode fileMode();
+
+    void setOption( Editor.FileDialog.Option option, bool on );
+}

@@ -1,0 +1,35 @@
+﻿namespace Sandbox.Physics;
+
+/// <summary>
+/// A slider constraint, basically allows movement only on the arbitrary axis between the 2 constrained objects on creation.
+/// </summary>
+public partial class SliderJoint : PhysicsJoint
+{
+	internal SliderJoint( HandleCreationData _ ) { }
+
+	/// <summary>
+	/// Maximum length it should be allowed to go
+	/// </summary>
+	public float MaxLength
+	{
+		get => native.GetMaxLength();
+		set => native.SetMaxLength( value );
+	}
+
+	/// <summary>
+	/// Minimum length it should be allowed to go
+	/// </summary>
+	public float MinLength
+	{
+		get => native.GetMinLength();
+		set => native.SetMinLength( value );
+	}
+
+	/// <summary>
+	/// Slider friction.
+	/// </summary>
+	public float Friction
+	{
+		set => native.SetFriction( value );
+	}
+}

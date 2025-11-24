@@ -1,0 +1,8 @@
+﻿
+#include "mapdoclib/mapgroup.h"
+
+[Handle:Editor.MapDoc.MapGroup]
+native class CMapGroup as NativeMapDoc.CMapGroup : CMapNode
+{
+	// It really is just an empty class
+}

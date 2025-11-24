@@ -1,0 +1,54 @@
+﻿
+#include "mapdoclib/mapworld.h"
+
+[Handle:Editor.MapDoc.MapWorld]
+native class CMapWorld as NativeMapDoc.CMapWorld : CMapNode
+{
+	void SetSerializedScene( string json );
+	string GetSerializedScene();
+
+	CMapNode FindNodeByID( int nodeId );
+
+	// Can't remember how casting works on C# end, so just doing this shit
+	inline CMapEntity FindEntityByNodeId( int nodeId )
+	{
+		CMapNode* pMapNode = self->FindNodeByID( nodeId );
+		return dynamic_cast<CMapEntity*>( pMapNode );
+	}
+	
+	// okay this is getting meaty, maybe I shouldn't be inling this
+	inline TraceResult Trace( TraceRequest traceRequest )
+	{
+		// TraceRequest to CTraceInfo
+		Ray_t ray;
+		ray.Init( traceRequest.vStartPos, traceRequest.vEndPos );
+		CTraceInfo traceInfo( nullptr, ray, traceRequest.nTraceFlags );
+		
+		// Trace against the world
+		self->TraceLineSegmentAgainstWorld( &traceInfo );
+
+		Trace::TraceResult result;
+		result.bHit = false;
+		result.nObjectHandle = -1;
+
+		// Only doing 1 closet for now
+		if ( traceInfo.NumHits() == 0 )
+			return result;
+		
+		result.bHit = true;
+
+		int nClosestHitIndex = traceInfo.GetClosestHit();
+		const HitInfo_t *pHitInfo = traceInfo.GetHit( nClosestHitIndex );
+
+		result.vHitPos = pHitInfo->m_vPos;
+		result.vHitNormal = pHitInfo->m_vNormal;
+
+		CMapNode *pNode = dynamic_cast< CMapNode * >( pHitInfo->pObject );
+		if ( pNode != nullptr )
+		{
+			result.nObjectHandle = pNode->GetManagedHandle()->GetValue();
+		}
+
+		return result;
+	}
+}

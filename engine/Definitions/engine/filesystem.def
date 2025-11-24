@@ -1,0 +1,14 @@
+
+include "filesystem/ifilesystem.h"
+
+
+native accessor g_pFullFileSystem as NativeEngine.FullFileSystem
+{
+	string GetSymLink( string pPath, string pathID );
+	void AddSymLink( string pPath, string pathID, string realPath );
+	void RemoveSymLink( string pPath, string pathID );
+
+	void ResetProjectPaths( bool includeCloudAssets );
+	void AddProjectPath( string ident, string fullPath );
+	void AddCloudPath( string ident, string fullPath );
+}

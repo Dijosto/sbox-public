@@ -1,0 +1,21 @@
+
+include "soundsystem/soundsystem.h"
+
+[small]
+native struct AudioDeviceDesc is NativeEngine.AudioDeviceDesc;
+
+
+native accessor g_pSoundSystemInternal as g_pSoundSystem
+{
+	int GetNumAudioDevices();
+	AudioDeviceDesc GetAudioDeviceDesc( int index );
+	string GetAudioDeviceId( int index );
+	string GetAudioDeviceName( int index );
+	string GetActiveAudioDevice();
+	void SetActiveAudioDevice( string id );
+	void PlaySoundAtOSLevel( string filename );
+
+	CSfxTable PrecacheSound( string pSoundName );
+	CSfxTable CreateSound( string pSoundName, int nChannels, int nRate, int nFormat, int nSampleCount, float flDuration, bool bLoop, void* pData, int nDataSize );
+	void PreloadSound( CSfxTable pSfx );
+}

@@ -1,0 +1,126 @@
+
+#include "vphysics2/iphysicsbody.h"
+
+//
+// Native Type
+//
+[Handle:Sandbox.PhysicsBody]
+native class IPhysicsBody as NativeEngine.IPhysicsBody
+{
+	IPhysicsWorld GetWorld();
+
+	void SetGravityScale( float f );
+	float GetGravityScale();
+	bool IsGravityEnabled();
+	void EnableGravity( bool value );
+
+	void SetMass( float f );
+	float GetMass();
+
+	Vector3 GetMassCenter();
+	Vector3 GetLocalMassCenter();
+	void SetLocalMassCenter( Vector3 v );
+	void SetOverrideMassCenter( bool bOverride );
+	bool GetOverrideMassCenter();
+
+	void SetPosition( Vector3 v );
+	Vector3 GetPosition();
+	void SetOrientation( Rotation q );
+	Rotation GetOrientation();
+	void SetTransform( Vector3 v, Rotation q );
+	Transform GetTransform();
+
+	void SetLinearVelocity( Vector3 v );
+	Vector3 GetLinearVelocity();
+	
+	Vector3 GetVelocityAtPoint( Vector3 v );
+
+	void AddLinearVelocity( Vector3 v );
+	void SetAngularVelocity( Vector3 v );
+	Vector3 GetAngularVelocity();
+
+	void Wake();
+	void Sleep();
+	bool IsSleeping();
+	void EnableAutoSleeping();
+	void DisableAutoSleeping();
+
+	void EnableTouchEvents();
+	void DisableTouchEvents();
+	bool IsTouchEventEnabled();
+
+	PhysicsBodyType GetType();
+	void SetType( PhysicsBodyType type );
+
+	int GetShapeCount();
+	IPhysicsShape GetShape( int nShape );
+
+	IPhysicsShape AddSphereShape( Vector3 vCenter, float flRadius );
+	IPhysicsShape AddCapsuleShape( Vector3 vCenter1, Vector3 vCenter2, float flRadius );
+	IPhysicsShape AddBoxShape( Vector3 position, Rotation rotation, Vector3 extent );
+	IPhysicsShape AddHullShape( Vector3 position, Rotation rotation, int numVertices, CastTo[Vector*] void* vertices );
+	IPhysicsShape AddHullShape( RnHull_t hull, Transform xform );
+	IPhysicsShape AddHullShape( RnMesh_t mesh, Transform xform );
+	IPhysicsShape AddMeshShape( int numVertices, CastTo[Vector*] void* vertices, int numIndices, CastTo[uint32*] void* indices, int nMaterialCount );
+	IPhysicsShape AddMeshShape( RnMesh_t mesh, Transform xform, int nMaterialCount );
+	IPhysicsShape AddHeightFieldShape( CastTo[uint16_t*] void* pHeights, CastTo[uint8_t*] void* pMaterials, int sizeX, int sizeY, float sizeScale, float heightScale, int nMaterialCount );
+
+	void RemoveShape( IPhysicsShape pShape );
+	void PurgeShapes();
+
+	void ApplyLinearImpulse( Vector3 impulse );
+	void ApplyLinearImpulseAtWorldSpace( Vector3 impulse, Vector3 pos );
+	void ApplyAngularImpulse( Vector3 impulse );
+
+	void ApplyForce( Vector3 F );
+	void ApplyForceAt( Vector3 F, Vector3 r );
+	void ApplyTorque( Vector3 M );
+
+	void ClearForces();
+	void ClearTorque();
+
+	void Enable();
+	void Disable();
+	bool IsEnabled();
+
+	void BuildMass();
+
+	void SetLinearDamping( float d );
+	float GetLinearDamping();
+	void SetAngularDamping( float d );
+	float GetAngularDamping();
+
+	BBox BuildBounds();
+
+	float GetDensity();
+
+	Vector3 GetClosestPoint( Vector3 vPoint );
+
+	void SetMaterialIndex( StringToken name );
+
+	inline IPhysAggregateInstance GetAggregate()
+	{
+		return static_cast<IPhysAggregateInstance*>(self->GetAggregateInstance());
+	}
+
+	void SetTargetTransform( Vector3 vTargetPosition, Rotation vTargetAngles, float flTimeOffset );
+
+	bool CheckOverlap( IPhysicsBody body, Transform transform );
+
+	Vector3 GetLocalInertiaVector();
+	Rotation GetLocalInertiaOrientation();
+	void SetLocalInertia( Vector3 vInertia, Rotation qRotation );
+	void ResetLocalInertia();
+
+	inline IPhysicsBody ManagedObject()
+	{
+		return self;
+	}
+
+	void SetMotionLocks( bool x, bool y, bool z, bool pitch, bool yaw, bool roll );
+
+	bool IsTouching( IPhysicsBody pBody, bool bTriggers );
+	bool IsTouching( IPhysicsShape pShape, bool bTriggers );
+
+	void SetTrigger( bool trigger );
+}

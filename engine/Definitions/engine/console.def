@@ -1,0 +1,44 @@
+
+include "dbg.h"
+include "convar.h"
+
+native enum ConVarFlags_t;
+
+include "sandbox.console.h"
+
+native class ConVar as NativeEngine.ConVar
+{
+	string GetName();
+	string GetHelpText();
+
+	void SetValue( string value );
+	void SetValue( float flValue );
+	void SetValue( int nValue );
+
+	string GetString();
+	void Revert();
+	bool HasMin();
+	bool HasMax();
+	float GetMinValue();
+	float GetMaxValue();
+	string GetDefault();
+
+	ConVarFlags_t GetFlags();
+}
+
+native class ConCommand as NativeEngine.ConCommand
+{
+	string GetName();
+	string GetHelpText();
+
+	ConVarFlags_t GetFlags();
+
+	void Run( string command );
+}
+
+managed static class Sandbox.ConVarSystem
+{
+	static void RegisterNativeVar( ConVar convar );
+	static void RegisterNativeCommand( ConCommand concommand );
+	static void OnConVarChanged( string convarname, string value, string previous );
+}

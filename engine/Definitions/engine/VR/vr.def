@@ -1,0 +1,16 @@
+﻿// Things in managed that we might want to call from native (i.e. during specific points in the render loop)
+
+managed static class Sandbox.VR.VRSystem
+{
+	bool InternalIsActive();
+	bool InternalWantsInit();
+
+	void BeginFrame();
+	void EndFrame();
+	bool Submit( IntPtr pTexture, IntPtr pDepthTexture );
+
+	string GetVulkanInstanceExtensionsRequired();
+	string GetVulkanDeviceExtensionsRequired();
+
+	void RenderOverlays();
+}

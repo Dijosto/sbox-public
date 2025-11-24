@@ -1,0 +1,36 @@
+﻿using System.IO;
+
+namespace Editor;
+
+public record EverythingLocation : LocalAssetBrowser.Location
+{
+	public override bool IsAggregate => true;
+
+	public EverythingLocation() : base( "Everything", "Public" )
+	{
+		Path = "@everything";
+	}
+
+	public override bool CanGoUp() => false;
+	public override IEnumerable<LocalAssetBrowser.Location> GetDirectories() => Enumerable.Empty<LocalAssetBrowser.Location>();
+
+	public override IEnumerable<FileInfo> GetFiles()
+	{
+		string projectPath = Project.Current.GetAssetsPath().NormalizeFilename( false );
+
+		foreach ( var asset in AssetSystem.All.OrderBy( x => x.Name ) )
+		{
+			bool isCloud = asset.AbsolutePath.Contains( ".sbox/cloud/" );
+			if ( isCloud ) continue;
+
+
+			if ( asset.AbsolutePath.StartsWith( "mount:" ) )
+			{
+				yield return new FileInfo( asset.AbsolutePath );
+				continue;
+			}
+
+			yield return new FileInfo( asset.AbsolutePath );
+		}
+	}
+}

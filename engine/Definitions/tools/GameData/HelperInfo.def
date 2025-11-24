@@ -1,0 +1,18 @@
+﻿
+#include "fgdlib/helperinfo.h"
+
+// All this class does is hold a buncha strings
+native class CHelperInfo as Native.CHelperInfo
+{
+	void DeleteThis(); [delete]
+	static CHelperInfo Create(); [new]
+
+	string GetName();
+	void SetName( string name );
+
+	bool AddParameter( string parameter );
+	void SetKV3ParameterData( KeyValues3 pCopyFrom );
+
+	int GetParameterCount();
+	string GetParameter( int index );
+}

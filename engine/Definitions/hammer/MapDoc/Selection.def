@@ -1,0 +1,70 @@
+﻿
+#include "mapdoclib/selection.h"
+
+native enum SelectMode_t as Editor.MapEditor.SelectMode;
+native enum SelectionConversionMethod_t as NativeMapDoc.SelectionConversionMethod_t;
+native enum SelectionOperation_t as NativeMapDoc.SelectionOperation_t;
+
+//
+// Selection is owned by the MapDocument
+// It has multiple selection sets
+// Different select modes
+//
+
+native class CSelection as NativeMapDoc.CSelection
+{
+	SelectMode_t GetMode();
+	void SetMode( SelectMode_t mode, SelectionConversionMethod_t method );
+
+	inline ISelectionSet ActiveSelectionSet()
+	{
+		// Only handle CObjectSelectionSet for now
+		auto pSelectionSet = selectionset_cast< CObjectSelectionSet >( self->GetSelectionSetForMode( SELECT_MODE_OBJECTS ) );
+		return pSelectionSet;
+	}
+
+	// ISelectionSet ActiveSelectionSet();
+	ISelectionSet GetSelectionSetForMode( SelectMode_t nMode );
+
+	int GetNumSelectionSets();
+	ISelectionSet GetSelectionSet( int nIndex );
+}
+
+managed static class Editor.MapEditor.Selection
+{
+	void OnSelectionChanged();
+}
+
+//
+// This might not catch all, the general usage of this is with CMapNode
+// However there are templated versions of CSelectionSet that handle CMeshFace / CMeshEdge
+//
+native class ISelectionSet as NativeMapDoc.ISelectionSet
+{
+	bool SelectObject( CMapNode pObject, SelectionOperation_t selectOp );
+	// bool IsObjectSelected( CMapNode pObject );
+	
+	//
+	// Return like this and not the CUtlVector, cause we got handles
+	//
+	inline CMapNode GetSelectedObject( int nIndex )
+	{
+		// matt: ideally implement something for ISelectionSet to implement instead of this
+		
+		CUtlVector< CMapNode* > objectList;
+		self->GetSelectedObjects( &objectList );
+		
+		return objectList[nIndex];
+	}
+
+	// Number of selected objects in the set
+	int Count();
+
+	void RemoveAll();
+
+	void SelectAll();
+	void InvertSelection();
+
+	Vector3 GetPivotPosition();
+	void SetPivot( Vector3 pivot );
+}

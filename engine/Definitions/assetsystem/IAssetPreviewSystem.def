@@ -1,0 +1,10 @@
+﻿
+#include "assetpreview/iassetpreviewsystem.h"
+
+native static accessor g_pAssetPreviewSystem as IAssetPreviewSystem
+{
+	bool RenderAssetThumbnail( IAsset pAsset, QPixmap targetPixmap );
+	void OnThumbnailGenerated( IAsset asset, QPixmap renderedPixmap );
+
+	IModel GetModelForAsset( IAsset pAsset );
+}

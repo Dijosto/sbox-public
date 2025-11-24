@@ -1,0 +1,27 @@
+﻿
+native class QStatusBar as Native.QStatusBar : QWidget
+{
+	QString currentMessage();
+	void showMessage( QString text, int timeout );
+	void clearMessage();
+
+	void setSizeGripEnabled(bool b);
+    bool isSizeGripEnabled();
+
+	void addWidget(QWidget widget, int stretch);
+    int insertWidget(int index, QWidget widget, int stretch);
+    void addPermanentWidget(QWidget widget, int stretch);
+    int insertPermanentWidget(int index, QWidget widget, int stretch);
+    void removeWidget(QWidget widget);
+}
+
+
+native class CStatusBar
+{
+	static QStatusBar Create( QWidget parent, Editor.StatusBar managedobj ); [new]
+}
+
+managed class Editor.StatusBar : Editor.Widget
+{
+
+}

@@ -1,0 +1,65 @@
+{
+    "TextureQuality":
+    {
+        "Low":
+        {
+            "r_texture_stream_max_resolution": "1024.0",
+            "r_texture_stream_resolution_bias_min": "0.5"
+        },
+        "Medium":
+        {
+            "r_texture_stream_max_resolution": "2048.0",
+            "r_texture_stream_resolution_bias_min": "0.8"
+        },
+        "High":
+        {
+            "r_texture_stream_max_resolution": "8192.0",
+            "r_texture_stream_resolution_bias_min": "1.0"
+        }
+    }, 
+    "PostProcessQuality":
+    {
+        "Low":
+        {
+            "r_dof_quality": "1",
+            "r_motionblur_quality": "0",
+            "r_ao_quality": "1",
+            "r_ssr_downsample_ratio": "0"
+        },
+        "Medium":
+        {
+            "r_dof_quality": "2",
+            "r_motionblur_quality": "1",
+            "r_ao_quality": "2",
+            "r_ssr_downsample_ratio": "4"
+        },
+        "High":
+        {
+            "r_dof_quality": "3",
+            "r_motionblur_quality": "2",
+            "r_ao_quality": "3",
+            "r_ssr_downsample_ratio": "2"
+        }
+    }, 
+    "VolumetricFogQuality":
+    {
+        "Low":
+        {
+            "volume_fog_width": "60",
+            "volume_fog_height": "40",
+            "volume_fog_depth": "32"
+        },
+        "Medium":
+        {
+            "volume_fog_width": "120",
+            "volume_fog_height": "80",
+            "volume_fog_depth": "32"
+        },
+        "High":
+        {
+            "volume_fog_width": "240",
+            "volume_fog_height": "160",
+            "volume_fog_depth": "64"
+        }
+    }
+}

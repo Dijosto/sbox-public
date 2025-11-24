@@ -1,0 +1,14 @@
+﻿
+native class QScrollArea as Native.QScrollArea : QAbstractScrollArea
+{
+	static QScrollArea CreateQScrollArea( QWidget parent ); [new]
+
+	void ensureVisible(int x, int y, int xmargin, int ymargin);
+	void ensureWidgetVisible(QWidget childWidget, int xmargin, int ymargin);
+
+	bool widgetResizable();
+	void setWidgetResizable(bool resizable);
+
+	QWidget widget();
+    void setWidget(QWidget widget);
+}

@@ -1,0 +1,6 @@
+﻿native class QProgressDialog as Native.QProgressDialog : QWidget
+{
+	void setMaximum(int maximum);
+	void setValue(int value);
+	void setLabelText(string text);
+}

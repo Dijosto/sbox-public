@@ -1,0 +1,21 @@
+ident "tools"
+nativedll toolframework2.dll
+inherit "engine.def"
+
+// A static function to report exceptions to in C#
+exceptions	"Sandbox.Interop.BindingException"
+
+// Management classes will appear under this namespace
+namespace "Managed.SourceTools"
+
+// Paths are relative to the def file
+cpp "../../src/toolframework2/interop.tools.cpp"
+hpp "../../src/toolframework2/interop.tools.h"
+cs	"../Sandbox.Tools/Interop.Tools.cs"
+
+pch "cbase.h"
+
+include "tier3"
+include "common/*"
+include "resources"
+include "tools/*"

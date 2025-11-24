@@ -1,0 +1,13 @@
+{
+  "menu.quit": "Esci",
+  "menu.settings": "Impostazioni",
+  "avatar.toggletype": "Passa tra umano e cittadino",
+  "party": "Festa",
+  "avatar.change": "Cambia",
+  "avatar.changetip": "Cambia il tuo aspetto",
+  "menu.hub": "Hub",
+  "menu.multiplayer": "Server",
+  "menu.maps": "Mappe",
+  "menu.store": "Negozio",
+  "menu.games": "Giochi"
+}

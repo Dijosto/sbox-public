@@ -1,0 +1,34 @@
+﻿
+native class QScrollBar as Native.QScrollBar : QWidget
+{
+    void setValue(int v);
+    int value();
+
+    void setMinimum(int v);
+    int minimum();
+
+    void setMaximum(int v);
+    int maximum();
+
+    void setSingleStep(int v);
+    int singleStep();
+
+    void setPageStep(int v);
+    int pageStep();
+
+    void setTracking(bool enable);
+    bool hasTracking();
+
+    void setSliderDown(bool v);
+    bool isSliderDown();
+
+    void setSliderPosition(int v);
+    int sliderPosition();
+
+    void setInvertedAppearance(bool v);
+    bool invertedAppearance();
+
+    void setInvertedControls(bool v);
+    bool invertedControls();
+}
+

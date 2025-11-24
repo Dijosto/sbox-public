@@ -1,0 +1,89 @@
+
+#include "vphysics2/iphysicsbody.h"
+
+native enum JointMotion_t is Sandbox.JointMotion;
+native enum PhysicsBodyType_t is Sandbox.PhysicsBodyType;
+native enum PhysicsJointType_t is Sandbox.PhysicsJointType;
+native enum PhysicsShapeType_t is Sandbox.PhysicsShapeType;
+native enum PhysicsSimulation_t is Sandbox.PhysicsSimulationMode;
+native enum VPhysicsMotionType_t is Sandbox.PhysicsMotionType;
+
+delegate ProcessIntersectionsDelegate_t;
+delegate DebugDrawDelegate_t;
+
+[Handle:Sandbox.PhysicsWorld]
+native class IPhysicsWorld
+{
+	// Bodies
+	IPhysicsBody AddBody();
+	void RemoveBody( IPhysicsBody pBody );
+
+	IPhysicsBody GetWorldReferenceBody();
+	void SetWorldReferenceBody( IPhysicsBody pBody );
+
+	// Joints
+	void RemoveJoint( IPhysicsJoint pJoint );
+
+	void SetGravity( Vector3 gravity );
+	Vector3 GetGravity();
+
+	void SetSimulation( PhysicsSimulationMode simulation  );
+	PhysicsSimulationMode GetSimulation();
+
+	// Sleeping
+	void EnableSleeping();
+	void DisableSleeping();
+	bool IsSleepingEnabled();
+
+	void SetMaximumLinearSpeed( float flSpeed );
+
+	IPhysicsJoint AddWeldJoint( IPhysicsBody pBody1, IPhysicsBody pBody2, Transform localFrame1, Transform localFrame2 );
+	IPhysicsJoint AddSpringJoint( IPhysicsBody pBody1, IPhysicsBody pBody2, Transform localFrame1, Transform localFrame2 );
+	IPhysicsJoint AddRevoluteJoint( IPhysicsBody pBody1, IPhysicsBody pBody2, Transform localFrame1, Transform localFrame2 );
+	IPhysicsJoint AddPrismaticJoint( IPhysicsBody pBody1, IPhysicsBody pBody2, Transform localFrame1, Transform localFrame2 );
+	IPhysicsJoint AddSphericalJoint( IPhysicsBody pBody1, IPhysicsBody pBody2, Transform localFrame1, Transform localFrame2 );
+	IPhysicsJoint AddMotorJoint( IPhysicsBody pBody1, IPhysicsBody pBody2, Transform localFrame1, Transform localFrame2 );
+
+	//
+	// Sets the collision rules using a json serialized Sandbox.Internal.CollisionRules
+	//
+	void SetCollisionRulesFromJson( string rules );
+	
+	inline void StepSimulation( float flTimestep, int nNumSteps )
+	{
+		g_pPhysicsSystem->StepSimulation( &self, 1, flTimestep, nNumSteps );
+	}
+
+	void ProcessIntersections( ProcessIntersectionsDelegate_t f );
+
+	void DestroyAggregateInstance( IPhysAggregateInstance pAggregate );
+
+	inline IPhysAggregateInstance CreateAggregateInstance( string resourceName, Transform tmStart, ulong nGSNHandle, PhysicsMotionType nMotionType )
+	{
+		HPhysAggregateData_Internal hPhysicsData = g_pResourceSystem->FindExistingResourceByName< RESOURCE_TYPE_PHYSICSDATA_INTERNAL >( CResourceName( resourceName ) );
+		IPhysAggregateInstance *pInstance = nullptr;
+		if ( !hPhysicsData.HasData() )
+			return pInstance;
+
+		pInstance = self->CreateAggregateInstance( hPhysicsData, tmStart, nGSNHandle, nMotionType );
+		return pInstance;
+	}
+
+	inline IPhysAggregateInstance CreateAggregateInstance( IModel model, Transform tmStart, ulong nGSNHandle, PhysicsMotionType nMotionType )
+	{
+		return self->CreateAggregateInstance( model->GetPhysicsContainer(), tmStart, nGSNHandle, nMotionType );
+	}
+
+	void SetDebugScene( ISceneWorld world );
+	ISceneWorld GetDebugScene();
+	void Draw( DebugDrawDelegate_t debugDrawFcn );
+
+	inline IPhysicsWorld ManagedObject()
+	{
+		return self;
+	}
+
+	void Query( cref CQueryResult result, Vector3 vCenter, float flRadius, CastTo[RnQueryObjectSet] ushort nObjectSetMask );
+	void Query( cref CQueryResult result, AABB_t bounds, CastTo[RnQueryObjectSet] ushort nObjectSetMask );
+	void Query( cref CQueryResult result, CastTo[Vector*] void* pPoints, int nPoints, CastTo[RnQueryObjectSet] ushort nObjectSetMask );
+}

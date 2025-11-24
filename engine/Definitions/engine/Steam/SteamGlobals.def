@@ -1,0 +1,35 @@
+native static class globalSteam as NativeEngine.Steam
+{
+	static ISteamHTMLSurface SteamHTMLSurface();
+	static void SteamAPI_RunCallbacks();
+	static void SteamGameServer_RunCallbacks();
+	static ISteamUser SteamUser();
+	static ISteamFriends SteamFriends();
+	static ISteamNetworkingMessages SteamNetworkingMessages();
+	static ISteamNetworkingUtils SteamNetworkingUtils();
+	static ISteamMatchmaking SteamMatchmaking();
+	static ISteamGameServer SteamGameServer();
+	static ISteamApps SteamApps();
+	static ISteamUtils SteamUtils();
+
+	static bool SteamGameServer_BSecure();
+	static ulong SteamGameServer_GetSteamID();
+	static void SteamGameServer_Shutdown();
+	static void SteamGameServer_ReleaseCurrentThreadMemory();
+	
+	inline ISteamNetworkingSockets SteamNetworkingSockets()
+	{
+        if ( SteamGameServerNetworkingSockets() )
+            return SteamGameServerNetworkingSockets();
+        
+        if ( SteamNetworkingSockets() )
+            return SteamNetworkingSockets();
+        
+        return nullptr;
+	}
+
+	inline void SteamGameServer_Init( int gamePort, int queryPort, string serverVersion )
+	{
+		SteamGameServer_InitEx( 0, static_cast<uint16>( gamePort ), static_cast<uint16>( queryPort ), eServerModeAuthenticationAndSecure, serverVersion, nullptr );
+	}
+}

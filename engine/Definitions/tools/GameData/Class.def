@@ -1,0 +1,80 @@
+﻿
+#include "fgdlib/gdclass.h"
+
+native class CGameDataClass as Native.CGameDataClass
+{
+	void DeleteThis(); [delete]
+	static CGameDataClass Create(); [new]
+
+	void Reset();
+
+    //
+    // Info
+    //
+
+    string GetName();
+    string GetDescription();
+    string GetHelpContextName();
+
+    inline void SetName( string name )
+    {
+        self->m_Name = name;
+    }
+
+    inline void SetDescription( string description )
+    {
+        self->m_Description = description;
+    }
+    // void SetHelpContextName( string help );
+
+    GDClassType_t GetClassType();
+	void SetClassType( GDClassType_t nClassType );
+
+    //
+    // Variables (keys)
+    //
+
+    int GetVariableCount();
+    CGameDataVariable GetVariableAt( int index );
+    void AddVariable( CGameDataVariable pVar );
+
+    //
+    // Inputs / Outputs
+    //
+
+    void AddInput( CClassInput input );
+    int GetInputCount();
+    CClassInput GetInput( int index );
+
+    void AddOutput( CClassOutput output );
+    int GetOutputCount();
+    CClassOutput GetOutput( int index );
+
+    //
+    // Tags
+    //
+
+    void AddTag( string tag );
+    bool HasTag( string tag );
+
+    int GetTagCount();
+    string GetTag( int index );
+
+    //
+    // Helpers
+    //
+
+    void AddHelper( CHelperInfo info );
+
+    int GetHelperCount();
+    CHelperInfo GetHelper( int index );
+
+    //
+    // Metadata
+    //
+
+    inline void MergeKV3Metadata( KeyValues3 val )
+    {
+        self->m_MetaData.MergeFrom( val, KV3_MERGE_SUBTABLES_SKIP, KV3_MERGE_ARRAY_SKIP );
+    }
+}

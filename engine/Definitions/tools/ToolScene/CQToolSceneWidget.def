@@ -1,0 +1,29 @@
+﻿
+#include "toolscene/qtoolscenewidget.h"
+
+native class CQToolSceneWidget : QWidget
+{
+	static CQToolSceneWidget Create( QWidget pParent ); [new]
+
+	void SetCreateSettingsButton( bool bCreateSettingsButton );
+	void Init();
+
+	Vector2 GetMousePositionScreen();
+
+	int GetNativeWidth();
+	int GetNativeHeight();
+
+	void MarkSceneDirty();
+
+	void StartRenderingLive();
+	void StopRenderingLive();
+	void RunFrame( float flSimulationRateMultiplier );
+
+
+	inline void SetMouseControl( bool b )
+	{
+		this->SetMouseControlType( b ? SCENE_MOUSE_CONTROL_ANYWHERE : SCENE_MOUSE_CONTROL_NONE );
+	}
+
+	void SetRenderOverlays( bool bRenderOverlays );	
+}

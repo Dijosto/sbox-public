@@ -1,0 +1,14 @@
+﻿native class QFrame as Native.QFrame : QWidget
+{
+
+}
+
+native class CFrame
+{
+	static CFrame CreateFrame( QWidget parent, Editor.Frame managedobj ); [new]
+}
+
+managed class Editor.Frame : Editor.Widget
+{
+    
+}

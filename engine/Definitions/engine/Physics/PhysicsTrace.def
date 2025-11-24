@@ -1,0 +1,24 @@
+﻿
+#include "sbox/physics_trace.h"
+
+native struct PhysicsTrace.Result;
+native struct PhysicsTrace.Request;
+
+native class CUtlVector<PhysicsTrace.Result> as NativeEngine.CUtlVectorTraceResult
+{
+	void DeleteThis(); [delete]
+	static CUtlVectorTraceResult Create( int growsize, int initialcapacity ); [new]
+
+	int Count();
+	PhysicsTrace.Result Element( int i );
+}
+
+native static class PhysicsTrace
+{
+    PhysicsTrace.Result Trace( PhysicsTrace.Request request );
+	void TraceAll( PhysicsTrace.Request request, CUtlVectorTraceResult results );
+
+	PhysicsTrace.Result TraceAgainstCapsule( PhysicsTrace.Request request, Capsule capsule, Transform tx );
+	PhysicsTrace.Result TraceAgainstBBox( PhysicsTrace.Request request, BBox box, Transform tx );
+	PhysicsTrace.Result TraceAgainstSphere( PhysicsTrace.Request request, Sphere sphere, Transform tx );
+}

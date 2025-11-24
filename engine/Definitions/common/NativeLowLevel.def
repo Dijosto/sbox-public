@@ -1,0 +1,15 @@
+
+//
+// Built in c# functions like Unsafe.CopyBlockUnaligned benchmark slower
+// than calling into native and using those methods instead. So lets do that.
+//
+
+[nogc]
+native static class NativeLowLevel
+{
+	inline void Copy( void* dest, void* src, long count )
+	{
+		V_memcpy( dest, src, (size_t)count );
+	}
+}
+

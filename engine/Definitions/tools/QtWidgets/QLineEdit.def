@@ -1,0 +1,73 @@
+﻿native class QLineEdit as Native.QLineEdit : QWidget
+{
+	void setText( qstring text );
+	qstring text();
+	qstring displayText();
+
+	qstring placeholderText();
+	void setPlaceholderText(qstring str );
+
+	int maxLength();
+	void setMaxLength(int x);
+
+	void setFrame(bool x);
+	bool hasFrame();
+
+	void setClearButtonEnabled(bool enable);
+	bool isClearButtonEnabled();
+
+	bool isReadOnly();
+	void setReadOnly(bool x);
+
+	int cursorPosition();
+	void setCursorPosition(int x);
+    int cursorPositionAt( QPoint pos);
+
+	bool hasSelectedText();
+	qstring selectedText();
+    int selectionStart();
+    int selectionEnd();
+    int selectionLength();
+    void setSelection( int start, int length );
+
+	void clear();
+	void selectAll();
+	void undo();
+	void redo();
+
+	void cut();
+	void copy();
+	void paste();
+
+	void deselect();
+	void insert(qstring x);
+
+	void addAction(QAction action, CastTo[QLineEdit::ActionPosition] int position );
+
+	int alignment();
+	void setAlignment( CastTo[Qt::Alignment] int flag );
+
+	inline void setRegexValidator( qstring str )
+	{
+		QRegularExpression rx( str );
+		QValidator *validator = new QRegularExpressionValidator( rx, self );
+		self->setValidator(validator);
+	}
+}
+
+
+native class CLineEdit
+{
+	static CLineEdit Create( QWidget parent, LineEdit obj ); [new]
+
+	void SetValidation( qstring str );
+	QRect cursorRect();
+}
+
+managed class Editor.LineEdit : Editor.Widget
+{
+	void InternalTextChanged( qstring s );
+	void InternalTextEdited( qstring s );
+	void InternalReturnPressed();
+	void InternalEditingFinished();
+}

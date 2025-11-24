@@ -1,0 +1,43 @@
+
+#include "vphysics2/iphysicsbody.h"
+#include "vphysics2/iphysicsjoint.h"
+
+[Handle:Sandbox.PhysicsGroup]
+native class IPhysAggregateInstance as NativeEngine.IPhysAggregateInstance
+{
+	void WakeUp();
+	void PutToSleep();
+	bool IsAsleep();
+
+	void SetVelocity( Vector3 v );
+	void AddVelocity( Vector3 v );
+
+	void SetAngularVelocity( Vector3 v );
+	void AddAngularVelocity( Vector3 v );
+
+	int GetBodyCount();
+
+	IPhysicsBody GetBodyHandle( int i );
+	string GetBodyName( int i );
+	uint GetBodyNameHash( int i );
+	IPhysicsBody GetBodyByNameHash( int i );
+	int GetBodyIndex( IPhysicsBody body );
+	IPhysicsBody FindBodyByName( string name );
+
+	int GetJointCount();
+	IPhysicsJoint GetJointHandle( int nIndex );
+	void RemoveJoint( IPhysicsJoint pJoint );
+
+	Vector3 GetOrigin();
+	Vector3 GetMassCenter();
+
+	void SetSurfaceProperties( StringToken name );
+
+	float GetTotalMass();
+	void SetTotalMass( float flMass );
+
+	void SetLinearDamping( float flLinearDamping );
+	void SetAngularDamping( float flAngularDamping );
+
+	IPhysicsWorld GetWorld();
+}

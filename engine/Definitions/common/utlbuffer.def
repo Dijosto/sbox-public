@@ -1,0 +1,11 @@
+
+
+native class CUtlBuffer
+{
+	static CUtlBuffer Create();[new]
+	void Dispose(); [delete]
+
+	void* Base();
+	int TellMaxPut();
+
+}

@@ -1,0 +1,824 @@
+﻿using System.IO;
+using System.IO.Compression;
+using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
+
+
+#nullable enable
+
+namespace Sandbox;
+
+/// <summary>
+/// Write and read bytes to a stream. This aims to be as allocation free as possible while also being as fast as possible.
+/// </summary>
+public unsafe ref struct ByteStream
+{
+	// Maximum reasonable allocation size (1GB) - prevents OOM attacks
+	private const int MAX_BUFFER_SIZE = 1024 * 1024 * 1024;
+
+	NativeMemoryBlock? writeData;
+	ReadOnlySpan<byte> readSpan;
+
+	int position;
+	int usedSize;
+
+	/// <summary>
+	/// Is this stream writable?
+	/// </summary>
+	public readonly bool Writable => writeData is not null;
+
+	/// <summary>
+	/// The current read or write position. Values are clamped to valid range.
+	/// </summary>
+	public int Position
+	{
+		readonly get => position;
+
+		set
+		{
+			// Clamp to valid range, prevent negative or out-of-bounds
+			if ( value < 0 ) position = 0;
+			else if ( value > usedSize ) position = usedSize;
+			else position = value;
+		}
+	}
+
+	internal readonly int BufferSize => writeData?.Size ?? usedSize;
+
+	/// <summary>
+	/// The total size of the data
+	/// </summary>
+	public readonly int Length => usedSize;
+
+	internal ByteStream( int size )
+	{
+		if ( size <= 0 || size > MAX_BUFFER_SIZE )
+			throw new ArgumentOutOfRangeException( nameof( size ), $"Size must be between 1 and {MAX_BUFFER_SIZE}" );
+
+		writeData = NativeMemoryBlock.GetOrCreatePooled( size );
+		position = 0;
+	}
+
+	internal ByteStream( ReadOnlySpan<byte> data )
+	{
+		if ( data.Length > MAX_BUFFER_SIZE )
+			throw new ArgumentOutOfRangeException( nameof( data ), "Data too large" );
+
+		readSpan = data;
+		usedSize = data.Length;
+		position = 0;
+	}
+
+	internal ByteStream( void* data, int datasize )
+		: this( datasize <= 0 || datasize > MAX_BUFFER_SIZE
+			? throw new ArgumentOutOfRangeException( nameof( datasize ) )
+			: new ReadOnlySpan<byte>( data, datasize ) )
+	{
+	}
+
+	/// <summary>
+	/// Create a writable byte stream
+	/// </summary>
+	public static ByteStream Create( int size )
+	{
+		if ( size <= 0 || size > MAX_BUFFER_SIZE )
+			throw new ArgumentOutOfRangeException( nameof( size ) );
+		return new ByteStream( size );
+	}
+
+	/// <summary>
+	/// Create a reader byte stream
+	/// </summary>
+	public static ByteStream CreateReader( ReadOnlySpan<byte> data )
+	{
+		return new ByteStream( data );
+	}
+
+	/// <summary>
+	/// Create a reader byte stream
+	/// </summary>
+	internal static ByteStream CreateReader( void* data, int size )
+	{
+		return new ByteStream( new ReadOnlySpan<byte>( data, size ) );
+	}
+
+	public void Dispose()
+	{
+		writeData?.Dispose();
+		writeData = null;
+		readSpan = default;
+		position = default;
+		usedSize = default;
+	}
+
+	/// <summary>
+	/// Ensures buffer can accommodate write with overflow protection
+	/// </summary>
+	public void EnsureCanWrite( int size )
+	{
+		if ( writeData is null )
+			throw new InvalidOperationException( "Cannot write to read-only stream" );
+
+		if ( size < 0 || size > MAX_BUFFER_SIZE )
+			throw new ArgumentOutOfRangeException( nameof( size ), "Invalid write size" );
+
+		// Uses checked arithmetic to detect overflow
+		checked
+		{
+			int required = position + size;
+
+			if ( required > MAX_BUFFER_SIZE )
+				throw new ArgumentOutOfRangeException( nameof( size ), "Write would exceed maximum buffer size" );
+
+			if ( required > writeData.Size )
+				writeData.Grow( required );
+		}
+	}
+
+	public int ReadRemaining
+	{
+
+		get
+		{
+			var remaining = usedSize - position;
+			return remaining < 0 ? 0 : remaining;
+		}
+	}
+
+	/// <summary>
+	/// Validates read bounds with overflow protection
+	/// </summary>
+	public readonly void EnsureCanRead( int size )
+	{
+		if ( size < 0 )
+			throw new ArgumentOutOfRangeException( nameof( size ), "Cannot read negative size" );
+
+		// Uses checked arithmetic to prevent overflow
+		checked
+		{
+			int required = position + size;
+			if ( required > usedSize || required < 0 )
+				throw new IndexOutOfRangeException( $"Read would exceed buffer bounds (pos:{position}, size:{size}, buffer:{BufferSize})" );
+		}
+	}
+
+	/// <summary>
+	/// Writes an array of unmanaged types
+	/// </summary>
+	public void WriteArray<T>( ReadOnlySpan<T> arr ) where T : unmanaged
+	{
+		if ( !SandboxedUnsafe.IsAcceptablePod<T>() )
+			throw new InvalidOperationException( "Type must be unmanaged" );
+
+		// Write length first
+		Write( arr.Length );
+
+		if ( arr.Length == 0 ) return;
+
+		Write( arr );
+	}
+
+	/// <summary>
+	/// Writes an array of unmanaged types
+	/// </summary>
+	public void WriteArray<T>( T[]? arr, bool includeCount = true ) where T : unmanaged
+	{
+		if ( arr == null )
+		{
+			if ( includeCount )
+				Write( -1 );
+			return;
+		}
+
+		if ( !SandboxedUnsafe.IsAcceptablePod<T>() )
+			throw new InvalidOperationException( "Type must be unmanaged" );
+
+		if ( includeCount )
+			Write( arr.Length );
+
+		if ( arr.Length == 0 ) return;
+
+		Write( arr.AsSpan() );
+	}
+
+	public void Write( ByteStream stream )
+	{
+		// dont try to copy to self!
+		if ( writeData is not null && stream.writeData == writeData )
+			return;
+
+		var len = stream.usedSize;
+		if ( len == 0 ) return;
+
+		if ( len > MAX_BUFFER_SIZE )
+			throw new ArgumentOutOfRangeException( nameof( stream ), "Stream too large" );
+
+		Write( stream.ToSpan() );
+	}
+
+	internal void Write<T>( ReadOnlySpan<T> rawData ) where T : unmanaged
+	{
+		if ( !SandboxedUnsafe.IsAcceptablePod<T>() )
+			throw new InvalidOperationException( "Type must be unmanaged" );
+
+		checked
+		{
+			var bytesSize = rawData.Length * sizeof( T );
+			if ( bytesSize == 0 ) return;
+			if ( bytesSize > MAX_BUFFER_SIZE ) throw new ArgumentOutOfRangeException( nameof( rawData ), "Data too large" );
+
+			EnsureCanWrite( bytesSize );
+
+			var dst = new Span<T>( (byte*)writeData!.Pointer + position, rawData.Length );
+			rawData.CopyTo( dst );
+
+			position += bytesSize;
+			if ( position > usedSize ) usedSize = position;
+		}
+	}
+
+	public void Write( byte[] rawData )
+	{
+		if ( rawData == null )
+			throw new ArgumentNullException( nameof( rawData ) );
+
+		Write( rawData.AsSpan() );
+	}
+
+	public void Write( byte[] rawData, int offset, int bytes )
+	{
+		if ( rawData == null ) throw new ArgumentNullException( nameof( rawData ) );
+		if ( bytes < 0 ) throw new ArgumentOutOfRangeException( nameof( bytes ), "Cannot write negative bytes" );
+		if ( offset < 0 ) throw new ArgumentOutOfRangeException( nameof( offset ), "Offset cannot be negative" );
+
+		// Checks for overflow in offset + bytes
+		checked
+		{
+			int endPos = offset + bytes;
+			if ( endPos > rawData.Length ) throw new ArgumentOutOfRangeException( nameof( bytes ), "Offset + bytes exceeds array length" );
+		}
+
+		if ( bytes == 0 ) return;
+		if ( bytes > MAX_BUFFER_SIZE ) throw new ArgumentOutOfRangeException( nameof( bytes ), "Too many bytes" );
+
+		Write( rawData.AsSpan().Slice( offset, bytes ) );
+	}
+
+	public void Write( ByteStream stream, int offset, int maxSize )
+	{
+		// dont try to copy to self!
+		if ( writeData is not null && stream.writeData == writeData )
+			return;
+
+		if ( offset < 0 ) throw new ArgumentOutOfRangeException( nameof( offset ), "Offset cannot be negative" );
+		if ( maxSize < 0 ) throw new ArgumentOutOfRangeException( nameof( maxSize ), "Size cannot be negative" );
+		if ( maxSize == 0 ) return;
+
+		// Checks offset bounds and calculates safe copy length
+		if ( offset > stream.usedSize ) throw new ArgumentOutOfRangeException( nameof( offset ), "Offset exceeds stream length" );
+		int maxReadLeft = stream.usedSize - offset;
+		int len = maxSize > maxReadLeft ? maxReadLeft : maxSize;
+		if ( len <= 0 ) return;
+		if ( len > MAX_BUFFER_SIZE ) throw new ArgumentOutOfRangeException( nameof( maxSize ), "Size too large" );
+
+		Write( stream.ToSpan().Slice( offset, len ) );
+	}
+
+	/// <summary>
+	/// Writes a string
+	/// </summary>
+	public void Write( string? str )
+	{
+		if ( str == null )
+		{
+			Write( -1 );
+			return;
+		}
+
+		if ( str.Length == 0 )
+		{
+			Write( 0 );
+			return;
+		}
+
+		// Validates string isn't absurdly large
+		if ( str.Length > MAX_BUFFER_SIZE / 4 ) // UTF8 can be up to 4 bytes per char
+			throw new ArgumentOutOfRangeException( nameof( str ), "String too large" );
+
+		var dataLen = System.Text.Encoding.UTF8.GetByteCount( str );
+
+		if ( dataLen > MAX_BUFFER_SIZE )
+			throw new ArgumentOutOfRangeException( nameof( str ), "Encoded string too large" );
+
+		Write( dataLen );
+
+		EnsureCanWrite( dataLen );
+
+		var dst = new Span<byte>( (byte*)writeData!.Pointer + position, dataLen );
+		System.Text.Encoding.UTF8.GetBytes( str, dst );
+
+		position += dataLen;
+		if ( position > usedSize ) usedSize = position;
+	}
+
+	/// <summary>
+	/// Get the data as an array of bytes
+	/// </summary>
+	public readonly byte[] ToArray()
+	{
+		return ToSpan().ToArray();
+	}
+
+	/// <summary>
+	/// Get the data as a span. Note this can't be kept around after disposing the ByteStream
+	/// </summary>
+	internal readonly ReadOnlySpan<byte> ToSpan()
+	{
+		return writeData is not null
+			? new ReadOnlySpan<byte>( writeData.Pointer, usedSize )
+			: readSpan;
+	}
+
+	/// <summary>
+	/// Returns a pointer to the base of the data
+	/// </summary>
+	internal readonly IntPtr Base()
+	{
+		return writeData is not null
+			? (IntPtr)writeData.Pointer
+			: throw new NotImplementedException( $"Only writeable {nameof( ByteStream )}s have a valid pointer." );
+	}
+
+	/// <summary>
+	/// Returns a pointer to the base of the data with offset validation
+	/// </summary>
+	internal readonly IntPtr Base( int offset )
+	{
+		if ( writeData is null )
+			throw new NotImplementedException( $"Only writeable {nameof( ByteStream )}s have a valid pointer." );
+
+		if ( offset < 0 || offset > usedSize )
+			throw new ArgumentOutOfRangeException( nameof( offset ), "Offset out of range" );
+
+		return (IntPtr)((byte*)writeData.Pointer + offset);
+	}
+
+	/// <summary>
+	/// Writes an unmanaged type
+	/// </summary>
+	public void Write<T>( T value ) where T : unmanaged
+	{
+		if ( !SandboxedUnsafe.IsAcceptablePod<T>() )
+			throw new InvalidOperationException( "Type must be unmanaged" );
+
+		var size = sizeof( T );
+
+		// Validates reasonable size
+		if ( size > MAX_BUFFER_SIZE )
+			throw new ArgumentOutOfRangeException( nameof( T ), "Type too large" );
+
+		EnsureCanWrite( size );
+
+		var dst = (byte*)writeData!.Pointer + position;
+		Unsafe.WriteUnaligned( dst, value );
+
+		position += size;
+		if ( position > usedSize ) usedSize = position;
+	}
+
+	/// <summary>
+	/// Reads an unmanaged type
+	/// </summary>
+	public T Read<T>() where T : unmanaged
+	{
+		if ( !SandboxedUnsafe.IsAcceptablePod<T>() )
+			throw new InvalidOperationException( "Type must be unmanaged" );
+
+		var size = sizeof( T );
+
+		// Uses checked arithmetic
+		checked
+		{
+			int newPos = position + size;
+
+			if ( newPos > usedSize || newPos < 0 )
+				throw new IndexOutOfRangeException( $"Failed to read {typeof( T )} (pos:{position}, size:{size}, buffer:{BufferSize})" );
+
+			T value;
+			if ( writeData is not null )
+			{
+				var src = (byte*)writeData.Pointer + position;
+				value = Unsafe.ReadUnaligned<T>( src );
+			}
+			else
+			{
+				fixed ( byte* src = readSpan )
+				{
+					value = Unsafe.ReadUnaligned<T>( src + position );
+				}
+			}
+
+			position = newPos;
+			return value;
+		}
+	}
+
+	/// <summary>
+	/// Try to read variable, return false if not enough data
+	/// </summary>
+	public bool TryRead<T>( out T v ) where T : unmanaged
+	{
+		if ( !SandboxedUnsafe.IsAcceptablePod<T>() )
+			throw new InvalidOperationException( "Type must be unmanaged" );
+
+		v = default;
+
+		var size = sizeof( T );
+		var remaining = usedSize - position;
+
+		if ( remaining < size || remaining < 0 )
+			return false;
+
+		// Additional overflow check
+		checked
+		{
+			int newPos = position + size;
+			if ( newPos > usedSize || newPos < 0 )
+				return false;
+
+			if ( writeData is not null )
+			{
+				var src = (byte*)writeData.Pointer + position;
+				v = Unsafe.ReadUnaligned<T>( src );
+			}
+			else
+			{
+				fixed ( byte* src = readSpan )
+				{
+					v = Unsafe.ReadUnaligned<T>( src + position );
+				}
+			}
+
+			position = newPos;
+			return true;
+		}
+	}
+
+	/// <summary>
+	/// Returns an array of unmanaged types
+	/// </summary>
+	public T[] ReadArray<T>( int maxElements = 1024 ) where T : unmanaged
+	{
+		return ReadArraySpan<T>( maxElements ).ToArray();
+	}
+
+	/// <summary>
+	/// Non allocating read of an array of unmanaged types
+	/// </summary>
+	internal ReadOnlySpan<T> ReadArraySpan<T>( int maxElements = 1024 ) where T : unmanaged
+	{
+		if ( !SandboxedUnsafe.IsAcceptablePod<T>() )
+			throw new ArgumentOutOfRangeException( nameof( T ), "Type not acceptable" );
+
+		if ( maxElements <= 0 || maxElements > MAX_BUFFER_SIZE / sizeof( T ) )
+			throw new ArgumentOutOfRangeException( nameof( maxElements ), "Invalid max elements" );
+
+		var len = Read<int>();
+
+		// Validates array length
+		if ( len < 0 )
+			throw new InvalidOperationException( "Array length cannot be negative" );
+
+		if ( len == 0 )
+			return default;
+
+		if ( len > maxElements )
+			throw new IndexOutOfRangeException( $"Array length {len} exceeds maximum {maxElements}" );
+
+		// Checks for multiplication overflow
+		checked
+		{
+			int dataSize = sizeof( T ) * len;
+
+			if ( dataSize > MAX_BUFFER_SIZE )
+				throw new ArgumentOutOfRangeException( nameof( len ), "Array data too large" );
+
+			int newPos = position + dataSize;
+
+			if ( newPos > usedSize || newPos < 0 )
+				throw new IndexOutOfRangeException( $"Array read exceeds buffer (pos:{position}, size:{dataSize}, buffer:{BufferSize})" );
+
+			ReadOnlySpan<byte> byteSpan;
+			if ( writeData is not null )
+			{
+				byteSpan = new ReadOnlySpan<byte>( (byte*)writeData.Pointer + position, dataSize );
+			}
+			else
+			{
+				byteSpan = readSpan.Slice( position, dataSize );
+			}
+
+			position = newPos;
+			return MemoryMarshal.Cast<byte, T>( byteSpan );
+		}
+	}
+
+	public string? Read<T>( string defaultValue = "" ) where T : IEquatable<string>
+	{
+		int datasize = Read<int>();
+
+		// Validates size
+		if ( datasize == -1 ) return null;
+		if ( datasize == 0 ) return string.Empty;
+
+		if ( datasize < 0 )
+			throw new InvalidOperationException( "String size cannot be negative" );
+
+		if ( datasize > MAX_BUFFER_SIZE )
+			throw new ArgumentOutOfRangeException( nameof( datasize ), "String too large" );
+
+		checked
+		{
+			int newPos = position + datasize;
+
+			if ( newPos > usedSize || newPos < 0 )
+				throw new IndexOutOfRangeException( $"String read exceeds buffer (pos:{position}, size:{datasize}, buffer:{BufferSize})" );
+
+			ReadOnlySpan<byte> bytes;
+			if ( writeData is not null )
+			{
+				bytes = new ReadOnlySpan<byte>( (byte*)writeData.Pointer + position, datasize );
+			}
+			else
+			{
+				bytes = readSpan.Slice( position, datasize );
+			}
+
+			var str = System.Text.Encoding.UTF8.GetString( bytes );
+
+			position = newPos;
+			return str;
+		}
+	}
+
+	public void Write<T>( T data, bool unused = false ) where T : IByteParsable
+	{
+		T.WriteObject( ref this, data );
+	}
+
+	public T Read<T>( T? defaultValue = default, bool unused = false ) where T : IByteParsable
+	{
+		return (T)T.ReadObject( ref this );
+	}
+
+	public object? ReadObject( Type objectType )
+	{
+		if ( objectType == typeof( byte ) ) return Read<byte>();
+		if ( objectType == typeof( ushort ) ) return Read<ushort>();
+		if ( objectType == typeof( short ) ) return Read<short>();
+		if ( objectType == typeof( uint ) ) return Read<uint>();
+		if ( objectType == typeof( int ) ) return Read<int>();
+		if ( objectType == typeof( ulong ) ) return Read<ulong>();
+		if ( objectType == typeof( long ) ) return Read<long>();
+		if ( objectType == typeof( float ) ) return Read<float>();
+		if ( objectType == typeof( double ) ) return Read<double>();
+		if ( objectType == typeof( string ) ) return Read<string>();
+		if ( objectType == typeof( Vector3 ) ) return Read<Vector3>();
+		if ( objectType == typeof( Rotation ) ) return Read<Rotation>();
+		if ( objectType == typeof( Angles ) ) return Read<Angles>();
+		if ( objectType == typeof( Transform ) ) return Read<Transform>();
+
+		throw new NotImplementedException( $"ReadObject doesn't support {objectType} - add support if it makes sense!" );
+	}
+
+	/// <summary>
+	/// Read a block of data. Note - this can't be made public as it could lead to unsafe usage.
+	/// </summary>
+	internal ByteStream ReadByteStream( int size )
+	{
+		if ( size < 0 )
+			throw new ArgumentOutOfRangeException( nameof( size ), "Size cannot be negative" );
+
+		if ( size > MAX_BUFFER_SIZE )
+			throw new ArgumentOutOfRangeException( nameof( size ), "Size too large" );
+
+		checked
+		{
+			int newPos = position + size;
+
+			if ( newPos > usedSize || newPos < 0 )
+				throw new IndexOutOfRangeException( $"Read exceeds buffer (pos:{position}, size:{size}, buffer:{BufferSize})" );
+
+			ReadOnlySpan<byte> span;
+			if ( writeData is not null )
+			{
+				span = new ReadOnlySpan<byte>( (byte*)writeData.Pointer + position, size );
+			}
+			else
+			{
+				span = readSpan.Slice( position, size );
+			}
+
+			position = newPos;
+			return CreateReader( span );
+		}
+	}
+
+	/// <summary>
+	/// Note never make public - as the span could point to disposed memory!
+	/// </summary>
+	internal ReadOnlySpan<byte> GetRemainingBytes()
+	{
+		var remaining = usedSize - position;
+		if ( remaining <= 0 ) return default;
+
+		if ( writeData is not null )
+		{
+			var span = new ReadOnlySpan<byte>( (byte*)writeData.Pointer + position, remaining );
+			position = usedSize;
+			return span;
+		}
+		else
+		{
+			var span = readSpan.Slice( position, remaining );
+			position = usedSize;
+			return span;
+		}
+	}
+
+	/// <summary>
+	/// Write an Array, that we know is a Value array. We definitely know it's a value array.
+	/// We're not exposing this to the public api because they don't know whether it's a value array.
+	/// </summary>
+	internal void WriteValueArray( Array array )
+	{
+		if ( array == null )
+			throw new ArgumentNullException( nameof( array ) );
+
+		if ( array.Length == 0 ) return;
+
+		if ( array.Length > MAX_BUFFER_SIZE )
+			throw new ArgumentOutOfRangeException( nameof( array ), "Array too large" );
+
+		var elementType = array.GetType().GetElementType()!;
+		if ( !elementType.IsValueType )
+			throw new InvalidOperationException( $"{elementType} isn't a value type!" );
+
+		var elementSize = elementType.GetManagedSize();
+		if ( elementSize <= 0 )
+			throw new InvalidOperationException( $"Couldn't get size of {elementType}" );
+
+		// Checks for multiplication overflow
+		checked
+		{
+			int bytes = elementSize * array.Length;
+
+			if ( bytes > MAX_BUFFER_SIZE )
+				throw new ArgumentOutOfRangeException( nameof( array ), "Array data too large" );
+
+			EnsureCanWrite( bytes );
+
+			var dst = (byte*)writeData!.Pointer + position;
+			var handle = GCHandle.Alloc( array, GCHandleType.Pinned );
+
+			try
+			{
+				var src = (void*)handle.AddrOfPinnedObject();
+				Buffer.MemoryCopy( src, dst, bytes, bytes );
+			}
+			finally
+			{
+				handle.Free();
+			}
+
+			position += bytes;
+			if ( position > usedSize ) usedSize = position;
+		}
+	}
+
+	/// <summary>
+	/// Read an Array, that we know is a Value array. We definitely know it's a value array.
+	/// We're not exposing this to the public api because they don't know whether it's a value array.
+	/// </summary>
+	internal void ReadValueArray( Array array )
+	{
+		if ( array == null )
+			throw new ArgumentNullException( nameof( array ) );
+
+		if ( array.Length == 0 ) return;
+
+		if ( array.Length > MAX_BUFFER_SIZE )
+			throw new ArgumentOutOfRangeException( nameof( array ), "Array too large" );
+
+		var elementType = array.GetType().GetElementType()!;
+		if ( !elementType.IsValueType )
+			throw new InvalidOperationException( $"{elementType} isn't a value type!" );
+
+		var elementSize = elementType.GetManagedSize();
+		if ( elementSize <= 0 )
+			throw new InvalidOperationException( $"Couldn't get size of {elementType}" );
+
+		// Checks for multiplication overflow
+		checked
+		{
+			int bytes = elementSize * array.Length;
+
+			if ( bytes > MAX_BUFFER_SIZE )
+				throw new ArgumentOutOfRangeException( nameof( array ), "Array data too large" );
+
+			int newPos = position + bytes;
+
+			if ( newPos > usedSize || newPos < 0 )
+				throw new IndexOutOfRangeException( $"Read exceeds buffer (pos:{position}, size:{bytes}, buffer:{BufferSize})" );
+
+			var handle = GCHandle.Alloc( array, GCHandleType.Pinned );
+
+			try
+			{
+				var dst = (void*)handle.AddrOfPinnedObject();
+
+				if ( writeData is not null )
+				{
+					var src = (byte*)writeData.Pointer + position;
+					Buffer.MemoryCopy( src, dst, bytes, bytes );
+				}
+				else
+				{
+					fixed ( byte* src = readSpan )
+					{
+						Buffer.MemoryCopy( src + position, dst, bytes, bytes );
+					}
+				}
+			}
+			finally
+			{
+				handle.Free();
+			}
+
+			position = newPos;
+		}
+	}
+
+	/// <inheritdoc cref="System.IO.Stream.Read(byte[],int,int)"/>
+	public int Read( byte[] buffer, int offset, int count )
+	{
+		if ( buffer == null )
+			throw new ArgumentNullException( nameof( buffer ) );
+
+		return Read( buffer.AsSpan( offset, count ) );
+	}
+
+	/// <inheritdoc cref="System.IO.Stream.Read(Span{byte})"/>
+	public int Read( Span<byte> buffer )
+	{
+		var remaining = usedSize - position;
+		if ( remaining < 0 ) remaining = 0;
+
+		var length = buffer.Length < remaining ? buffer.Length : remaining;
+
+		if ( length <= 0 ) return 0;
+
+		if ( writeData is not null )
+		{
+			var src = new ReadOnlySpan<byte>( (byte*)writeData.Pointer + position, length );
+			src.CopyTo( buffer );
+		}
+		else
+		{
+			readSpan.Slice( position, length ).CopyTo( buffer );
+		}
+
+		position += length;
+		return length;
+	}
+
+	public ByteStream Compress()
+	{
+		var data = ToArray();
+		using ( MemoryStream compressedStream = new MemoryStream() )
+		{
+			using ( GZipStream gzipStream = new GZipStream( compressedStream, CompressionLevel.SmallestSize ) )
+			{
+				gzipStream.Write( data, 0, data.Length );
+			}
+
+			return ByteStream.CreateReader( compressedStream.ToArray() );
+		}
+	}
+
+	public ByteStream Decompress()
+	{
+		using ( MemoryStream compressedStream = new MemoryStream( ToArray() ) )
+		{
+			using ( MemoryStream decompressedStream = new MemoryStream() )
+			{
+				using ( GZipStream gzipStream = new GZipStream( compressedStream, CompressionMode.Decompress ) )
+				{
+					gzipStream.CopyTo( decompressedStream );
+				}
+
+				return ByteStream.CreateReader( decompressedStream.ToArray() );
+			}
+		}
+	}
+}

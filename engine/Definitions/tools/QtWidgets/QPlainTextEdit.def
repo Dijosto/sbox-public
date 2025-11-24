@@ -1,0 +1,131 @@
+﻿
+native enum Qt::TextInteractionFlags as TextInteractionFlags;
+native enum QPlainTextEdit::LineWrapMode as LineWrapMode;
+native enum QTextOption::WrapMode as QTextOptionWrapMode;
+
+
+native class QPlainTextEdit as Native.QPlainTextEdit : QAbstractScrollArea
+{
+    QTextDocument document();
+
+    void setPlaceholderText( QString placeholderText);
+    QString placeholderText();
+
+    bool isReadOnly();
+    void setReadOnly(bool ro);
+
+    void setTextInteractionFlags( TextInteractionFlags flags);
+    TextInteractionFlags textInteractionFlags();
+
+    bool tabChangesFocus();
+    void setTabChangesFocus(bool b);
+
+    void setDocumentTitle(QString title);
+    QString documentTitle();
+
+    bool isUndoRedoEnabled();
+    void setUndoRedoEnabled(bool enable);
+
+    void setMaximumBlockCount(int maximum);
+    int maximumBlockCount();
+
+    LineWrapMode lineWrapMode();
+    void setLineWrapMode(LineWrapMode mode);
+
+    QTextOptionWrapMode wordWrapMode();
+    void setWordWrapMode(QTextOptionWrapMode policy);
+
+    void setBackgroundVisible(bool visible);
+    bool backgroundVisible();
+
+    void setCenterOnScroll(bool enabled);
+    bool centerOnScroll();
+
+    bool find( QString exp );
+
+    QString toPlainText();
+    void setPlainText( QString text);
+    void ensureCursorVisible();
+
+    void insertPlainText( QString text);
+    void appendPlainText( QString text);
+    void appendHtml(const QString html);
+
+    void centerCursor();
+
+    void clear();
+    void selectAll();
+
+    QString anchorAt( QPoint pos );
+    void setTextCursor( TextCursor cursor );
+    TextCursor textCursor();
+
+    TextCursor cursorForPosition( QPoint pos );
+    QRect cursorRect( TextCursor c );
+
+    float tabStopDistance();
+    void setTabStopDistance(float distance);
+}
+
+
+native class CPlainTextEdit
+{
+	static QPlainTextEdit Create( QWidget parent, Editor.TextEdit managedobj ); [new]
+}
+
+managed class Editor.TextEdit : Editor.Widget
+{
+	void InternalTextChanged();
+}
+
+native class QTextDocument : QObject
+{
+    QString toRawText();
+    QString toPlainText();
+    void setPlainText( QString text );
+
+    void setDefaultStyleSheet( QString sheet );
+    int blockCount();
+    int lineCount();
+    int characterCount();
+    bool isModified();
+    int pageCount();
+
+    QTextBlock findBlock(int pos);
+    QTextBlock findBlockByNumber(int blockNumber);
+    QTextBlock findBlockByLineNumber(int blockNumber);
+    QTextBlock begin();
+    QTextBlock end();
+
+    QTextBlock firstBlock();
+    QTextBlock lastBlock();
+
+    void setHtml( QString html );
+	QString toHtml( );
+
+}
+
+[SharedDataPointer]
+native class QTextBlock as Editor.QTextBlock
+{
+    void Dispose(); [delete]
+
+    int position();
+    int length();
+
+    QString text();
+
+    bool isVisible();
+    void setVisible(bool visible);
+
+    int blockNumber();
+    int firstLineNumber();
+
+    void setLineCount(int count);
+    int lineCount();
+
+    QTextBlock next();
+    QTextBlock previous();
+
+}
+

@@ -1,0 +1,5 @@
+﻿
+native static class QFontDatabase 
+{
+	static int addApplicationFont( QString fileName );
+}

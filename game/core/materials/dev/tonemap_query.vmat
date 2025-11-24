@@ -1,0 +1,4 @@
+"Layer0"
+{
+	"shader"		"shaders/tonemap_query.shader_c"
+}

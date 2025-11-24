@@ -1,0 +1,14 @@
+
+[ResourceHandle:HRenderTexture]
+native class CTextureBase as NativeEngine.ITexture
+{
+}
+
+native class CUtlVector<HRenderTexture> as NativeEngine.CUtlVectorTexture
+{
+	void DeleteThis(); [delete]
+	static CUtlVectorTexture Create( int growsize, int initialcapacity ); [new]
+
+	int Count();
+	ITexture Element( int i );
+}

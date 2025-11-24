@@ -1,0 +1,25 @@
+ident "modeldoc"
+nativedll tools/modeldoc_editor.dll
+inherit "engine.def"
+inherit "tools.def"
+skipall "tools.def"
+
+
+// A static function to report exceptions to in C#
+exceptions	"Sandbox.Interop.BindingException"
+
+// Management classes will appear under this namespace
+namespace "Managed.SourceModelDoc"
+
+// Paths are relative to the def file
+cpp "../../src/tools/modeldoc_editor/interop.modeldoc.cpp"
+hpp "../../src/tools/modeldoc_editor/interop.modeldoc.h"
+cs	"../Sandbox.Tools/Interop.ModelDoc.cs"
+
+pch "modeldoc_editor_pch.h"
+
+include "tier3"
+include "common/*"
+include "resources"
+include "tools/*"
+include "modeldoc/*"

@@ -1,0 +1,7 @@
+﻿#include "qcontrols/qutils.h"
+
+native static class CQUtils
+{
+	bool IsKeyPressed( CastTo[Qt::Key] int key );
+	int GetWindowsVirtualKey( CastTo[Qt::Key] int key );
+}

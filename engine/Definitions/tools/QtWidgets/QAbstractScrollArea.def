@@ -1,0 +1,24 @@
+﻿
+native class QAbstractScrollArea as Native.QAbstractScrollArea : QFrame
+{
+	QScrollBar horizontalScrollBar();
+	QScrollBar verticalScrollBar();
+
+	ScrollbarMode horizontalScrollBarPolicy();
+	void setHorizontalScrollBarPolicy( ScrollbarMode m );
+
+	ScrollbarMode verticalScrollBarPolicy();
+	void setVerticalScrollBarPolicy( ScrollbarMode m );
+
+	QWidget viewport();
+}
+
+native class CAbstractScrollArea : QAbstractScrollArea
+{
+	static CAbstractScrollArea Create( QWidget parent, Editor.BaseScrollWidget obj ); [new]
+}
+
+managed class Editor.BaseScrollWidget : Editor.Widget
+{
+	void InternalOnScrollChanged();
+}

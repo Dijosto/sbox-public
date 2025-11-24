@@ -1,0 +1,35 @@
+
+include "mathlib/camera.h"
+
+native class CFrustum
+{
+	static CFrustum Create(); [new]
+	void Delete(); [delete]
+
+	void InitCamera( Vector3 origin, Angles angles, float flNear, float flFar, float flFOV, float flAspect, float flClipSpaceBottomLeftX, float flClipSpaceBottomLeftY, float flClipSpaceTopRightX, float flClipSpaceTopRightY );
+	void InitCamera( Vector3 origin, Angles angles, float flNear, float flFar, float flFOV, float flAspect );
+	void InitOrthoCamera( Vector origin, Angles angles, float flNear, float flFar, float flWidth, float flHeight );
+	void SetCameraWidthHeight( float flWidth, float flHeight );
+
+	Matrix GetProj();
+	Matrix GetInvProj();
+	Matrix GetReverseZProj();
+	Matrix GetInvReverseZProj();
+	Matrix GetViewProj();
+	Matrix GetInvViewProj();
+
+	bool BoundingVolumeIntersectsFrustum( BBox box );
+
+	bool ScreenTransform( Vector3 world, cref out Vector3 result );
+	void WorldToView( Vector3 vWorld, out Vector2 pOutViewMinusOneToOne );
+	void ViewToWorld( Vector2 vViewMinusOneToOne, out Vector3 pOutWorld );
+
+	Vector3 GetCameraPosition();
+	Angles GetCameraAngles();
+	float GetCameraNearPlane();
+	float GetCameraFarPlane();
+	float GetCameraFOV();
+	float GetCameraAspect();
+
+	void GetPlane( int index, cref out Vector3 normal, cref out float distance );
+}

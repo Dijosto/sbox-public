@@ -1,0 +1,78 @@
+﻿
+managed static class Editor.ManagedTools
+{
+	void InitQt();
+	void StartSplashScreen();
+	void InitStart();
+	void InitFinish();
+	void RunFrame();
+	void Shutdown();
+
+	void NativeHook( string name, void* arg0, void* arg1, void* arg2 );
+
+	void GlobalMousePressed( int button );
+	void GlobalMouseReleased( int button );
+	void GlobalMouseWheel( int x, int y );
+	bool GlobalKeyPressed( bool press, QKeyEvent keyEvent );
+	bool GlobalShortcutPressed();
+
+	void OnToolCommand( string str );
+	void OnQtHeartbeat();
+}
+
+native accessor g_pToolFramework2
+{
+	void SetWantsFullFrameRate( int frames );
+	void SetStallMonitorMainThreadWindow( QWidget window );
+	void Tools_RunFrame();
+	void Tools_OnIdle( int i );
+	void Tools_UnloadPending();
+
+	inline void Spin()
+	{
+		if ( g_pToolFramework2 == nullptr )
+			return;
+
+		g_pToolFramework2->Spin();
+	}
+
+	inline bool InitEngineTool( string name )
+	{
+		EngineToolID_t nEditorTool = g_pToolFramework2->FindEngineTool( name );
+		if ( nEditorTool == ENGINE_TOOL_INVALID )
+			return false;
+
+		if ( !g_pToolFramework2->GetEngineToolByID( nEditorTool ) )
+			return false;
+
+		return true;
+	}
+}
+
+#include "qcontrols/inputglobalhotkeys.h"
+
+native accessor g_pBindSystemGlobalHotkeys
+{
+	void Cmd_ShowAllCommandsPopup();
+	void Cmd_DebugWidgetUnderMouse();
+	void Cmd_DebugWidgetWithFocus();
+	void Cmd_DebugWidgetActiveWindow();
+	void Cmd_ShowInputDebugger();
+	void Cmd_ShowWidgetDebugger();
+	void Cmd_ShowFullHelpForBindableCommandUnderMouse();
+	void Cmd_FocusChainDebug_Tweak( int nShift, int nResize );
+	void Cmd_FocusChainDebug_Toggle();
+}
+
+managed static class Editor.CompileStatus
+{
+	void CompileProgress( string statusText );
+	void StartCompile( int id, string text );
+	void EndCompile( int id );
+}
+
+managed static class Editor.Theme
+{
+    QColor[] GetPaletteColors();
+    string GetDefaultFont();
+}

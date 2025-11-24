@@ -1,0 +1,5 @@
+﻿
+managed static class Steamworks.Dispatch
+{
+	static void OnClientCallback( int type, void* data, int datasize, bool isServer );
+}

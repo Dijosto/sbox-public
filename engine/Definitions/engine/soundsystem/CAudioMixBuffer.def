@@ -1,0 +1,32 @@
+
+[nogc]
+native class CAudioMixBuffer
+{
+	static CAudioMixBuffer Create(); [new]
+	void Dispose(); [delete]
+
+	inline void* GetDataPointer()
+	{
+		return (void*) self->m_flData;
+	}
+
+	void Silence();
+	float AbsLevel();
+	float AvergeLevel();
+	void Ramp( float flStart, float flEnd );
+	void CopyFrom( CAudioMixBuffer addThis );
+	void Mix( CAudioMixBuffer addThis, float flScale );
+	void MixRamp( CAudioMixBuffer addThis, float flScaleStart, float flScaleEnd );
+}
+
+[nogc]
+native class CAudioMixDeviceBuffers
+{
+	static CAudioMixDeviceBuffers Create( int channels ); [new]
+	void Destroy(); [delete]
+
+	inline CAudioMixBuffer GetBuffer( int i )
+	{
+		return &self->m_outputBuffers[i];
+	}
+}

@@ -1,0 +1,39 @@
+﻿
+#include "fgdlib/inputoutput.h"
+
+native enum InputOutputType_t is Editor.InputOutputType;
+
+// All this class does is hold a buncha strings
+native class CClassInputOutputBase as Native.CClassInputOutputBase
+{
+    void DeleteThis(); [delete]
+
+    string GetName();
+    string GetDescription();
+    InputOutputType_t GetType();
+    string GetTypeText();
+
+    void SetName( string name );
+    void SetDescription( string description );
+    void SetType( InputOutputType_t type );
+
+    inline bool IsInput()
+    {
+        return self->GetPlugType() == PLUG_TYPE_INPUT;
+    }
+
+    inline bool IsOutput()
+    {
+        return self->GetPlugType() == PLUG_TYPE_OUTPUT;
+    }
+}
+
+native class CClassInput : CClassInputOutputBase as Native.CClassInput
+{
+    static CClassInput Create(); [new]
+}
+
+native class CClassOutput : CClassInputOutputBase as Native.CClassInput
+{
+    static CClassOutput Create(); [new]
+}

@@ -1,0 +1,21 @@
+managed static class Editor.MapEditor.MapNodeCallbacks
+{
+	void OnAddToWorld( CMapNode node, CMapWorld world );
+	void OnRemoveFromWorld( CMapNode node, CMapWorld world );
+
+	void PreSaveToFile( CMapNode node );
+	void PostLoadFromFile( CMapNode node );
+
+	void PostLoadDocument( CMapDoc doc );
+
+	void OnCopyFrom( CMapNode toNode, CMapNode fromNode, int copyFlags );
+	void OnParentChanged( CMapNode node, CMapNode parent );
+	void OnTransformChanged( CMapNode node, Vector3 position, Angles angle, Vector3 scale );
+	void OnSetEnabled( CMapNode node, bool enabled );
+
+	void GetMimeData( CMapNode node, QMimeData data );
+
+	string GetGameObjectName( CMapGameObject node );
+
+	void GetWorldResourceReferencesAndDependencies( CMapWorld world, CUtlSymbolTable references );
+}

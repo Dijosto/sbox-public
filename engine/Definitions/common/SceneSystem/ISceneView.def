@@ -1,0 +1,47 @@
+
+
+native struct RenderViewport_t is NativeEngine.RenderViewport
+delegate SboxProceduralLayerCallback;
+
+native class ISceneView as NativeEngine.ISceneView
+{
+	RenderViewport GetMainViewport();
+	void* GetSwapChain();
+	void AddDependentView( ISceneView pView, int nSlot );
+	CRenderAttributes GetRenderAttributesPtr();
+	ISceneLayer AddRenderLayer( string pszDebugName, RenderViewport viewport, StringToken eShaderMode, ISceneLayer pAddBefore );
+	ISceneLayer AddManagedProceduralLayer( string pszDebugName, RenderViewport viewport, SboxProceduralLayerCallback renderCallback, ISceneLayer pAddBefore, bool bDeleteWhenDone );
+
+	void SetDefaultLayerObjectRequiredFlags( ESceneObjectFlags nFlags );
+	void SetDefaultLayerObjectExcludedFlags( ESceneObjectFlags nFlags );
+	ESceneObjectFlags GetDefaultLayerObjectRequiredFlags();
+	ESceneObjectFlags GetDefaultLayerObjectExcludedFlags();
+	
+	void AddWorldToRenderList( ISceneWorld pWorld );
+
+	HSceneViewRenderTarget FindOrCreateRenderTarget( string pName, ITexture hTexture, int nFlags );
+
+	void SetParent( ISceneView pParent );
+	ISceneView GetParent();
+	int GetPriority();
+	void SetPriority( int nPriority );
+
+	inline CFrustum GetFrustum()
+	{
+		return &this->GetFrustum();
+	}
+
+	int m_ViewUniqueId;
+	int m_ManagedCameraId;
+
+	bool GetPostProcessEnabled();
+	inline int GetToolsVisMode()
+	{
+		auto attrs = this->GetRenderAttributesPtr();
+		if ( !attrs )
+			return 0;
+
+		return attrs->GetIntValue( StringTokenFromHashCode( 3329653539u ), 0 );
+	}
+	
+}

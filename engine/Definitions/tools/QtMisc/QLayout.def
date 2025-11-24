@@ -1,0 +1,91 @@
+﻿#include "sbox/verticallayout.h"
+
+native class QLayout as Native.QLayout : QObject
+{
+	int spacing();
+	void setSpacing( int spacing );
+
+	QRect contentsRect();
+	QRect geometry();
+
+	void setContentsMargins(int left, int top, int right, int bottom);
+
+	void addWidget(QWidget w);
+	void removeWidget(QWidget w);	
+
+	void setEnabled(bool b);
+	bool isEnabled();
+
+	int alignment();
+	void setAlignment( CastTo[Qt::Alignment] int flag );
+	void setSizeConstraint( SizeConstraint sc );
+
+	inline void clear( bool deleteWidgets )
+	{
+		ClearLayout( self, deleteWidgets );
+	}
+}
+
+native enum QBoxLayout::Direction is Editor.BoxLayout.Direction
+
+native class QBoxLayout as Native.QBoxLayout : QLayout
+{
+	static QBoxLayout Create( Editor.BoxLayout.Direction direction, QWidget parent ); [new]
+
+	Editor.BoxLayout.Direction direction();
+	void setDirection( Editor.BoxLayout.Direction );
+
+	void addSpacing(int size);
+	void addStretch(int stretch);
+
+	bool setStretchFactor(QWidget w, int stretch);
+	bool setStretchFactor(QLayout l, int stretch);
+	void setStretch(int index, int stretch);
+	int stretch(int index);
+
+	void addWidget(QWidget w, int stretch);
+	void addLayout(QLayout w, int stretch);
+
+	void addItem(QLayout w);
+	void removeItem(QLayout w);
+}
+
+native class QGridLayout as Native.QGridLayout : QLayout
+{
+	static QGridLayout Create( QWidget parent ); [new]
+
+	void setRowStretch(int row, int stretch);
+    void setColumnStretch(int column, int stretch);
+    int rowStretch(int row);
+    int columnStretch(int column);
+
+	void setHorizontalSpacing(int spacing);
+    int horizontalSpacing();
+    void setVerticalSpacing(int spacing);
+    int verticalSpacing();
+
+	void setRowMinimumHeight(int row, int minSize);
+    void setColumnMinimumWidth(int column, int minSize);
+    int rowMinimumHeight(int row);
+    int columnMinimumWidth(int column);
+
+	int columnCount();
+    int rowCount();
+
+	QRect cellRect(int row, int column);
+
+    void addWidget(QWidget w, int row, int column, CastTo[Qt::Alignment] int flag );
+    void addWidget(QWidget w, int row, int column, int rowSpan, int columnSpan, CastTo[Qt::Alignment] int flag );
+    void addLayout(QLayout w, int row, int column, CastTo[Qt::Alignment] int flag );
+    void addLayout(QLayout w, int row, int column, int rowSpan, int columnSpan, CastTo[Qt::Alignment] int flag );
+}
+
+native class QVerticalLayout as Native.QVerticalLayout : QLayout
+{
+	static QVerticalLayout Create( QWidget parent ); [new]
+
+	//void addSpacing(int size);
+
+	void addItem(QLayout w);
+	void removeItem(QLayout w);
+}

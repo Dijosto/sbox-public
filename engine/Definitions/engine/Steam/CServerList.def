@@ -1,0 +1,18 @@
+﻿
+#include "sbox/serverlist.h"
+
+native class CServerList
+{
+	static CServerList Create( ServerList serverObj ); [new]
+	void Destroy(); [delete]
+
+	void StartQuery();
+	void AddFilter( string key, string value );
+}
+
+managed class Sandbox.Services.ServerList
+{
+	void OnStarted();
+	void OnServerResponded( void* ptr, ulong steamid );
+	void OnFinished();
+}

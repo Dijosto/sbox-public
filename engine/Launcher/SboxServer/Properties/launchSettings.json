@@ -1,0 +1,13 @@
+{
+  "profiles": {
+    "Sbox-Server": {
+      "commandName": "Project",
+      "nativeDebugging": true
+    },
+    "SBDM": {
+      "commandName": "Project",
+      "commandLineArgs": "+game \"facepunch.sbdm facepunch.datacore\" +hostname \"Developer Test Server\"",
+      "nativeDebugging": true
+    }
+  }
+}

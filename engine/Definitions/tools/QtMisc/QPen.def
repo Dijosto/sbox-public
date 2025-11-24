@@ -1,0 +1,5 @@
+﻿
+native class QPen as Native.QPen
+{
+
+}

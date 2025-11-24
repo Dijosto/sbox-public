@@ -1,0 +1,47 @@
+﻿native class QAbstractButton as Native.QAbstractButton : QWidget
+{
+	void setText(QString text);
+    QString text();
+
+    void setIcon(QIcon icon);
+	inline void setIconFromPixmap( QPixmap icon )
+	{
+		QIcon qicon( *icon );
+		self->setIcon( qicon );
+	}
+
+	inline QPixmap getIconAsPixmap()
+	{
+		QIcon qicon = self->icon();
+		QPixmap pixmap = qicon.pixmap( qicon.actualSize( QSize( 32, 32 ) ) );
+
+		return new QPixmap( pixmap );
+	}
+
+    void setCheckable(bool b);
+    bool isCheckable();
+
+    bool isChecked();
+
+    void setDown(bool b);
+    bool isDown();
+
+    void setIconSize(const QSize size);
+    void animateClick(int msec);
+    void click();
+    void toggle();
+    void setChecked(bool b);
+
+    
+	void setAutoRepeat(bool x);
+	bool autoRepeat();
+
+	void setAutoRepeatDelay(int x);
+	int autoRepeatDelay();
+
+	void setAutoRepeatInterval(int x);
+	int autoRepeatInterval();
+
+	void setAutoExclusive(bool x);
+	bool autoExclusive();
+}

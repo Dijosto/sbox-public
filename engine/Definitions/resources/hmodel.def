@@ -1,0 +1,208 @@
+
+#include "mathlib/ray.h"
+#include "raytrace/raytrace_glue.h"
+
+native struct MeshTraceInput
+native struct MeshTraceOutput
+
+native enum CModelSkeleton::BoneFlags_t as NativeEngine.BoneFlags;
+
+[ResourceHandle:HModel]
+native class CModel as NativeEngine.IModel
+{
+	string GetModelName();
+
+	bool IsTranslucent();
+	bool IsTranslucentTwoPass();
+
+	bool HasPhysics();
+
+	KeyValues3 FindModelSubKey( string name );
+
+	// old
+	bool GetAttachmentTransform( StringToken name, cref out Transform tx );
+	string GetAttachmentNameFromIndex( int index );
+
+	int GetBodyPartForName( string pName );
+	string GetBodyPartName( int nPart );
+	int GetNumBodyParts();
+	int GetNumBodyPartMeshes( int nPart );
+	ulong GetBodyPartMask( int nPart );
+	ulong GetBodyPartMeshMask( int nPart, int nMesh );
+	
+	int FindMeshIndexForMask( int nPart, ulong nMask );
+
+	int GetNumMeshGroups();
+	ulong GetDefaultMeshGroupMask();
+
+	inline string GetBodyPartMeshName( int nPart, int nMesh )
+	{
+		static thread_local CBufferString str;
+		self->GetBodyPartMeshName( nPart, nMesh, &str );
+		return str.String();
+	}
+
+	int GetNumMaterialGroups();
+	string GetMaterialGroupName( int iGroup );
+	int GetMaterialGroupIndex( StringToken nGroup );
+	int GetNumMaterialsInGroup( int iGroup );
+	IMaterial GetMaterialInGroup( int iGroup, int iIndex );
+
+	inline int GetNumSceneObjects( int iMesh )
+	{
+		const CRenderMesh *pMesh = self->GetMeshData( iMesh );
+		return pMesh->m_sceneObjects.Count();
+	}
+
+	inline int GetNumDrawCalls( int iMesh, int nSceneObject )
+	{
+		const CRenderMesh *pMesh = self->GetMeshData( iMesh );
+		return pMesh->m_sceneObjects[nSceneObject].m_drawCalls.Count();
+	}
+
+	inline IMaterial GetMaterial( int iMesh, int nSceneObject, int nDrawCall )
+	{
+		const CRenderMesh *pMesh = self->GetMeshData( iMesh );
+		return pMesh->m_sceneObjects[nSceneObject].m_drawCalls[nDrawCall].GetMaterial();
+	}
+
+	int GetNumMeshes();
+
+	BBox GetMeshBounds();
+	BBox GetPhysicsBounds();
+	BBox GetModelRenderBounds();
+
+	int NumBones();
+	int FindBoneIndex( string name );
+	string boneName( int iBone );
+	int boneParent( int iBone );
+	Transform GetBoneTransform( int iBone );
+	Vector3 bonePosParentSpace( int iBone );
+	Rotation boneRotParentSpace( int iBone );
+
+	int NumFlexControllers();
+	inline string GetFlexControllerName( int nFlexController )
+	{
+		return self->GetFlexControllerName( LocalFlexController_t( nFlexController ) );
+	}
+
+	float GetVisemeMorph( string viseme, int morph );
+
+	int GetNumAnim();
+	string GetAnimationName( int nAnimation );
+
+	inline void GetSequenceNames( CUtlVectorString names )
+	{
+		for ( HSequence hSequence = self->FirstSequence(); hSequence != SEQUENCE_HANDLE_INVALID; hSequence = self->NextSequence( hSequence ) )
+		{
+			const ISequence* pSequence = self->pSeqdesc( hSequence );
+			if ( !pSequence ) continue;
+			if ( pSequence->IsHidden() ) continue;
+
+			names->AddToTail( pSequence->GetName() );
+		}
+	}
+
+	[nogc]
+	inline bool HasSceneObjects()
+	{	
+		for ( int i = 0; i < self->GetNumMeshes(); ++i )
+		{
+			const CRenderMesh *pMesh = self->GetMeshData( i );
+			if ( pMesh && pMesh->m_sceneObjects.Count() > 0 )
+				return true;
+		}
+
+		return false;
+	}
+
+	inline bool MeshTrace( MeshTraceInput input, ref MeshTraceOutput output )
+	{
+		return self->MeshTrace( input, *output );
+	}
+
+	HAnimationGraph GetAnimationGraph();
+
+	CPhysAggregateData GetPhysicsContainer();
+
+	// Hitboxes
+	//int GetBoneIndexForHitboxForMesh( const CHitBox *pHitBox, int nMesh ) const;
+	CHitBoxSet FindHitboxSetByName( string pName, int nMesh );
+	int FindHitboxSetIndexByName( string pName, int nMesh );
+	CHitBoxSet GetHitboxSetByIndex( int nIndex, int nMesh );
+	int	GetBoneIndexForHitbox( CHitBox pHitBox );
+	int GetHitboxSetCount( int nMesh );
+	//void GetHitboxSetsForMeshGroupMask( CHitboxSetList &hitBoxSets, MeshGroupMask_t nActiveMask, CUtlStringToken hitboxSetName = CUtlStringToken() ) const;
+	//void GetHitboxesForMeshGroupMask( CHitboxList &hitBoxes, MeshGroupMask_t nActiveMask, CUtlStringToken hitboxSetName = CUtlStringToken() ) const;
+	//int GetBoneIndexForHitbox( const HitBoxAndMesh_t &hitBox ) const;
+
+	bool HasSkinnedMeshes();
+	bool HasAnimationDrivenFlexes();
+
+	BoneFlags boneFlags( int iBone );
+
+	int GetNumAttachments();
+	inline CAttachment GetAttachment( int index )
+	{
+		AttachmentHandle_t handle = self->GetAttachmentHandleFromIndex( index );
+		if ( handle == ATTACHMENT_HANDLE_INVALID) return nullptr;
+		if ( handle == ATTACHMENT_HANDLE_UNKNOWN) return nullptr;
+
+		return self->GetAttachment( handle );
+	}
+
+	int GetMaterialIndexCount();
+	IMaterial GetMaterialByIndex( int index );
+}
+
+native class CAttachment
+{
+	CUtlString m_name;
+	byte m_nInfluences;
+	bool m_bIgnoreRotation;
+
+	inline CUtlString GetInfluenceName( int index )
+	{
+		return self->m_influenceNames[index];
+	}
+
+	inline Vector3 GetInfluenceOffset( int index )
+	{
+		return self->m_vInfluenceOffsets[index];
+	}
+
+	inline Rotation GetInfluenceRotation( int index )
+	{
+		return self->m_vInfluenceRotations[index];
+	}
+}
+
+native class CHitBoxSet
+{
+	CUtlString m_name;
+	CUtlString m_SourceFilename;
+	int numhitboxes();
+	CHitBox pHitbox( int nIndex );
+}
+
+native class CHitBox
+{
+	Vector3		m_vMinBounds;
+	Vector3		m_vMaxBounds;
+	CUtlString	m_name;
+	CUtlString	m_sSurfaceProperty;
+	CUtlString	m_sBoneName;
+	float		m_flShapeRadius; 
+	uint		m_nBoneNameHash;
+	Color		m_cRenderColor;
+	ushort		m_nHitBoxIndex;
+	byte		m_nShapeType;
+
+	bool		m_bForcedTransform;
+	bool		m_bTranslationOnly;
+
+	bool		m_bVisible;
+	bool		m_bSelected;
+
+	string GetTag( int index );
+}

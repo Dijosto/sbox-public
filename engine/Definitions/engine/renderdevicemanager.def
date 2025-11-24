@@ -1,0 +1,17 @@
+﻿
+
+include "sbox/glue_renderdevice.h"
+
+native struct DisplayMode_t is Sandbox.Engine.Settings.RenderSettings.VideoDisplayMode;
+
+
+native static class Glue.RenderDeviceManager as NativeEngine.RenderDeviceManager
+{
+	void WriteVideoConfig();
+	void ResetVideoConfig();
+
+	void ChangeVideoMode( bool fullscreen, bool noborder, bool vsync, int width, int height, RenderMultisampleType multisample );
+
+	int GetDisplayModes( VideoDisplayMode[] modes, int max, bool windowed );
+
+}

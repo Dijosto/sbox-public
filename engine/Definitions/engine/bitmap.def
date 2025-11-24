@@ -1,0 +1,52 @@
+
+include "bitmap/floatbitmap.h"
+
+native enum FBMGammaType_t;
+
+native class FloatBitMap_t
+{
+	static FloatBitMap_t Create(); [new]
+	static FloatBitMap_t Create( int width, int height); [new]
+	void Delete(); [delete]
+
+	bool LoadFromFile( string filename, FBMGammaType_t gamma );
+	bool LoadFromPFM( string pFilename ); 
+	bool LoadFromPSD( string pFilename, FBMGammaType_t ldrFileGammaType );
+	bool LoadFromTIF( string pFilename, FBMGammaType_t ldrFileGammaType );
+	bool LoadFromPNG( string pFilename, FBMGammaType_t ldrFileGammaType );
+	bool LoadFromJPG( string pFilename, FBMGammaType_t ldrFileGammaType );
+	bool LoadFromEXR( string pFilename );
+	void LoadFromBuffer( void* data, int size, ImageFormat format, FBMGammaType_t gamma );
+
+	void Init( int nWidth, int nHeight, int depth );
+	void Shutdown();
+
+	void SetChannel( int nComponent, float flValue );
+
+	void Rotate90DegreesCW();
+	void Rotate90DegreesCCW();
+	void Rotate180Degrees();
+	void MirrorHorizontally();
+	void MirrorVertically();
+
+	bool WriteTGAFile( string pFilename );
+	bool WritePFM( string pFilename );
+	bool WriteEXR( string pFilename, int nExrCompressionTypeType );
+
+	bool LoadFromInMemoryTGA( void* pBuffer, int nSize );
+	bool LoadFromInMemoryPSD( void* pBuffer, int nSize );
+	bool LoadFromInMemoryTIF( void* pBuffer, int nSize );
+
+	float Pixel( int x, int y, int z, int comp );
+	float PixelWrapped( int x, int y, int z, int comp );
+	float PixelClamped( int x, int y, int z, int comp );
+	float Alpha( int x, int y, int z );
+	Vector3 RGBPixelAsVector( int nX, int nY, int nZ );
+
+	int Width();
+	int Height();
+	int Depth();
+
+	void Resize2D( int nNewWidth, int nNewHeight, bool bClamp );
+	bool WriteToBuffer( void* pBuffer, int nBufSize, ImageFormat fmt, bool bLowQualityFastCompile, bool bIsSrgb, uint nFlags );
+}

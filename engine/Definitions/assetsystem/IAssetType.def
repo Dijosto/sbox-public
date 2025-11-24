@@ -1,0 +1,24 @@
+﻿
+#include "assetsystem/iassetsystem.h"
+
+native class IAssetType
+{
+	string GetFriendlyName();
+	string GetIconLg();
+	string GetIconSm();
+	string GetPrimaryExtension();
+	string GetColor();
+	string GetCategory();
+
+	bool HideTypeByDefault();
+	bool IgnoreCompiledState();
+	bool IsContentFileText();
+	bool IsSimpleAsset();
+	bool HasDependencies();
+
+	bool PrefersIconForThumbnail();
+	string GetAssetTypeName();
+
+	void GetAdditionalExtensions( CUtlVectorString pExts );
+}
+

@@ -1,0 +1,40 @@
+﻿
+#include "resourcesystem/iresourcecompiler.h"
+
+native static accessor g_pResourceCompilerSystem as IResourceCompilerSystem
+{
+	inline bool GenerateResourceFile( string path, void* pData, int size )
+	{
+		CUtlBuffer inputData( pData, size );
+		ResourceCompileSettings_t compileSettings;
+		compileSettings.m_pOverrideInputData = &inputData;
+		return g_pResourceCompilerSystem->GenerateResourceFile( path, compileSettings );
+	}
+
+	inline bool GenerateResourceFile( string path, string text )
+	{
+		CUtlBuffer inputData( 0, 0, CUtlBuffer::TEXT_BUFFER );
+		inputData.PutString( text );
+		ResourceCompileSettings_t compileSettings;
+		compileSettings.m_pOverrideInputData = &inputData;
+		return g_pResourceCompilerSystem->GenerateResourceFile( path, compileSettings );
+	}
+
+	inline CUtlBuffer GenerateResourceBytes( string path, void* pData, int size )
+	{
+		CUtlBuffer inputData;
+		inputData.Put( pData, size );
+
+		CUtlBuffer* outputData = new CUtlBuffer();
+		
+		ResourceCompileSettings_t compileSettings;
+		compileSettings.m_pOverrideInputData = &inputData;
+		if ( !g_pResourceCompilerSystem->GenerateResourceBytes( path, *outputData, compileSettings ) )
+		{
+			delete outputData;
+			return nullptr;
+		}
+
+		return outputData;
+	}
+}

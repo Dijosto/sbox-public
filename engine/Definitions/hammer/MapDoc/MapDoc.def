@@ -1,0 +1,50 @@
+﻿
+#include "mapdoclib/mapdoc.h"
+
+//
+// CMapDoc - stores an open map/document, including the tree of objects that represent the world.
+//
+
+[Handle:Editor.MapDoc.MapDocument]
+native class CMapDoc as NativeMapDoc.CMapDoc
+{
+    CMapWorld GetMapWorld();
+    string GetPathName();
+    CSelection GetSelection();
+
+    // Adds an object to the world. This is the ONLY correct way to add an
+    //			object to the world. Calling directly through AddChild skips a bunch
+    //			of necessary bookkeeping.
+	void AddObjectToDocument( CMapNode pObject, CMapNode pParent );
+    void DeleteObject( CMapNode node );
+
+    //
+    // Constructors for all map nodes
+    // We could bind CMapNode::Create for each one but almost all the time you need a FileId from a MapDoc anyway
+    //
+	CMapMesh CreateEmptyMesh( bool addToDocument );
+    CMapEntity CreateEntity( bool addToDocument );
+    CMapGameObject CreateGameObject( bool addToDocument );
+	
+    //
+    // Inline is fine and we're adding everything to MapDoc as is anyway
+    // Don't even need to bother returning shit since it's all NextHandle
+	//
+    
+    inline void CreateMapGroup()
+    {
+        self->AddObjectToDocument( CREATE_MAP_NODE( CMapGroup, self->GetFileId() ) );
+    }
+    inline void CreateMapInstance()
+    {
+        self->AddObjectToDocument( CREATE_MAP_NODE( CMapInstance, self->GetFileId() ) );
+    }
+    inline void CreateMapPath()
+    {
+        self->AddObjectToDocument( CREATE_MAP_NODE( CMapPath, self->GetFileId() ) );
+    }
+    inline void CreateStaticOverlay()
+    {
+        self->AddObjectToDocument( CREATE_MAP_NODE( CMapStaticOverlay, self->GetFileId() ) );
+    }
+}

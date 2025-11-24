@@ -1,0 +1,29 @@
+#include "sbox/media/mediainterface.h"
+
+native accessor g_pAudioDevice
+{
+	string Name();
+	uint ChannelCount();
+	uint MixChannelCount();
+	uint BitsPerSample();
+	uint BytesPerSample();
+	uint SampleRate();
+
+	bool IsActive();
+
+	void CancelOutput();
+	void WaitForComplete();
+	void MuteDevice( bool bMuteDevice );
+	void ClearBuffer();
+	void OutputDebugInfo();
+
+	inline bool IsValid()
+	{
+		return g_pAudioDevice != nullptr;
+	}
+
+	inline void SendOutput( CAudioMixDeviceBuffers buffers )
+	{
+		g_pAudioDevice->OutputBuffer( buffers->m_nChannelCount, buffers->m_outputBuffers );
+	}
+}

@@ -1,0 +1,48 @@
+﻿
+native enum Qt::AspectRatioMode is Qt.AspectRatioMode;
+native enum Qt::TransformationMode is Qt.TransformationMode;
+native enum QImage::Format is Qt.QImageFormat;
+
+native class QPixmap as Native.QPixmap
+{
+	void Dispose(); [delete]
+	static QPixmap CreateFromFile( QString filename ); [new]
+	static QPixmap Create( int w, int h ); [new]
+
+	int width();
+	int height();
+	int depth();
+
+	void fill( QColor color );
+
+	bool hasAlpha();
+	bool hasAlphaChannel();
+
+	// TODO - this is a hack around the fact that returning a QPixmap doesn't make a copy automatically
+	inline QPixmap scaled( int w, int h, Qt::AspectRatioMode aspectMode, Qt::TransformationMode transformMode )
+	{
+		QPixmap scaled = this->scaled( w, h, aspectMode, transformMode );
+		return new QPixmap( scaled );
+	}
+
+	bool load( QString filename, string format );
+	bool save( QString filename, string format, int quality );
+
+	//QPixmap copy( QRect rect );
+
+	void scroll( int dx, int dy, int x, int y, int width, int height );
+
+	inline bool FromPixels( void* data, int width, int height, QImage::Format format )
+	{
+		QImage im( (const uchar *) data, width, height, format );
+		return self->convertFromImage( im );
+	}
+
+	inline void getpixels( void* target, int targetSize )
+	{
+		QImage img = self->toImage().convertToFormat( QImage::Format_RGBA8888 );
+		int size = img.sizeInBytes();
+		if ( targetSize < size ) size = targetSize;
+		memcpy( target, img.bits(), size );
+	}
+}

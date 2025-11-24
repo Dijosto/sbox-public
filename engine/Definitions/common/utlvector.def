@@ -1,0 +1,43 @@
+
+include "dbg.h"
+include "convar.h"
+
+native class CUtlVector<CUtlString> as NativeEngine.CUtlVectorString
+{
+	void DeleteThis(); [delete]
+	static CUtlVectorString Create( int growsize, int initialcapacity ); [new]
+
+	int Count();
+	void SetCount( int count );
+	CUtlString Element( int i );
+}
+
+native class CUtlVector<Vector> as NativeEngine.CUtlVectorVector
+{
+	void DeleteThis(); [delete]
+	static CUtlVectorVector Create( int growsize, int initialcapacity ); [new]
+
+	int Count();
+	void SetCount( int count );
+	Vector Element( int i );
+}
+
+native class CUtlVector<float> as NativeEngine.CUtlVectorFloat
+{
+	void DeleteThis(); [delete]
+	static CUtlVectorFloat Create( int growsize, int initialcapacity ); [new]
+
+	int Count();
+	void SetCount( int count );
+	float Element( int i );
+}
+
+native class CUtlVector<uint32> as NativeEngine.CUtlVectorUInt32
+{
+	void DeleteThis(); [delete]
+	static CUtlVectorUInt32 Create( int growsize, int initialcapacity ); [new]
+
+	int Count();
+	void SetCount( int count );
+	uint Element( int i );
+}

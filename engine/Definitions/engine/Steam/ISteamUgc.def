@@ -1,0 +1,87 @@
+#include "sbox/steam/steamugc.h"
+
+native class Steam.Ugc.CUgcUpdate as NativeEngine.CUgcUpdate
+{
+    inline static CUgcUpdate CreateCommunityItem()
+    {
+        return new Steam::Ugc::CUgcUpdate( k_EWorkshopFileTypeCommunity );
+    }
+
+    inline static CUgcUpdate CreateMtxItem()
+    {
+        return new Steam::Ugc::CUgcUpdate( k_EWorkshopFileTypeMicrotransaction );
+    }
+
+    inline static CUgcUpdate OpenCommunityItem( ulong itemid )
+    {
+        return new Steam::Ugc::CUgcUpdate( (PublishedFileId_t) itemid );
+    }
+
+    void Dispose(); [delete]
+
+    ulong GetPublishedFileId();
+
+    void SetTitle( string title );
+    void SetDescription( string description );
+    void SetLanguage( string language );
+    void SetMetadata( string metadata );
+    void SetVisibility( int visibility );
+    void SetTag( string tag );
+    void SetContentFolder( string contentFolder );
+    void SetPreviewImage( string previewFile );
+    void SetAllowLegacyUpload( bool allow );
+
+    void AddKeyValueTag( string key, string value );
+    void RemoveKeyValueTags( string key );
+    void RemoveAllKeyValueTags();
+
+    void AddPreviewFile( string previewFile, int type );
+    void AddPreviewVideo( string videoId );
+    void UpdatePreviewFile( uint index, string previewFile );
+    void UpdatePreviewVideo( uint index, string videoId );
+    void RemovePreview( uint index );
+
+    void SetRequiredGameVersions( string minVersion, string maxVersion );
+
+    bool Submit( string changeNote );
+
+    float GetProgressPercent();
+    ulong GetBytesProcessed();
+    ulong GetBytesTotal();
+
+    bool m_creating;
+    bool m_created;
+    bool m_submitted;
+    bool m_complete;
+    bool m_success;
+    bool m_bNeedsLegalAgreement;
+    int m_resultCode;
+}
+
+native class Steam.Ugc.CUgcQuery as NativeEngine.CUgcQuery
+{
+    static CUgcQuery CreateQuery( string json, string cursor );
+    void Dispose(); [delete]
+
+    bool m_complete;
+    bool m_success;
+    int m_resultCode;
+
+    string GetResultJson();
+}
+
+native class Steam.Ugc.CUgcInstall as NativeEngine.CUgcInstall
+{
+    inline static CUgcInstall Create( ulong fileid )
+    {
+        return new Steam::Ugc::CUgcInstall( (PublishedFileId_t) fileid );
+    }
+
+    void Dispose(); [delete]
+
+    bool m_complete;
+    bool m_success;
+    int m_resultCode;
+
+    string GetResultJson();
+}

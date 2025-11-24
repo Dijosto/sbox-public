@@ -1,0 +1,24 @@
+﻿native enum Qt::CheckState as Editor.CheckState;
+
+native class QCheckBox as Native.QCheckBox : QAbstractButton
+{
+	void setTristate(bool y);
+    bool isTristate();
+
+	CheckState checkState() const;
+    void setCheckState(CheckState state);
+}
+
+native class CCheckBox
+{
+	static CCheckBox CreateCheckBox( QWidget parent, Editor.Checkbox managedobj ); [new]
+}
+
+managed class Editor.Checkbox : Editor.Widget
+{
+    void InternalOnPressed();
+	void InternalOnReleased();
+	void InternalOnClicked();
+	void InternalOnToggled();
+	void InternalOnStateChanged();
+}

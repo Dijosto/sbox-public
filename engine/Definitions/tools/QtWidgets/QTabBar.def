@@ -1,0 +1,5 @@
+﻿
+native class QTabBar as Native.QTabBar : QWidget
+{
+
+}

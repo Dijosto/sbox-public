@@ -1,0 +1,10 @@
+#include "sbox/steamaudio.h"
+
+[nogc]
+native class CBinauralEffect
+{
+	static CBinauralEffect Create(); [new]
+	void Dispose(); [delete]
+
+	void Apply( Vector3 localDirection, float spatialBlend, CAudioMixDeviceBuffers input, CAudioMixDeviceBuffers output );
+}

@@ -1,0 +1,13 @@
+﻿
+#include "qanimgraph_previewdockwidget.h"
+
+native class CQAnimGraphPreviewDockWidget as NativeAnimgraph.CQAnimGraphPreviewDockWidget
+{
+	string GetPreviewModel();
+	void SetPreviewModel( string model );
+}
+
+managed static class Editor.Animgraph
+{
+	QWidget CreateModelPicker( CQAnimGraphPreviewDockWidget widget );
+}

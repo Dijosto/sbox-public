@@ -1,0 +1,250 @@
+﻿#include "qcontrols/qt_includes.h"
+#include "sbox_widgets.h"
+
+native enum Qt::WindowFlags is Editor.WindowFlags;
+native enum Qt::WidgetAttribute is Editor.Widget.Flag;
+native enum Qt::FocusPolicy is Editor.FocusMode;
+native enum Qt::FocusReason is Editor.FocusChangeReason;
+native enum QSizePolicy::Policy is Editor.SizeMode;
+native enum Qt::WindowModality is Editor.WindowModality;
+native enum QLayout::SizeConstraint is Editor.SizeConstraint;
+
+
+native class QWidget as Native.QWidget : QObject
+{
+	static QWidget CreateWidget( QWidget parent ); [new]
+
+	bool isTopLevel();
+	bool isWindow();
+	bool isModal();
+
+	void setStyleSheet( qstring sheet );
+
+	qstring windowTitle();
+	void setWindowTitle( qstring title );
+
+    void setWindowFlags(WindowFlags type);
+    WindowFlags windowFlags();
+
+	QSize size();
+	void resize( QSize x );
+
+	QSize minimumSize();
+	void setMinimumSize( QSize x );
+
+	QSize maximumSize();
+	void setMaximumSize( QSize x );
+
+	QSize sizeHint();
+
+	QPoint pos();
+	void move( QPoint x );	
+	
+	bool isEnabled();
+	void setEnabled( bool x );
+
+    void setVisible(bool visible);
+    void show();
+    void hide();
+
+    void showMinimized();
+    void showMaximized();
+    void showFullScreen();
+    void showNormal();
+
+    bool close();
+    void raise();
+    void lower();
+
+	bool isVisible();
+	bool isHidden();
+	void setHidden( bool b );
+
+	void setAttribute(Editor.Widget.Flag a, bool on );
+    bool testAttribute(Editor.Widget.Flag a);
+
+	bool acceptDrops();
+    void setAcceptDrops(bool on);
+
+	void updateGeometry();
+	void update();
+	void repaint();
+
+	void setCursor(CursorShape shape);
+	inline void setCursor(QPixmap pixmap)
+	{
+		QCursor qcursor( *pixmap );
+		self->setCursor( qcursor );
+	}
+
+    void unsetCursor();
+
+	void setWindowIcon(QIcon icon);
+	inline void setWindowIconFromPixmap( QPixmap icon )
+	{
+		QIcon qicon( *icon );
+		self->setWindowIcon( qicon );
+	}
+    void setWindowIconText(QString str);
+
+	void setWindowOpacity(float level);
+    float windowOpacity();
+
+	bool isMinimized();
+    bool isMaximized();
+    bool isFullScreen();
+
+	void setMouseTracking(bool enable);
+    bool hasMouseTracking();
+    bool underMouse();
+
+	QPoint mapToGlobal( QPoint p);
+    QPoint mapFromGlobal( QPoint p);
+
+	bool hasFocus();
+	FocusMode focusPolicy();
+    void setFocusPolicy(FocusMode policy);
+
+	void setFocusProxy( QWidget widget );
+	bool isActiveWindow();
+
+	bool updatesEnabled();
+    void setUpdatesEnabled(bool enable);
+
+	void setFocus(); 
+    void activateWindow();
+	void clearFocus();
+
+
+	float devicePixelRatioF();
+
+	QByteArray saveGeometry();
+    bool restoreGeometry(QByteArray state);
+
+	void addAction(QAction action);
+	void removeAction(QAction action);
+
+	void setParent(QWidget parent);
+	QWidget parentWidget();
+
+	QWidget window();
+
+	void AddClassName( QString name );
+	void Polish();
+
+	QString toolTip();
+	void setToolTip( QString str );
+
+	QString statusTip();
+	void setStatusTip( QString str );
+
+	int toolTipDuration();
+	void setToolTipDuration( int x );
+
+	bool autoFillBackground();
+    void setAutoFillBackground(bool enabled);
+
+	void adjustSize();
+
+    Qt::WindowModality windowModality();
+    void setWindowModality(Qt::WindowModality windowModality);
+
+	inline QRect ScreenGeometry()
+	{
+		return self->screen()->availableGeometry();
+	}
+
+	void setContentsMargins(int left, int top, int right, int bottom);
+	inline QRect contentsMargins()
+	{
+		QMargins margin = self->contentsMargins();
+		return QRect( margin.left(), margin.top(), margin.right(), margin.bottom() );
+	}
+
+	QLayout layout();
+    void setLayout(QLayout l);
+
+	QRect contentsRect();
+
+	inline void SetEffectOpacity( float opacity )
+	{
+		QGraphicsOpacityEffect *effect = new QGraphicsOpacityEffect( self );
+		effect->setOpacity( opacity );
+		self->setGraphicsEffect( effect );
+	}
+
+	void setSizePolicy( SizeMode x, SizeMode y );
+
+	inline SizeMode GetHorizontalSizePolicy()
+	{
+		return self->sizePolicy().horizontalPolicy();
+	}
+
+	inline SizeMode GetVerticalSizePolicy()
+	{
+		return self->sizePolicy().verticalPolicy();
+	}
+
+	inline void SetHorizontalSizePolicy( SizeMode mode )
+	{
+		auto sp = self->sizePolicy();
+		sp.setHorizontalPolicy( mode );
+		self->setSizePolicy( sp );
+	}
+
+	inline void SetVerticalSizePolicy( SizeMode mode )
+	{
+		auto sp = self->sizePolicy();
+		sp.setVerticalPolicy( mode );
+		self->setSizePolicy( sp );
+	}
+
+    void setFixedSize(int w, int h);
+    void setFixedWidth(int w);
+    void setFixedHeight(int h);
+
+	inline void* winId()
+	{
+		return (void*)self->winId();
+	}
+
+}
+
+native class CWidget
+{
+	static QWidget CreateWidget( QWidget parent, Editor.Widget managedObject, bool darkMode ); [new]
+}
+
+managed class Editor.Widget
+{
+	void InternalOnEvent( EventType e );
+
+	bool InternalMousePressEvent( QMouseEvent e );
+	void InternalMouseEnterEvent( QEvent e );
+	void InternalMouseLeaveEvent( QEvent e );
+	bool InternalMouseReleaseEvent( QMouseEvent e );
+	void InternalMouseMoveEvent( QMouseEvent e );
+	void InternalMouseDoubleClickEvent( QMouseEvent e );
+	void InternalWheelEvent( QWheelEvent e );
+	void InternalContextMenuEvent( QContextMenuEvent e );
+	void InternalKeyPressEvent( QKeyEvent pEvent );
+	void InternalKeyReleaseEvent( QKeyEvent pEvent );
+	void InternalFocusInEvent( FocusChangeReason reason );
+	void InternalFocusOutEvent( FocusChangeReason reason );
+	void InternalOnResizeEvent( QResizeEvent e );
+	void InternalOnMoveEvent( QMoveEvent e );
+
+	bool InternalPaintEvent( QPainter e, int flags );
+	bool InternalFocusNextPrevChild( bool next );
+
+	bool InternalDragEnterEvent( QDragEnterEvent e );
+	bool InternalDragMoveEvent( QDragMoveEvent e );
+	bool InternalDragLeaveEvent( QDragLeaveEvent e );
+	bool InternalDropEvent( QDropEvent e );
+	bool InternalCloseEvent( QEvent e );
+	QSize InternalSizeHint( int w, int h );
+	QSize InternalMinimumSizeHint( int w, int h );
+
+	void InternalShortcutOverrideEvent( QKeyEvent e );
+}
+

@@ -1,0 +1,91 @@
+﻿
+#include "mapview.h"
+#include "mapviewdroptarget.h"
+
+#include "toolrenderutils/toolcamera.h"
+
+native enum ManipulationMode_t as NativeHammer.ManipulationMode_t;
+
+[Handle:Editor.MapEditor.MapView]
+native class CMapView as NativeHammer.CMapView
+{
+	CMapDoc GetMapDoc();
+	void MarkHudDirty();
+
+	CToolCamera GetCamera();
+
+	bool IsActive();
+
+	// FIXME: Having a Vector2 as return type was corrupting something with the interop
+	// Vector2 GetMousePosition();
+	inline void GetMousePosition( out Vector2 pos )
+	{
+		*pos = self->GetMousePosition();
+	}
+
+	//
+	// We could do dragging purely in C#, but this stuff takes care of a shit load of stuff that I'd rather not right now
+	//
+	void EnterFreeDragMode( Vector2 vClientPos, CMapNode pObjectToSelect, Vector3 vecInitialHitNormal, bool bAlignToSurface );
+	void UpdateFreeDragMode( Vector2 vClientPos, bool bModifyAlignToSurface );
+	void ExitFreeDragMode( bool bRestoreToolState );
+	inline void GetDropTarget( ref Vector3 pVecNormalOut, ref Vector3 pVecDropPointOut, Vector2 vecPoint2D )
+	{
+		self->m_pDropTarget->GetDropTarget( pVecNormalOut, pVecDropPointOut, vecPoint2D );
+	}
+
+	void UpdateManagedGizmoState( bool isHoveredOverSomething, float distanceFromCamera );
+
+	inline ManipulationMode_t GetManipulationMode()
+	{
+		if ( self->m_pToolManager == nullptr ) return MANIPULATION_MODE_INVALID;
+		return self->m_pToolManager->GetManipulationMode();
+	}
+
+	inline float HitDistanceAtMouse()
+	{
+		Vector2D vMousePos = self->GetMousePosition();
+
+		CUtlVector< HitInfo_t > objects;
+		self->ObjectsAt( vMousePos, objects, TRACE_FLAG_IGNORE_MANAGED_GIZMOS );
+
+		float hit = 999999.0f;
+
+		if ( objects.Count() > 0 )
+		{
+			auto pNearestHit = objects[0];
+			hit = objects[0].m_flTraceT * MAX_COORD_FLOAT * 3;
+		}
+
+		return hit;
+	}
+}
+
+native struct HitInfo_t is NativeHammer.HitInfo_t
+
+managed static class Editor.MapEditor.MapViewRender
+{
+	void OnPreRender( CMapView mapView, ISceneView sceneView );
+	bool TraceManagedGizmos( CMapView mapView, Vector2 vecPoint2D, ref asref NativeHammer.HitInfo_t hitInfo );
+}
+
+native class CToolCamera as NativeHammer.CToolCamera
+{
+	Vector3 GetOrigin();
+	Angles GetAngles();
+	void SetOrigin( Vector3 origin );
+	void SetAngles( Angles angles );
+
+	float GetWidth();
+	float GetHeight();
+	float GetCameraFOV();
+
+	//
+	// Finds the 2d point in world space, it lies on the near clipping plane.
+	// Works on ortho views too.
+	//
+	inline void BuildRay( Vector2 view, out Vector3 start, out Vector3 end )
+	{
+		self->BuildRay( view, *start, *end );
+	}
+}

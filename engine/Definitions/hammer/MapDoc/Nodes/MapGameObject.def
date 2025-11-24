@@ -1,0 +1,11 @@
+
+#include "mapdoclib/mapgameobject.h"
+
+#include "mapdoclib/alignedboxhelper.h"
+
+[Handle:Editor.MapDoc.MapGameObject]
+native class CMapGameObject as NativeMapDoc.CMapGameObject : CMapNode
+{
+	void SetGUID( string json );
+	string GetGUID();
+}

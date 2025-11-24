@@ -1,0 +1,70 @@
+#include "appframework/materialsystem2app.h"
+
+native struct MaterialSystem2AppSystemDictCreateInfo as NativeEngine.MaterialSystem2AppSystemDictCreateInfo;
+
+native class CMaterialSystem2AppSystemDict
+{
+	static void CMaterialSystem2AppSystemDict Create( MaterialSystem2AppSystemDictCreateInfo createInfo ); [new]
+	void Destroy(); [delete]
+
+	bool Init();
+	bool InitWithoutMaterialSystem();
+	bool InitFinishSetupMaterialSystem();
+	void* GetAppWindow();
+
+	SwapChainHandle_t GetAppWindowSwapChain();
+
+	void SetAppWindowTitle( string title );
+	void SetAppWindowIcon( string title );
+	void SetInitialAppWindowImage( string vmat );
+	void SetAppWindowDiscardMouseFocusClick( bool discard );
+
+	void DrawInitialWindowImage();
+
+	void SuppressStartupManifestLoad( bool b );
+
+	void SetModuleSearchPath( string dir );
+	void SetModGameSubdir( string dir );
+	void SetModFromFileName( string filename, bool noExeCheck );
+	void DisableModPathCheck();
+	void SetDefaultRenderSystemOption( string system );
+
+	void SetInitializationPhase( int p );
+	int GetInitializationPhase();
+
+	void PreShutdown();
+	
+	bool InitSDL( uint flags );
+	void ShutdownSDL();
+
+	bool IsConsoleApp();
+	bool IsGameApp();
+
+	void SetDedicatedServer( bool bIsDedicatedServer );
+	bool IsDedicatedServer( );
+
+	string GetContentPath();
+	string GetModGameSubdir();
+
+	void SetInToolsMode();
+	bool IsInToolsMode();
+
+	bool IsInDeveloperMode();
+	bool IsInVRMode();
+
+	void* CreateAppWindow( string pTitle, int nPlatWindowFlags, int x, int y, int w, int h, int nRefreshRateHz );
+
+	void SuppressCOMInitialization();
+	bool IsRunningOnCustomerMachine();
+
+	void* AddSystem( string dllName, string interfaceName );
+
+	void SetInTestMode();
+	bool IsInTestMode();
+
+	void SetInStandaloneApp();
+	bool IsStandaloneApp();
+
+	void SetSteamAppId( uint appId );
+	uint GetSteamAppId();
+}

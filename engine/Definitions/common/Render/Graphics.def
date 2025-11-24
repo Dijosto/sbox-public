@@ -1,0 +1,23 @@
+﻿#include "sbox/imanagedrenderpipeline.h"
+native struct ManagedRenderSetup_t;
+
+native enum ManagedRenderHookStage is Sandbox.Rendering.Stage;
+
+managed static class Sandbox.Graphics
+{
+	//
+	// Called multiple times per rendering, for each stage.
+	//
+	void OnLayer( int renderHookStage, ManagedRenderSetup_t setup );
+}
+
+managed static class Sandbox.RenderTarget
+{
+	void Flush();
+}
+
+managed static class Sandbox.Rendering.RenderPipeline
+{
+	void InternalAddLayersToView( ISceneView view, RenderViewport viewport, HSceneViewRenderTarget hColor, HSceneViewRenderTarget hDepth, RenderMultisampleType nMSAA, CRenderAttributes pipelineAttributes, RenderViewport screenDimensions );
+	void InternalPipelineEnd( ISceneView view, RenderViewport viewport, HSceneViewRenderTarget hColor, HSceneViewRenderTarget hDepth, RenderMultisampleType nMSAA, CRenderAttributes pipelineAttributes, RenderViewport screenDimensions );
+}

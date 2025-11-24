@@ -1,0 +1,9 @@
+﻿
+[SharedDataPointer]
+native class QStringList as Editor.QStringList
+{
+    void Dispose(); [delete]
+
+    int size();
+    QString at( int i );
+}

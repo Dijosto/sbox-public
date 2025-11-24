@@ -1,0 +1,23 @@
+ident "assetsystem"
+nativedll assetsystem.dll
+inherit "engine.def"
+inherit "tools.def"
+skipall "tools.def"
+
+
+// A static function to report exceptions to in C#
+exceptions	"Sandbox.Interop.BindingException"
+
+// Management classes will appear under this namespace
+namespace "Managed.SourceAssetSytem"
+
+// Paths are relative to the def file
+cpp "../../src/assetsystem/interop.assetsystem.cpp"
+hpp "../../src/assetsystem/interop.assetsystem.h"
+cs	"../Sandbox.Tools/Interop.AssetSystem.cs"
+
+include "tier3"
+include "common/*"
+include "resources"
+include "tools/*"
+include "assetsystem/*"

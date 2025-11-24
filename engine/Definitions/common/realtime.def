@@ -1,0 +1,8 @@
+
+include "dbg.h"
+include "convar.h"
+
+managed static class Sandbox.RealTime
+{
+	void Update( float time );
+}

@@ -1,0 +1,23 @@
+{
+  "profiles": {
+    "Game": {
+      "commandName": "Executable",
+      "executablePath": "../game/sbox.exe",
+      "commandLineArgs": "-dev -noasserts",
+      "workingDirectory": "../../game/"
+    },
+    "Editor": {
+      "commandName": "Executable",
+      "executablePath": "../game/sbox-dev.exe",
+      "workingDirectory": "../../game/",
+      "nativeDebugging": true
+    },
+    "Server": {
+      "commandName": "Executable",
+      "executablePath": "../game/sbox-server.exe",
+      "commandLineArgs": "-noasserts +gamemode facepunch.sandbox +map facepunch.flatgrass",
+      "workingDirectory": "../../game/",
+      "nativeDebugging": true
+    }
+  }
+}

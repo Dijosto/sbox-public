@@ -1,0 +1,21 @@
+
+include "../thirdparty/ovrlipsync/Include/OVRLipSync.h"
+
+native enum ovrLipSyncResult as OVRLipSync.Result;
+native enum ovrLipSyncContextProvider as OVRLipSync.ContextProvider;
+native enum ovrLipSyncSignals as OVRLipSync.Signals;
+native enum ovrLipSyncAudioDataType as OVRLipSync.AudioDataType;
+native struct ovrLipSyncFrame is OVRLipSync.Frame;
+
+[WindowsOnly]
+native static class globalOVRLipSync as NativeEngine.OVRLipSyncGlobal
+{
+	static ovrLipSyncResult ovrLipSync_Initialize( int sampleRate, int bufferSize );
+	static ovrLipSyncResult ovrLipSync_Shutdown();
+	static ovrLipSyncResult ovrLipSync_DestroyContext( uint context );
+	static ovrLipSyncResult ovrLipSync_ResetContext( uint context );
+	static ovrLipSyncResult ovrLipSync_CreateContext( out uint pContext, ovrLipSyncContextProvider provider );
+	static ovrLipSyncResult ovrLipSync_CreateContextEx( out uint pContext, ovrLipSyncContextProvider provider, int sampleRate, bool enableAcceleration );
+	static ovrLipSyncResult ovrLipSync_SendSignal( uint context, ovrLipSyncSignals signal, int arg1, int arg2 );
+	static ovrLipSyncResult ovrLipSync_ProcessFrameEx( uint context, void* audioBuffer, int sampleCount, ovrLipSyncAudioDataType dataType, ref ovrLipSyncFrame frame );
+}

@@ -1,0 +1,33 @@
+
+#include "fgdlib/gamedata.h"
+
+//
+// GameData is all the data loaded from FGD files.
+//
+
+native enum GDClassType_t as Editor.GameDataClassType;
+
+native class CGameData as Native.CGameData
+{
+    //
+    // Classes
+    //
+
+    void AddClass( CGameDataClass gdClass, string helpContext );
+    void RemoveClass( int index );
+    int GetClassCount() const;
+    CGameDataClass GetClass( int nIndex );
+    CGameDataClass ClassForName( string className, out int index );
+
+    //
+    // Vars are allocated in GameData as its shared in multiple classes
+    //
+
+    CGameDataVariable AllocateVar();
+    void FreeVar( CGameDataVariable var );
+}
+
+managed static class Editor.GameData
+{
+    void Initialize( Native.CGameData gameData );
+}

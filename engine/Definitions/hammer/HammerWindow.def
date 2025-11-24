@@ -1,0 +1,26 @@
+
+#include "qhammermainwnd.h"
+
+native enum DockArea as Editor.DockArea;
+
+native class CQHammerMainWnd as Native.CQHammerMainWnd : CFramelessMainWindow
+{
+	// static CManagedMainWindow Create( QWidget parent, Window managedobj ); [new]
+
+	void CreateEverything();
+	void CreateMenus();
+	void SetupDefaultLayout();
+}
+
+managed class Editor.MapEditor.HammerMainWindow
+{
+	void WindowInit();
+	void AddNativeDock( string name, string icon, QWidget sibling, QWidget window, Editor.DockArea dockArea, Editor.DockManager.DockProperty properties, float split );
+
+	void CreateDynamicViewMenu( QMenu menu );
+
+	void ToggleAssetBrowser();
+	void ToggleFullscreenLayout( bool fullscreen );
+
+	static uint InitHammerMainWindow( CQHammerMainWnd window );
+}

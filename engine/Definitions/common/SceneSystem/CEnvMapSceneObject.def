@@ -1,0 +1,21 @@
+#include "scenesystem/envmapsceneobject.h"
+
+native enum CubemapProjectionMode_t as Sandbox.SceneCubemap.ProjectionMode;
+
+[Handle:Sandbox.SceneCubemap]
+native class CEnvMapSceneObject as NativeEngine.CEnvMapSceneObject : CSceneLightObject
+{
+	CubemapProjectionMode_t m_nProjectionMode;
+	Vector3 m_vBoxProjectMins;
+	Vector3 m_vBoxProjectMaxs;
+	Vector3 m_vColor;
+	int m_nRenderPriority;
+	ITexture m_hEnvMapTexture;
+	Vector4D m_vNormalizationSH;
+	float m_flFeathering;
+
+	void CalculateRadianceSH();
+	void CalculateRadianceSH( ITexture hTexture );
+	void CalculateNormalizationSH();
+	void CalculateBounds();
+}

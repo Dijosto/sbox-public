@@ -1,0 +1,56 @@
+﻿native enum QPainter::RenderHint is Editor.RenderHints;
+
+native enum QGraphicsView::DragMode is Editor.GraphicsView.DragTypes;
+
+native class QGraphicsView as Native.QGraphicsView : QFrame
+{
+	bool isInteractive();
+	void setInteractive(bool allowed);
+
+	void resetTransform();
+	void rotate(qreal angle);
+	void scale(qreal sx, qreal sy);
+	void shear(qreal sh, qreal sv);
+	void translate(qreal dx, qreal dy);
+	void centerOn(QPointF xy);
+	void ensureVisible(QRectF rect, int xmargin, int ymargin);
+	void fitInView(QRectF rect);
+
+	QRectF sceneRect();
+	void setSceneRect(QRectF rect);
+
+	QGraphicsScene scene();
+    void setScene(QGraphicsScene scene);
+
+	ScrollbarMode horizontalScrollBarPolicy();
+	void setHorizontalScrollBarPolicy( ScrollbarMode m );
+
+	ScrollbarMode verticalScrollBarPolicy();
+	void setVerticalScrollBarPolicy( ScrollbarMode m );
+
+	ViewportAnchorType transformationAnchor() const;
+    void setTransformationAnchor(ViewportAnchorType anchor);
+
+	QPointF mapToScene( QPoint pos );
+	QPoint mapFromScene( QPointF pos );
+
+	void setRenderHint(QPainter::RenderHint hint, bool on );
+
+	QGraphicsItem itemAt( QPoint pos );
+
+	inline void setBackground( QPixmap pixmap )
+	{
+		if ( pixmap == nullptr ) return;
+		this->setBackgroundBrush( QBrush( *pixmap ) );
+	}
+
+	void setDragMode( DragTypes mode );
+
+	QRectF rubberBandRect();
+}
+
+
+managed class Editor.GraphicsView : Editor.Widget
+{
+
+}

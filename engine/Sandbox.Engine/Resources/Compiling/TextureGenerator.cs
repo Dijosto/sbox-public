@@ -1,0 +1,66 @@
+﻿using System.Threading;
+
+namespace Sandbox.Resources;
+
+public abstract class TextureGenerator : ResourceGenerator<Texture>
+{
+	/// <summary>
+	/// Find an existing texture for this
+	/// </summary>
+	protected virtual ValueTask<Texture> CreateTexture( Options options, CancellationToken ct )
+	{
+		return default;
+	}
+
+	/// <summary>
+	/// Create a texture. Will replace a placeholder texture, which will turn into the generated texture later, if it's not immediately available.
+	/// </summary>
+	public sealed override Texture Create( Options options )
+	{
+		var tex = CreateTexture( options, default );
+
+		Texture output = default;
+		if ( !tex.IsCompletedSuccessfully )
+		{
+			// loading async
+			output = Texture.Create( 1, 1 ).WithData( new byte[4] { 0, 0, 0, 0 } ).Finish();
+			_ = output.ReplacementAsync( tex.AsTask() );
+		}
+		else
+		{
+			// finished immediately
+			output = tex.Result;
+		}
+
+		if ( output is null ) return default;
+
+		output.EmbeddedResource = CreateEmbeddedResource();
+		return output;
+	}
+
+	/// <summary>
+	/// Create a texture. Will wait until the texture is fully loaded and return when done.
+	/// </summary>
+	public sealed override async ValueTask<Texture> CreateAsync( Options options, CancellationToken token )
+	{
+		// Call it completely in a new thread
+		var output = await Task.Run( async () => await CreateTexture( options, token ) );
+		if ( output is null ) return default;
+
+		token.ThrowIfCancellationRequested();
+
+		output.EmbeddedResource = CreateEmbeddedResource();
+		return output;
+	}
+
+	public virtual EmbeddedResource? CreateEmbeddedResource()
+	{
+		return new EmbeddedResource
+		{
+			ResourceCompiler = "texture",
+			ResourceGenerator = DisplayInfo.For( this ).ClassName ?? GetType().FullName,
+			Data = Json.SerializeAsObject( this )
+		};
+	}
+
+}

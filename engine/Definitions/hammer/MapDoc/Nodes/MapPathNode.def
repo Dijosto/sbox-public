@@ -1,0 +1,8 @@
+﻿
+#include "mapdoclib/mappathnode.h"
+
+[Handle:Editor.MapDoc.MapPathNode]
+native class CMapPathNode as NativeMapDoc.CMapPathNode : CMapEntity
+{
+
+}

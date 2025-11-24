@@ -1,0 +1,6 @@
+
+managed static class Sandbox.HandleIndex
+{
+	static int RegisterHandle( IntPtr ptr, uint type );
+	static void FreeHandle( int handle );
+}

@@ -1,0 +1,13 @@
+<Solution>
+  <Configurations>
+    <Platform Name="Any CPU" />
+    <Platform Name="x64" />
+    <Platform Name="x86" />
+  </Configurations>
+  <Folder Name="/Solution Items/">
+    <File Path=".editorconfig" />
+  </Folder>
+  <Project Path="InteropGen/InteropGen.csproj" />
+  <Project Path="SboxBuild/SboxBuild.csproj" />
+  <Project Path="ShaderProc/ShaderProc.csproj" />
+</Solution>

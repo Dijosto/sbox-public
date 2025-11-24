@@ -1,0 +1,123 @@
+﻿
+native class QGraphicsItem as Native.QGraphicsItem
+{
+	void DeleteThis(); [delete]
+
+	bool isVisible();
+	void setVisible(bool visible);
+
+	bool isEnabled();
+	void setEnabled(bool enabled);
+
+	bool isSelected();
+	void setSelected(bool selected);
+
+	bool acceptDrops();
+	void setAcceptDrops(bool on);
+
+	qreal opacity();
+	qreal effectiveOpacity();
+	void setOpacity(qreal opacity);
+
+	QPointF pos();
+	void setPos(QPointF pos);
+
+	void setRotation(qreal angle);
+	qreal rotation();
+
+	void setScale(qreal scale);
+	void setToolTip( qstring str );
+	qreal scale();
+
+	qreal zValue();
+	void setZValue(qreal z);
+
+	CastTo[(QGraphicsItem::GraphicsItemFlag)(int)] GraphicsItemFlag flags();
+	void setFlag(GraphicsItemFlag flag, bool enabled);
+
+	void stackBefore( QGraphicsItem sibling );
+
+	void setParentItem(QGraphicsItem parent);
+	void update();
+
+	bool acceptHoverEvents();
+	void setAcceptHoverEvents(bool enabled);
+
+	QPointF mapToItem( QGraphicsItem item, QPointF point);
+	QPointF mapToParent(QPointF point);
+	QPointF mapToScene(QPointF point);
+
+	QPointF mapFromItem( QGraphicsItem item, QPointF point);
+	QPointF mapFromParent( QPointF point);
+	QPointF mapFromScene( QPointF point);
+
+	void setCursor(CursorShape shape);
+    void unsetCursor();
+
+	bool filtersChildEvents();
+    void setFiltersChildEvents(bool enabled);
+
+    bool handlesChildEvents();
+    void setHandlesChildEvents(bool enabled);
+}
+
+managed class Editor.GraphicsItem
+{
+	void InternalPaint( QPainter painter, int state );
+	QRect InternalGetPaintRect();
+	QRect InternalGetBoundingRect();
+
+	void InternalMousePressEvent( QGraphicsSceneMouseEvent e );
+	void InternalMouseReleaseEvent( QGraphicsSceneMouseEvent e );
+	void InternalMouseMoveEvent( QGraphicsSceneMouseEvent e );
+
+	void InternalHoverEnterEvent( QGraphicsSceneHoverEvent e );
+	void InternalHoverMoveEvent( QGraphicsSceneHoverEvent e );
+	void InternalHoverLeaveEvent( QGraphicsSceneHoverEvent e );
+	void InternalKeyPressEvent( QKeyEvent pEvent );
+	void InternalKeyReleaseEvent( QKeyEvent pEvent );
+
+	void InternalItemChange( int type );
+	bool Contains( QPointF point );
+}
+
+native class QGraphicsSceneMouseEvent : QEvent
+{
+	QWidget widget();
+
+	QPointF pos();
+	QPointF scenePos();
+	QPointF screenPos();
+
+	Qt::MouseButtons buttons();
+	Qt::MouseButtons button();
+
+	Qt::KeyboardModifiers modifiers();
+}
+
+native class QGraphicsSceneHoverEvent : QEvent
+{
+	QPointF pos();
+	QPointF scenePos();
+	QPointF screenPos();
+}
+
+native class CManagedGraphicsItem as Native.CManagedGraphicsItem : QGraphicsItem
+{
+	static CManagedGraphicsItem Create( QGraphicsItem parent, GraphicsItem managedObject ); [new]
+
+	void PrepareGeometryChange();
+}
+
+native class CManagedLineGraphicsItem as Native.CManagedLineGraphicsItem : CManagedGraphicsItem
+{
+	static CManagedLineGraphicsItem CreateLine( QGraphicsItem parent, GraphicsItem managedObject ); [new]
+
+	float HitWidth;
+
+	void Clear();
+	void MoveTo( QPointF p );
+	void LineTo( QPointF p );
+	void CubicTo( QPointF c1, QPointF c2, QPointF p );
+	void paint( QPainter painter );
+}

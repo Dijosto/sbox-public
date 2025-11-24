@@ -1,0 +1,45 @@
+
+#include "sbox/media/videoplayer.h"
+
+
+native class CVideoPlayer as NativeEngine.CVideoPlayer
+{
+	static CVideoPlayer Create( Sandbox.VideoPlayer managedObject ); [new]
+	void Destroy(); [delete]
+
+	bool Play( string pUrl, string pExt );
+	void Resume();
+	void Stop();
+	void Pause();
+	void Seek( double time );
+	bool GetRepeat();
+	void SetRepeat( bool bRepeat );
+	float GetDuration();
+	float GetPlaybackTime();
+	bool HasAudioStream();
+	void Update();
+	bool IsPaused();
+	bool IsMuted();
+	void SetMuted( bool bMuted );
+	int GetWidth();
+	int GetHeight();
+	void SetVideoOnly();
+	string GetMetadata( string key );
+	void GetSpectrum( CUtlVectorFloat outSpectrum );
+	float GetAmplitude();
+
+	ITexture GetTexture();
+	CAudioStreamManaged GetAudioStream();
+}
+
+managed class Sandbox.VideoPlayer
+{
+	void OnTextureCreatedInternal();
+	void OnInitAudioInternal( int sampleRate, int channels );
+	void OnFreeAudioInternal();
+	void OnTextureDataInternal( void* data, int width, int height );
+	void OnLoadedInternal();
+	bool WantsTextureData();
+	void OnFinishedInternal();
+	void OnRepeatedInternal();
+}

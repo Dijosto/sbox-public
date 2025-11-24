@@ -1,0 +1,9 @@
+{
+  "profiles": {
+    "Sandbox.Test": {
+      "commandName": "Project",
+      "hotReloadEnabled": false,
+      "nativeDebugging": true
+    }
+  }
+}

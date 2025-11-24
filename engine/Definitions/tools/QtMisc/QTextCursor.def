@@ -1,0 +1,38 @@
+﻿native enum QTextCursor::SelectionType as QTextCursorSelectionType;
+
+[SharedDataPointer]
+native class QTextCursor as Editor.TextCursor
+{
+    static  TextCursor CreateFromBlock( cref QTextBlock block ); [new]
+    void Dispose(); [delete]
+
+    int blockNumber();
+    int columnNumber();
+
+    QString selectedText();
+
+    bool atBlockStart();
+    bool atBlockEnd();
+    bool atStart();
+    bool atEnd();
+
+    void insertHtml( QString html );
+    void insertText( QString text );
+
+    bool hasSelection();
+    bool hasComplexSelection();
+    void removeSelectedText();
+    void clearSelection();
+    int selectionStart();
+    int selectionEnd();
+
+    int position();
+    int positionInBlock();
+
+    void setPosition( int pos );
+
+    void deleteChar();
+    void deletePreviousChar();
+
+    void select(QTextCursorSelectionType selection);
+}

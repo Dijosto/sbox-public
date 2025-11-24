@@ -1,0 +1,47 @@
+﻿#include "sbox/graphicsscene.h"
+
+native class QGraphicsScene as Native.QGraphicsScene : QObject
+{
+	QRectF sceneRect();
+	void setSceneRect(QRectF rect);
+
+	QRectF itemsBoundingRect();
+
+	void addItem(QGraphicsItem item);
+	void removeItem(QGraphicsItem item);
+
+	inline void setSelectionArea( QGraphicsView pView, QRectF rect )
+	{
+		QPainterPath selectionPath;
+		selectionPath.addPolygon( pView->mapToScene( rect.toRect() ) );
+		selectionPath.closeSubpath();
+		self->setSelectionArea( selectionPath );
+	}
+
+	inline bool Capture( string path )
+	{
+		QRectF sceneRect = self->itemsBoundingRect();
+		QSize imageSize( sceneRect.width(), sceneRect.height() );
+
+		QImage image( imageSize, QImage::Format_ARGB32 );
+		image.fill( Qt::transparent );
+
+		QPainter painter( &image );
+		painter.setRenderHint( QPainter::Antialiasing, true );
+		painter.setRenderHint( QPainter::SmoothPixmapTransform, true );
+		self->render( &painter, QRectF(), sceneRect );
+		painter.end();
+
+		return image.save( path, "PNG" );
+	}
+}
+
+native class ManagedGraphicsScene : QGraphicsScene
+{
+	static QGraphicsScene Create( QObject parent, Editor.GraphicsScene obj ); [new]
+}
+
+managed class Editor.GraphicsScene
+{
+
+}

@@ -1,0 +1,29 @@
+﻿
+native class QMimeData : QObject 
+{
+	static QMimeData Create(); [new]
+
+    QString text();
+    void setText(QString text);
+
+    QString html();
+    void setHtml(QString html);
+
+	void clear();
+
+    inline QString url()
+    {
+        if ( !self->hasUrls() )
+            return QString();
+
+        QList<QUrl> urls = self->urls();
+        return urls.first().toString();
+    }
+
+    inline void setUrl( QString url )
+    {
+        QList<QUrl> list;
+        list.append( QUrl( url ) );
+        self->setUrls( list );
+    }
+}

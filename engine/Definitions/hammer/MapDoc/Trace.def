@@ -1,0 +1,10 @@
+﻿
+#include "mapdoclib/mapworld.h"
+
+native struct Trace.TraceResult is NativeHammer.TraceResult;
+native struct Trace.TraceRequest is NativeHammer.TraceRequest;
+
+//
+// I think I'd prefer the API all to be here for each tools thing we can trace against
+// Atm it's only CMapWorld
+//

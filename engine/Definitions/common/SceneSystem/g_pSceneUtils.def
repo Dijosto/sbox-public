@@ -1,0 +1,12 @@
+﻿
+#include "scenesystem/isceneutils.h"
+
+
+native accessor g_pSceneUtils
+{
+	ITonemapSystem CreateTonemapSystem();
+	void DestroyTonemapSystem( ITonemapSystem pTonemapSystem );
+
+	IVolumetricFog CreateVolumetricFog();
+	void DestroyVolumetricFog( IVolumetricFog pVolumetricFog );
+}

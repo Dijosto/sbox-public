@@ -1,0 +1,6 @@
+managed class Editor.MapEditor.HammerManagedInspector
+{
+	static HammerManagedInspector Create( QWidget parent );
+	bool Inspect( CMapNode mapnode );
+	QWidget GetWidget();
+}

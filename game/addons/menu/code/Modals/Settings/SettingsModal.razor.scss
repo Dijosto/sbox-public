@@ -1,0 +1,21 @@
+@import '/styles/mainmenu.scss';
+
+SettingsModal
+{
+    > .inner
+    {
+        width: 1000px;
+        height: 800px;
+        pointer-events: all;
+        border-radius: 10px;
+        z-index: 50;
+        backdrop-filter: blur(8px);
+        gap: 8px;
+        padding: 16px;
+        flex-direction: column;
+        flex-grow: 0;
+        flex-shrink: 0;
+        overflow: hidden;
+    }
+}
+

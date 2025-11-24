@@ -1,0 +1,28 @@
+﻿
+#include "assetsystem/iassetsystem.h"
+
+native static accessor g_pAssetSystem as IAssetSystem
+{
+	void RecordAssetOpen( IAsset pAsset );
+	void RecordAssetOpen( string pAssetFileName );
+
+	IAsset FindAssetByFilename( string pFilename );
+	IAsset FindAssetByAssetRelativePath( string pFilename );
+	IAsset RegisterAssetFile( string pFilename );
+
+	void RunFrame();
+
+	void UpdateMods();
+	int GetAllModsCount();
+
+	inline bool RecompileAsset( IAsset asset, bool full )
+	{
+		CUtlVector<IAsset*> assets;
+		assets.AddToTail( asset );
+		return g_pAssetSystem->RecompileMultipleAssets( assets, full ? COMPILE_PARENTS_AND_CHILDREN_AND_ASSOCIATES : COMPILE_AS_NEEDED );
+	}
+
+	void UpdateGameResourceType( string title, string extension );
+
+	void LoadWorkingSetsAndTags();
+}

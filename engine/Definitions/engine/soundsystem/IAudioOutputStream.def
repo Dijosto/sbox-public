@@ -1,0 +1,18 @@
+
+#include "soundsystem/audio_stream_managed.h"
+
+[Handle:Sandbox.SoundStream]
+native class CAudioStreamManaged
+{
+	static CAudioStreamManaged Create( int nChannels, uint nSampleRate );
+	void Destroy();
+
+	void WriteAudioData( CastTo[int16*] void* pData, uint nSampleCount, uint nChannels );
+	uint QueuedSampleCount();
+	uint MaxWriteSampleCount();
+	uint LatencySamplesCount();
+	void Pause();
+	void Resume();
+	string GetName();
+	CSfxTable GetSfxTable();
+}

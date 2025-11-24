@@ -1,0 +1,185 @@
+﻿
+#include "rendersystem/sheet.h"
+
+native struct TextureCreationConfig_t is NativeEngine.TextureCreationConfig_t;
+native struct CTextureDesc is NativeEngine.CTextureDesc;
+native enum RenderDeviceAPI_t is NativeEngine.RenderDeviceAPI_t;
+native pointer SwapChainHandle_t;
+native pointer RenderBufferHandle_t is NativeEngine.RenderBufferHandle_t;
+native pointer RenderInputLayout_t is NativeEngine.RenderInputLayout_t;
+native struct BufferDesc_t is NativeEngine.BufferDesc;
+native enum RenderBufferType_t is NativeEngine.RenderBufferType;
+native enum RenderBufferFlags_t is NativeEngine.RenderBufferFlags;
+native enum DeviceSpecificInfo_t is NativeEngine.DeviceSpecificInfo_t;
+native struct VulkanDeviceSpecificTexture_t is NativeEngine.VulkanDeviceSpecificTexture_t;
+native struct RenderDeviceInfo_t;
+native pointer SamplerStateHandle_t;
+native struct CSamplerStateDesc is NativeEngine.CSamplerStateDesc;
+
+native accessor g_pRenderDevice
+{
+	SamplerStateHandle_t FindOrCreateSamplerState(CSamplerStateDesc samplerDesc );
+	int GetSamplerIndex( SamplerStateHandle_t samplerState );
+
+	RenderDeviceInfo_t GetSwapChainInfo( SwapChainHandle_t swapChain );
+	ITexture FindOrCreateFileTexture( string pFileName, RenderSystemAssetFileLoadMode nLoadMode );
+	ITexture FindOrCreateTexture2( string pResourceName, bool bIsAnonymous, TextureCreationConfig_t pDescriptor, void* data, int dataSize );
+	void ClearTexture( ITexture hTexture, Color color );
+	void AsyncSetTextureData2( ITexture hTexture, void* pData, int nDataSize, Rect3D rect );
+
+	ITexture GetSwapChainTexture( SwapChainHandle_t swapChain, SwapChainBuffer bufferType );
+	bool GetGPUFrameTimeMS( SwapChainHandle_t swapChain, out float pGPUFrameTimeMSOut, out uint pFrameNumberOut );
+	
+	asref cast CTextureDesc GetTextureDesc( ITexture hTexture );
+	asref cast CTextureDesc GetOnDiskTextureDesc( ITexture hTexture );
+
+	RenderMultisampleType GetTextureMultisampleType( ITexture hTexture );
+
+	IRenderContext CreateRenderContext( uint flags );
+	void ReleaseRenderContext( IRenderContext context );
+
+	bool ReadTexturePixels( ITexture hTexture, ref Rect_t pSrcRect, int nSrcSlice, int nSrcMip, ref Rect_t pDstRect, void* pData, ImageFormat dstFormat, int nDstStride );
+
+	void DestroySwapChain( SwapChainHandle_t hSwapChain );
+
+	bool Present( SwapChainHandle_t chain );
+	void Flush();
+	bool CanRenderToSwapChain( SwapChainHandle_t chain );
+
+	bool IsUsing32BitDepthBuffer();
+
+	inline Vector2 GetBackbufferDimensions( SwapChainHandle_t chain )
+	{
+		int nBBWidth, nBBHeight;
+		g_pRenderDevice->GetBackBufferDimensions( chain, &nBBWidth, &nBBHeight );
+		return Vector2D( (float)nBBWidth, (float)nBBHeight );
+	}
+
+	RenderShaderHandle_t CompileAndCreateShader( RenderShaderType nType, string pProgram, uint nBufLen, string pShaderVersion, string pDebugName );
+
+	int GetTextureLastUsed( ITexture hTexture );
+
+	void UnThrottleTextureStreamingForNFrames( uint nNumberOfFramesForUnthrottledTextureLoading );
+	int GetNumTextureLoadsInFlight();
+	void SetForcePreloadStreamingData( bool bForcePreloadStreamingData );
+
+	RenderDeviceAPI_t GetRenderDeviceAPI();
+
+	void MarkTextureUsed( ITexture texture, int nRequiredMipSize );
+
+	bool IsTextureRenderTarget( ITexture texture );
+
+	inline RenderBufferHandle_t CreateGPUBuffer( RenderBufferType_t nType, BufferDesc_t desc, RenderBufferFlags_t usage, string pDebugName )
+	{
+		desc.m_pDebugName = pDebugName;
+		return g_pRenderDevice->CreateGPUBuffer( nType, desc, usage );
+	}
+
+	void DestroyGPUBuffer( RenderBufferHandle_t hGPUBuffer );
+	bool ReadBuffer( RenderBufferHandle_t hBuffer, uint nOffsetInBytes, void* pBuf, uint nBytesToRead );
+
+	IntPtr GetDeviceSpecificInfo( DeviceSpecificInfo_t info );
+	IntPtr GetGraphicsAPISpecificTextureHandle( ITexture hTexture );
+
+	IntPtr GetDeviceSpecificTexture( ITexture hTexture );
+	
+	int GetTextureViewIndex( ITexture hTexture, CastTo[RenderColorSpace_t] byte colorSpace, RenderTextureDimension_t dim );
+
+	inline void GetTextureResidencyInfo( CUtlVectorTexture pTextures, CUtlVectorString pNames )
+	{
+		TextureResidencyStats_t textureResidencyStats;
+		CUtlVector<TextureResidencyInfo_t> rawTextures;
+
+		g_pRenderDevice->GetTextureResidencyInfo( rawTextures, textureResidencyStats );
+
+		pTextures->EnsureCapacity( rawTextures.Count() );
+		pNames->EnsureCapacity( rawTextures.Count() );
+
+		for ( const TextureResidencyInfo_t &info : rawTextures )
+		{
+			if ( info.m_hTexture.IsLoaded() == false ) continue;
+
+			CPathBufferString texName;
+			info.m_hTexture.GetResourceName( &texName );
+
+			pTextures->AddToTail( info.m_hTexture );
+			pNames->AddToTail( texName );
+		}
+	}
+
+	inline Vector4 GetSheetInfo( ITexture texture )
+	{
+		Vector4D vec(0, 0, 0, 0 );
+
+		Vector2D vSheetSequenceDataUVCoords;
+		HRenderTexture hSequenceDataTexture;
+		int nSequenceCount;
+		if ( g_pRenderDevice->GetSheetSequenceTextureData( texture, &hSequenceDataTexture, &vSheetSequenceDataUVCoords, &nSequenceCount ) )
+		{
+			vec[0] = vSheetSequenceDataUVCoords.y;
+			const CTextureDesc *pTexHeader = g_pRenderDevice->GetTextureDesc( hSequenceDataTexture );
+			if ( pTexHeader )
+			{
+				vec[1] = pTexHeader->m_nWidth;
+				vec[2] = 1.0f / pTexHeader->m_nHeight;
+				vec[3] = (float)nSequenceCount;
+			}
+		}
+
+		return vec;
+	}
+
+	inline int GetSequenceCount( ITexture texture )
+	{
+		const Sheet_t *pSheet = g_pRenderDevice->GetTextureSheet( texture );
+		if ( pSheet == nullptr ) return 0;
+		return pSheet->m_Sequences.Count();
+	}
+
+	inline SheetSequence_t GetSequence( ITexture texture, int index )
+	{
+		const Sheet_t *pSheet = g_pRenderDevice->GetTextureSheet( texture );
+		if ( pSheet == nullptr ) return 0;
+		return &pSheet->m_Sequences[index];
+	}
+}
+
+native static class ImageLoader as NativeEngine.ImageLoader
+{
+	int GetMemRequired( int width, int height, int depth, ImageFormat imageFormat, bool mipmap );
+	int GetMemRequired( int width, int height, int depth, int mipmaps, ImageFormat imageFormat );
+
+	bool ConvertImageFormat( CastTo[uint8*] void* src, ImageFormat srcImageFormat, CastTo[uint8*] void* dst, ImageFormat dstImageFormat, int width, int height, int srcStride, int dstStride );
+}
+
+native class SheetSequence_t
+{
+	uint m_nId;
+	bool m_bClamp;
+	bool m_bAlphaCrop;
+	bool m_bNoColor;
+	bool m_bNoAlpha;
+	float m_flTotalTime;
+
+	inline int FrameCount()
+	{
+		return self->m_Frames.Count();
+	}
+}
+
+native class SheetSequenceFrame_t
+{
+	float m_flDisplayTime;
+
+	inline int ImageCount()
+	{
+		return self->m_Images.Count();
+	}
+
+	inline SheetFrameImage_t GetImage( int i )
+	{
+		return self->m_Images[i];
+	}
+}
+
+native struct SheetFrameImage_t;

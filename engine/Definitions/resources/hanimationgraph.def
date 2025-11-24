@@ -1,0 +1,55 @@
+
+#include "animationsystem/ienumanimparameter.h"
+
+native struct CAnimVariant is NativeEngine.AnimVariant;
+native enum AnimParamType_t is NativeEngine.AnimParamType;
+
+native class IAnimParameterList as NativeEngine.IAnimParameterList
+{
+	int Count();
+	IAnimParameter GetParameter( int index );
+	IAnimParameter GetParameter( string name );
+}
+
+native class IAnimParameter as NativeEngine.IAnimParameter
+{
+	string GetName();
+	AnimParamType GetParameterType();
+	AnimVariant GetDefaultValue();
+	AnimVariant GetMinValue();
+	AnimVariant GetMaxValue();
+
+	inline int GetNumOptionNames()
+	{
+		const IEnumAnimParameter* pEnumParam = reflection_cast< const IEnumAnimParameter >( self );
+		if ( pEnumParam )
+		{
+			return pEnumParam->GetOptionNames().Count();
+		}
+
+		return 0;
+	}
+
+	inline string GetOptionName( int nIndex )
+	{
+		const IEnumAnimParameter* pEnumParam = reflection_cast< const IEnumAnimParameter >( self );
+		if ( pEnumParam )
+		{
+			const CUtlVector<CUtlString> optionList = pEnumParam->GetOptionNames();
+			if ( nIndex >= 0 && nIndex < optionList.Count() )
+			{
+				return optionList[nIndex];
+			}
+		}
+
+		return 0;
+	}
+}
+
+[ResourceHandle:HAnimationGraph]
+native class IAnimationGraph as NativeEngine.HAnimationGraph
+{
+	string GetResourceName();
+
+	IAnimParameterList GetParameterList();
+}

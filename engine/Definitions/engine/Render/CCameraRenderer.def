@@ -1,0 +1,56 @@
+﻿
+#include "camerarenderer.h"
+
+native enum SceneViewFlags_t is NativeEngine.SceneViewFlags;
+
+native class CCameraRenderer
+{
+	void DeleteThis(); [delete]
+	static CCameraRenderer Create( string name, int cameraId ); [new]
+
+	void ClearSceneWorlds();
+	void AddSceneWorld( ISceneWorld world );
+	void SetRenderAttributes( CRenderAttributes attributes );
+	void Render( SwapChainHandle_t targetSwapChain );
+	void RenderToTexture( ITexture hTexture, ISceneView parentView );
+	void RenderToCubeTexture( ITexture hTexture, int nSlice );
+	void RenderToBitmap( void* pixels, int width, int height, int bytesPerPixel );
+
+	void RenderStereo( int eye, int eyeWidth, int eyeHeight, bool bSubmitThisEye );
+	void SubmitStereo( int eyeWidth, int eyeHeight );
+	void BlitStereo( int eyeWidth, int eyeHeight );
+
+	void ClearRenderTags();
+	void ClearExcludeTags();
+	void AddRenderTag( uint hash );
+	void AddExcludeTag( uint hash );
+
+	int ViewUniqueId;
+	Vector3 CameraPosition;
+	Angles CameraRotation;
+	float FieldOfView;
+	float ZNear;
+	float ZFar;
+	NativeRect Rect;
+	Vector4 Viewport;
+	Vector4 ClipSpaceBounds;
+
+	bool EnablePostprocessing;
+	bool EnableEngineOverlays;
+
+	bool Ortho;
+	float OrthoSize;
+
+	bool NeedTonemapRenderer;
+	SceneViewFlags SceneViewFlags;
+
+	bool IsRenderingStereo;
+	Vector3 MiddleEyePosition;
+	Angles MiddleEyeRotation;
+
+	Matrix OverrideProjection;
+	bool HasOverrideProjection;
+
+	bool FlipX;
+	bool FlipY;
+}

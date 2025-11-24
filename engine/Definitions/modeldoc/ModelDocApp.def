@@ -1,0 +1,135 @@
+﻿
+#include "modeldoc_editor_app.h"
+#include "modeldoc_editor_session.h"
+#include "modeldoc_lib/modeldoc_rendermeshfile.h"
+#include "modeldoc_lib/modeldoc_physicshullfromrender.h"
+#include "modeldoc_lib/modeldoc_physicsmeshfromrender.h"
+#include "modeldoc_lib/modeldoc_materialgroup.h"
+#include "modeldoc_lib/modeldoc_renderprimitive_mesh.h"
+#include "modeldoc_utils/imodeldocutils.h"
+
+native class CModelDocEditorApp as NativeModelDoc.CModelDocEditorApp
+{
+	void RefreshGameData();
+
+	inline string GetSessionModel()
+	{
+		CModelDocEditorSession *pSession = self->GetActiveModelDocEditorSession();
+		IAsset *pAsset = pSession ? pSession->GetModelAsset() : nullptr;
+		return pAsset ? pAsset->GetAssetRelativePath_Transient() : nullptr;
+	}
+}
+
+managed static class Editor.ModelEditor.ModelDoc
+{
+	void Init( CModelDocEditorApp app );
+	void OnToolsMenu( QMenu menu );
+}
+
+native static class NativeEngine.ModelDoc
+{
+	inline bool CreateModelFromMeshFile( string pVmdlFileFullPath, string meshRelativePath, string material )
+	{
+		CModelDoc modelFile;
+		CModelDocRenderMeshFile *pRenderMeshFile = modelFile.CreateNode< CModelDocRenderMeshFile >( "", nullptr, MODELDOC_CREATE_NODE_DEFAULT );
+		pRenderMeshFile->SetFilename( meshRelativePath );
+		modelFile.CreateNode< CModelDocPhysicsHullFromRender >( "", nullptr, MODELDOC_CREATE_NODE_DEFAULT );
+		CModelDocDefaultMaterialGroup *pDefaultMaterialGroup = modelFile.CreateNode< CModelDocDefaultMaterialGroup >( "", nullptr, MODELDOC_CREATE_NODE_DEFAULT );
+		pDefaultMaterialGroup->SetHasGlobalDefault( true );
+		pDefaultMaterialGroup->SetGlobalDefaultMaterial( material );
+		return modelFile.SaveToFile( pVmdlFileFullPath, nullptr );
+	}
+
+	inline bool CreateModelFromMesh( string pVmdlFileFullPath, CModelMesh pMesh )
+	{
+		CModelDoc modelFile;
+		CModelDocRenderPrimitiveMesh *pRenderPrimitiveMesh = modelFile.CreateNode< CModelDocRenderPrimitiveMesh >( "", nullptr, MODELDOC_CREATE_NODE_DEFAULT );
+		pRenderPrimitiveMesh->CopyFrom( pMesh );
+		modelFile.CreateNode< CModelDocPhysicsMeshFromRender >( "", nullptr, MODELDOC_CREATE_NODE_DEFAULT );
+		return modelFile.SaveToFile( pVmdlFileFullPath, nullptr );
+	}
+
+	inline bool CreateModelFromMeshes( string pVmdlFileFullPath, CastTo[CModelMesh**] void* pMeshes, int nMeshCount )
+	{
+		CModelDoc modelFile;
+		for ( int i = 0; i < nMeshCount; ++i )
+		{
+			CModelDocRenderPrimitiveMesh *pRenderPrimitiveMesh = modelFile.CreateNode< CModelDocRenderPrimitiveMesh >( "", nullptr, MODELDOC_CREATE_NODE_DEFAULT );
+			pRenderPrimitiveMesh->CopyFrom( pMeshes[i] );
+		}
+		modelFile.CreateNode< CModelDocPhysicsMeshFromRender >( "", nullptr, MODELDOC_CREATE_NODE_DEFAULT );
+		return modelFile.SaveToFile( pVmdlFileFullPath, nullptr );
+	}
+}
+
+native class CModelMesh
+{
+	void DeleteThis(); [delete]
+	static CModelMesh Create(); [new]
+
+	void AddVertices( int nNumVertices );
+
+	inline void AddFaceGroup( string pMaterialName )
+	{
+		int nFaceGroup = self->AddFaceGroup();
+		self->SetFaceGroupMaterial( nFaceGroup, pMaterialName );
+	}
+
+	inline void SetPositions( CastTo[Vector*] void* pPositions, int nNumPositions )
+	{
+		CModelMesh::VertexStreamIndex_t nPositionStream = self->VertexStreamSet().AddStream( "position", MODELSTREAM_TYPE_POSITION_3D );
+		CModelStreamAccessor positionStream = self->VertexStreamSet().GetStream( nPositionStream );
+
+		for ( int i = 0; i < nNumPositions; ++i )
+		{
+			positionStream.SetValue( i, pPositions[i] );
+		}
+	}
+
+	inline void SetTexCoords( CastTo[Vector2D*] void* pTexCoords, int nNumTexCoords )
+	{
+		CModelMesh::FaceVertexStreamIndex_t nUVStream = self->FaceVertexStreamSet().AddStream( "texcoord", MODELSTREAM_TYPE_TEXCOORD_2D );
+		CModelStreamAccessor uvStream = self->FaceVertexStreamSet().GetStream( nUVStream );
+
+		for ( int i = 0; i < nNumTexCoords; ++i )
+		{
+			uvStream.SetValue( i, pTexCoords[i] );
+		}
+	}
+	
+	inline void SetNormals( CastTo[Vector*] void* pNormals, int nNumNormals )
+	{
+		CModelMesh::FaceVertexStreamIndex_t nStream = self->FaceVertexStreamSet().AddStream( "normal", MODELSTREAM_TYPE_NORMAL_3D );
+		CModelStreamAccessor stream = self->FaceVertexStreamSet().GetStream( nStream );
+
+		for ( int i = 0; i < nNumNormals; ++i )
+		{
+			stream.SetValue( i, pNormals[i] );
+		}
+	}
+
+	inline void AddFace( int nGroupIndex, CastTo[int*] void* pVertices, int nNumVertices )
+	{
+		CUtlVector< CModelMesh::VertexHandle_t > vertices;
+		for ( int i = 0; i < nNumVertices; ++i )
+			vertices.AddToTail( self->GetVertexHandleForIndex( pVertices[i] ) );
+
+		self->AddFace( vertices.Base(), vertices.Count(), nGroupIndex );
+	}
+}
+
+native class CModelDoc
+{
+	void DeleteThis(); [delete]
+	static CModelDoc Create(); [new]
+
+	inline bool SaveToFile( string pFullPath )
+	{
+		return self->SaveToFile( pFullPath, nullptr );
+	}
+}
+
+native static accessor g_pModelDocUtils
+{
+	bool InitFromMesh( CModelDoc pModelDoc, string pFilename );
+}

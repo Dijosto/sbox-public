@@ -1,0 +1,47 @@
+﻿#include "qcontrols/framelesswindow.h"
+
+native class QMainWindow as Native.QMainWindow : QWidget
+{
+	QSize iconSize() const;
+    void setIconSize(QSize iconSize);
+
+	QMenuBar menuBar();
+	void setMenuBar(QMenuBar menubar);
+	void setMenuWidget(QWidget menubar);
+
+	QStatusBar statusBar();
+	void setStatusBar(QStatusBar statusbar);
+
+	QWidget centralWidget();
+    void setCentralWidget(QWidget widget);
+
+	bool isAnimated();
+	void setAnimated(bool enabled);
+
+	void addToolBarBreak(Qt::ToolBarArea area);
+    void insertToolBarBreak(QToolBar before);
+
+    void addToolBar(Qt::ToolBarArea area, QToolBar toolbar);
+    void addToolBar(QToolBar toolbar);
+    void insertToolBar( QToolBar before, QToolBar toolbar );
+    void removeToolBar( QToolBar toolbar );
+    void removeToolBarBreak( QToolBar before );
+
+    QByteArray saveState(int version);
+    bool restoreState(QByteArray state);
+}
+
+native class CFramelessMainWindow as Native.CFramelessMainWindow : QMainWindow
+{
+	void SetTitleBarWidgets( QPushButton icon, QLabel titleLabel, QMenuBar menuBar, QWidget grabber, QWidget minimizeButton, QWidget maximizeButton, QWidget closeButton );
+}
+
+native class CManagedMainWindow as Native.CManagedMainWindow : CFramelessMainWindow
+{
+	static CManagedMainWindow Create( QWidget parent, Window managedobj ); [new]
+}
+
+managed class Editor.Window : Editor.Widget
+{
+	static uint InitFramelessWindow( CFramelessMainWindow window );
+}

@@ -1,0 +1,43 @@
+﻿native enum Qt::ToolBarArea is Editor.ToolbarPosition;
+native enum Qt::ToolButtonStyle is Editor.ToolButtonStyle;
+
+native class QToolBar as Native.QToolBar : QWidget
+{
+	void setMovable(bool movable);
+	bool isMovable();
+
+	void setAllowedAreas( Editor.ToolbarPosition areas );
+	Editor.ToolbarPosition allowedAreas();
+
+	void clear();
+
+	void insertAction(QAction before, QAction action);
+	QAction insertWidget(QAction before, QWidget widget);
+	QAction addWidget(QWidget widget);
+	QAction addSeparator();
+
+	bool isFloatable();
+	void setFloatable(bool floatable);
+	bool isFloating();
+
+	void setIconSize( QSize iconSize );
+
+	ToolButtonStyle toolButtonStyle();
+	void setToolButtonStyle( ToolButtonStyle s );
+
+	inline void allowContextMenu( bool bEnabled )
+	{
+		self->setContextMenuPolicy( bEnabled ? Qt::ActionsContextMenu : Qt::PreventContextMenu );
+	}
+}
+
+
+native class CToolBar
+{
+	static QToolBar Create( QWidget parent, Editor.ToolBar managedobj ); [new]
+}
+
+managed class Editor.ToolBar : Editor.Widget
+{
+
+}

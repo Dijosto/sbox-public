@@ -1,0 +1,99 @@
+
+#include "engine2.h"
+#include "tier0/platform_extra.h"
+#include "sbox/media/mediainterface.h"
+#include "protocol.h"
+#include "tier0/tools_stall_monitor.h"
+
+native static class global as NativeEngine.EngineGlobal
+{
+	void Plat_ScreenToWindowCoords( CastTo[PlatWindow_t] IntPtr hwnd, cref ref int x, cref ref int y );
+	void Plat_WindowToScreenCoords( CastTo[PlatWindow_t] IntPtr hwnd, cref ref int x, cref ref int y );
+	void Plat_MessageBox( string title, string message );
+	bool Plat_GetDesktopResolution( int nMonitorIndex, ref int pWidth, ref int pHeight, ref uint pRefreshRate );
+	int Plat_GetDefaultMonitorIndex();
+	bool Plat_SafeRemoveFile( string file );
+
+	void Plat_SetModuleFilename( string filename );
+	void Plat_SetCurrentDirectory( string filename );
+	ulong Plat_GetCurrentFrame();
+	void Plat_SetCurrentFrame( ulong nFrame );
+	void Plat_ChangeCurrentFrame( long nDelta );
+	bool Plat_IsRunningOnCustomerMachine();
+
+	bool Plat_HasClipboardText();
+	void Plat_SetClipboardText( string text );
+	string Plat_GetClipboardText();
+	void Plat_ClearClipboardText();
+
+	inline bool IsWindowFocused()
+	{
+		PlatWindow_t window = g_pEngineServiceMgr->GetEngineWindow();
+		return Plat_IsWindowFocused( window );
+	}
+
+	inline bool IsRetail()
+	{
+		return IsRetail();
+	}
+
+	inline bool HasLaunchParameter( string name )
+	{
+		return CommandLine()->FindParm( name );
+	}
+
+	void Plat_SetNoAssert();
+
+	inline string GetGameRootFolder()
+	{
+		static CPathBufferString gamePath;
+		g_pFullFileSystem->GetSearchPath( "GAMEROOT", &gamePath );
+		return gamePath.String();
+	}
+
+	inline string GetGameSearchPath()
+	{
+		static CPathBufferString gamePath;
+		g_pFullFileSystem->GetSearchPathArgs( "PROJECT", &gamePath );
+		return gamePath.String();
+	}
+
+//	int LaunchGame( CMaterialSystem2AppSystemDict appDict, string lpCmdLine, bool withClient, bool withTools );
+
+	bool SourceEngineUnitTestInit();
+	bool SourceEnginePreInit( string lpCmdLine, CMaterialSystem2AppSystemDict appDict );
+	bool SourceEngineInit( CMaterialSystem2AppSystemDict appDict );
+	bool SourceEngineFrame( CMaterialSystem2AppSystemDict appDict, double currentTime, double previousTime );
+	void SourceEngineShutdown( CMaterialSystem2AppSystemDict appDict, bool forced );
+
+	inline void UpdateWindowSize()
+	{
+		VideoModeChange_t* pModeChange = g_pEngineServiceMgr->GetVideoModeChange();
+		if ( pModeChange )
+		{
+			g_pRenderService->SetVideoMode( pModeChange->m_deviceInfo );
+			pModeChange->ModeChangeComplete();
+		}
+
+		SwapChainHandle_t m_hSwapChain = g_pEngineServiceMgr->GetEngineSwapChain();
+		RenderViewport_t renderViewport;
+		renderViewport.Init( 0, 0, 512, 512, 0, 1 );
+
+		CRenderContextPtr pRenderContext( g_pRenderDevice, RenderTargetDesc_t( m_hSwapChain, RENDER_SRGB ), "Clear" );
+		pRenderContext->Clear( Vector4D( 0, 0, 0, 0 ) );
+		pRenderContext->SetViewports( 1, &renderViewport );
+
+		pRenderContext->Submit();
+		g_pRenderDevice->Present( m_hSwapChain );
+	}
+
+	inline float GetDiagonalDpi()
+	{
+		return Plat_GetDPI();
+	}
+
+	bool AppIsDedicatedServer();
+
+	void ToolsStallMonitor_IndicateActivity();
+}
+

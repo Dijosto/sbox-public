@@ -1,0 +1,16 @@
+﻿
+#include "toolpath.h"
+
+managed class Editor.MapEditor.IPathTool
+{
+	void CreateUI( QWidget container );
+	string GetCurrentEntityClassName();
+	float GetRadiusOffset();
+	bool IsRadiusOffsetEnabled();
+}
+
+// Glue for the entity tool, we could do the entire thing in C# with some more APIs exposed and avoid all this.
+managed static class Editor.MapEditor.PathToolGlue
+{
+	Editor.MapEditor.IPathTool Create();
+}

@@ -1,0 +1,11 @@
+
+include "sbox/glue_resources.h"
+
+native static class Glue.Resources as NativeGlue.Resources
+{
+	IMaterial GetMaterial( string name );
+	ITexture GetTexture( string name );
+	IModel GetModel( string name );
+	HAnimationGraph GetAnimationGraph( string name );
+	CVfx GetShader( string name );
+}

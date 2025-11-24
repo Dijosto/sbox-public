@@ -1,0 +1,31 @@
+﻿
+native enum Qt::CursorShape is Editor.CursorShape;
+
+native static class WidgetUtil Native.WidgetUtil
+{
+	static void OnObject_Destroyed( QObject obj, CastTo[WidgetUtil::callback] IntPtr method );
+
+	static void OnMenu_AboutToShow( QMenu obj, CastTo[WidgetUtil::callback_menu] IntPtr method );
+	static void OnMenu_AboutToHide( QMenu obj, CastTo[WidgetUtil::callback_menu] IntPtr method );
+
+	static int GetChildrenCount( QObject obj );
+	static int GetChildren( QObject obj, QObject[] childrens, int max );
+
+	static QGraphicsView CreateGraphicsView( QWidget parent, GraphicsView managedObject );
+	static QGraphicsProxyWidget CreateGraphicsProxy( QGraphicsItem parent, GraphicsWidget managedObject );
+
+	static void PostKeyEvent( QWidget target, int key );
+
+	static void PaintSetFont( QPainter painter, string fontName, int size, int weight, bool italic, bool heightInPixels );
+	static SwapChainHandle_t CreateSwapChain( QWidget target );
+
+	static void SetWindowNoActivate( QWidget widget );
+
+	//
+	// Text measuring tools
+	//
+	Vector4 MeasureText( QRect rect, int flags, string text );
+
+
+	static void ConstrainToScreen( QWidget widget );
+}

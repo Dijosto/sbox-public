@@ -1,0 +1,17 @@
+{
+    "menu.hub": "Hub",
+    "menu.games": "Games",
+    "menu.maps": "Maps",
+    "menu.multiplayer": "Servers",
+    "menu.store": "Store",
+    "menu.settings": "Settings",
+    "menu.quit": "Quit",
+    "menu.searchplaceholder": "Search..",
+
+    "avatar.change": "Change",
+    "avatar.changetip": "Change your appearance",
+    "avatar.toggletype": "Switch between human and citizen",
+
+    "party": "Party"
+
+}

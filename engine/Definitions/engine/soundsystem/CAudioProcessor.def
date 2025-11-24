@@ -1,0 +1,38 @@
+
+#include "soundsystem/vmix_dsp.h"
+
+native class CAudioProcessor
+{
+	void Dispose(); [delete]
+	void Process( CAudioMixDeviceBuffers pInput, CAudioMixDeviceBuffers pOutput, int nChannelCount );
+
+	bool SetControlParameter( StringToken name, float flValue );
+	bool SetNameParameter( StringToken name, StringToken nNameValue );
+
+	inline static CAudioProcessor CreateDelay( int channels )
+	{
+		return CreateDelayAudioProcessor( channels );
+	}
+
+	inline static CAudioProcessor CreatePitchShift( int channels )
+	{
+		return CreatePitchShiftAudioProcessor( channels );
+	}
+}
+
+native class DspPreset
+{
+	static DspPreset Create( string name ); [new]
+	void Dispose(); [delete]
+
+	void AddProcessor( int nType, float[] prms, uint prmsCount );
+	void FinishBuilding();
+
+	DspInstance Instantiate( int channels );
+}
+
+native class DspInstance
+{
+	void Dispose(); [delete]
+	void ProcessChannel( CAudioMixBuffer pOutput, CAudioMixBuffer input, int nChannelIndex );
+}

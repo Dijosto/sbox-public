@@ -1,0 +1,68 @@
+﻿
+
+native class IResourceCompilerContext
+{
+	void SetExtension( string name );
+	void SetCompiler( string name );
+
+	string FullPath();
+	string RelativePath();
+	string ResourceName();
+
+	void SpecifyResourceVersion( int nVersion );
+	void RegisterSpecialDependency( string str, uint nUserData, uint nFingerprint );
+
+	inline bool RegisterReference( string filename )
+	{
+		CPathBufferString fixedResourceName;
+
+		if ( !FixupResourceName( filename, &fixedResourceName ) )
+			return false;
+
+		ResourceType_t nType = DeduceResourceTypeFromResourceName( fixedResourceName );
+		self->RegisterResourceReference( nType, fixedResourceName );
+		return true;
+	}
+
+	inline void RegisterInputFileDependency( string filename, int flags )
+	{
+		self->RegisterInputFileDependency( filename, (InputFileDependencyFlags_t) flags );
+	}
+
+	inline int WriteBlock( string blockName, void* data, int count )
+	{
+		auto blockId = MK_RSRC_BLOCK_ID( blockName[0], blockName[1], blockName[2], blockName[3] );
+		return self->RegisterAdditionalBlock(  blockId, data, count );
+	}
+
+	inline CUtlBuffer GetOverrideData()
+	{
+		return self->RequestBufferArg( "___OverrideInputData___", INPUT_DEPENDENCY_NORMAL );
+	}
+
+	CResourceStream Data();
+	CResourceStream StreamingData();
+	IResourceCompilerContextChild CreateChildContext( string pFileName );
+}
+
+native class CResourceStream
+{
+	void WriteBytes( void* data, int size );
+
+	void Align( int alignment, int offset );
+	void AlignPointer();
+
+	uint Tell();
+}
+
+native class IResourceCompilerContextChild
+{
+	inline void SetOverrideInputData( string data )
+	{
+		CUtlBuffer buf( 0, 0, CUtlBuffer::TEXT_BUFFER );
+		buf.PutString( data );
+		self->SetOverrideInputData( buf );
+	}
+
+	bool CompileImmediately();
+}

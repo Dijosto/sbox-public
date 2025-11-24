@@ -1,0 +1,97 @@
+﻿native class QEvent
+{
+	void accept();
+	void ignore();
+
+	bool isAccepted();
+	bool spontaneous();
+	void setAccepted(bool accepted);
+}
+
+native class QInputEvent : QEvent
+{
+	Qt::KeyboardModifiers modifiers();
+	ulong timestamp();
+}
+
+native class QMouseEvent : QInputEvent
+{
+	QPointF localPos();
+	QPointF windowPos();
+	QPointF screenPos();
+
+	Qt::MouseButtons buttons();
+	Qt::MouseButtons button();
+}
+
+native class QWheelEvent : QInputEvent
+{
+	QPoint pixelDelta();
+	QPoint angleDelta();
+
+	QPointF position();
+	QPointF globalPosition();
+
+	Qt::MouseButtons buttons();
+}
+
+native class QContextMenuEvent : QInputEvent
+{
+	QPointF pos();
+	QPointF globalPos();
+}
+
+native class QKeyEvent : QInputEvent
+{
+	QString text();
+	bool isAutoRepeat();
+	int count();
+	int key();
+	uint nativeModifiers();
+	uint nativeScanCode();
+	uint nativeVirtualKey();
+}
+
+native class QResizeEvent : QEvent
+{
+	QSize size();
+	QSize oldSize();
+}
+
+native class QMoveEvent : QEvent
+{
+	QPoint pos();
+	QPoint oldPos();
+}
+
+native enum Qt::DropAction as Editor.DropAction;
+
+native class QDropEvent : QEvent
+{
+	void acceptProposedAction();
+	QMimeData mimeData();
+	QObject source();
+	QPoint pos();
+	Qt::MouseButtons mouseButtons();
+	Qt::KeyboardModifiers keyboardModifiers();
+
+	Qt::DropAction dropAction();
+	void setDropAction(Qt::DropAction action);
+}
+
+native class QDragMoveEvent : QDropEvent
+{
+
+}
+
+native class QDragEnterEvent : QDragMoveEvent
+{
+
+}
+
+native class QDragLeaveEvent : QEvent
+{
+
+}
+
+native enum QEvent::Type as Native.EventType;

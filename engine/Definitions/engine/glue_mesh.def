@@ -1,0 +1,147 @@
+
+include "sbox/glue_mesh.h"
+include "modellib/modelbuilder.h"
+include "meshutils/simplifyparams.h"
+include "vphysx/vphysx_collisionmesh_resource.h"
+
+native struct SboxVertex_t is Sandbox.Vertex;
+native struct VertexField_t as NativeEngine.VertexField
+
+native class CBuilderMaterialGroup
+{
+	CUtlString m_name;
+	void AddMaterial( IMaterial hMat );
+}
+
+native class CBuilderMaterialGroupArray
+{
+	void DeleteThis(); [delete]
+	static CBuilderMaterialGroupArray Create( int count ); [new]
+
+	CBuilderMaterialGroup Get( int index );
+}
+
+native class CAnimationGroupBuilder
+{
+	void DeleteThis(); [delete]
+	static CAnimationGroupBuilder Create(); [new]
+
+	int AddAnimation();
+	void AddFrame( int nAnimation, CastTo[CTransformUnaligned*] void* pBoneTransforms, int nNumBoneTransforms );
+	void SetName( int nAnimation, string pName );
+	void SetFrameRate( int nAnimation, float fps );
+	void SetLooping( int nAnimation, bool looping );
+	void SetDelta( int nAnimation, bool delta );
+	void SetDisableInterpolation( int nAnimation, bool disableInterpolation );
+}
+
+native class CPhysBodyDescArray
+{
+	void DeleteThis(); [delete]
+	static CPhysBodyDescArray Create( int count, int jointCount ); [new]
+
+	CPhysBodyDesc Get( int index );
+	VPhysXJoint_t GetJoint( int index );
+}
+
+native class CPhysBodyDesc
+{
+	float m_flMass;
+
+	inline void SetBoneName( string boneName )
+	{
+		self->m_boneName = boneName;
+		self->m_pBoneName = self->m_boneName.String();
+	}
+	
+	inline void SetSurface( StringToken surface )
+	{
+		self->m_surface = surface;
+	}
+
+	inline void SetBindPose( Transform transform )
+	{
+		self->m_BindPose = transform.ToMatrix();
+	}
+
+	void AddSphere( Sphere sphere );
+	void AddCapsule( Capsule capsule );
+
+	inline void AddHull( CastTo[Vector*] void* pPoints, int nNumPoints, Transform transform, float flPrecisionDegrees, float flPrecisionInches, int nMaxFaces, int nMaxEdges, int nMaxVerts, int nAlgo )
+	{
+		RnHullSimplificationParams_t params;
+		params.m_flPrecisionDegrees = flPrecisionDegrees;
+		params.m_flPrecisionInches = flPrecisionInches;
+		params.m_nMaxFaces = nMaxFaces;
+		params.m_nMaxEdges = nMaxEdges;
+		params.m_nMaxVerts = nMaxVerts;
+		params.m_nAlgo = (HullSimplificationAlgorithm_t)nAlgo;
+
+		if ( RnHull_t *pHull = g_pPhysicsSystem->HullCreate( nNumPoints, pPoints, nullptr, &params ) )
+		{
+			pHull->Transform( transform.AsTransform().ToMatrix() );
+			self->AddHull( pHull );
+		}
+	}
+
+	inline void AddMesh( CastTo[Vector*] void* pVertices, uint nNumVertices, CastTo[uint32*] void* pIndices, uint nNumIndices, CastTo[uint8*] void* pMaterials )
+	{
+		if ( RnMesh_t *pMesh = g_pPhysicsSystem->MeshCreate( nNumIndices / 3, pIndices, pMaterials, nNumVertices, pVertices ) )
+		{
+			self->AddMesh( pMesh );
+		}
+	}
+}
+
+native static class MeshGlue as NativeEngine.MeshGlue
+{
+	IMesh CreateRenderMesh( IMaterial material, int nPrimType, string pName );
+	IModel CreateModel( CAnimationGroupBuilder anim, CPhysBodyDescArray pBodies, CBuilderMaterialGroupArray pMaterialGroups, float mass, StringToken surfaceProp, CastTo[float*] void* lodSwitchDistance, CastTo[HRenderMesh_InternalStrong**] void* meshes, int numMeshes, CastTo[int*] void* lodMasks, CastTo[MeshGroupMask_t*] void* meshGroupMasks, CastTo[SboxMeshGroupDesc_t*] void* meshGroups, int numMeshGroups, CastTo[Vector*] void* vertices, int numVertices, CastTo[uint32*] void* indices, int numIndices, CastTo[SboxSphereDesc_t*] void* spheres, int numSpheres, CastTo[SboxCapsuleDesc_t*] void* capsules, int numCapsules, CastTo[SboxBoxDesc_t*] void* boxes, int numBoxes, CastTo[SboxHullDesc_t*] void* hulls, int numHulls, CastTo[SboxMeshDesc_t*] void* meshShapes, int numMeshShapes, CastTo[SboxBoneDesc_t*] void* bones, int numBones, string boneNames, int startTraceVertex, int startTraceIndex, int numTraceVertices, int numTraceIndices, CastTo[MeshGroupMask_t] ulong _defaultMeshGroupMask );
+
+	int GetModelNumVertices( IModel model );
+	void GetModelVertices( IModel model, CastTo[SboxVertex_t*] void* vertices, uint numVertices );
+
+	int GetModelNumIndices( IModel model );
+	void GetModelIndices( IModel model, CastTo[uint32*] void* indices, uint numIndices );
+
+	int GetModelIndexCount( IModel model, int drawCall );
+	int GetModelIndexStart( IModel model, int drawCall );
+	int GetModelBaseVertex( IModel model, int drawCall );
+
+	void SetMeshMaterial( IMesh renderMesh, IMaterial material );
+	void SetMeshPrimType( IMesh renderMesh, int nPrimType );
+	void SetMeshBounds( IMesh renderMesh, Vector3 mins, Vector3 maxs );
+	void SetMeshUvDensity( IMesh renderMesh, float flDensity );
+
+	void SetMeshVertexRange( IMesh renderMesh, int startVertex, int vertexCount );
+	void SetMeshIndexRange( IMesh renderMesh, int startIndex, int indexCount );
+
+	void SetMeshVertexBuffer( IMesh renderMesh, VertexBufferHandle_t hVB, void* pData, int nDataSize );
+	void SetMeshIndexBuffer( IMesh renderMesh, IndexBufferHandle_t hIB, void* pData, int nDataSize );
+
+	VertexBufferHandle_t CreateVertexBuffer( int nElementSizeInBytes, int nElementCount, string fieldNames, CastTo[VertexField_t*] void* pFields, int nFields, void* pData, int nDataSize );
+	IndexBufferHandle_t CreateIndexBuffer( int nElementCount, bool b32Bit, void* pData, int nDataSize );
+
+	void* LockVertexBuffer( VertexBufferHandle_t hVB, int nDataSize, int nDataOffset );
+	void UnlockVertexBuffer( VertexBufferHandle_t hVB, void* pData, int nDataSize, int nDataOffset );
+
+	void* LockIndexBuffer( IndexBufferHandle_t hIB, int nDataSize, int nDataOffset );
+	void UnlockIndexBuffer( IndexBufferHandle_t hIB, void* pData, int nDataSize, int nDataOffset );
+
+	void SetVertexBufferData( VertexBufferHandle_t hVB, void* pData, int nDataSize, int nDataOffset );
+	void SetIndexBufferData( IndexBufferHandle_t hIB, void* pData, int nDataSize, int nDataOffset );
+
+	VertexBufferHandle_t SetVertexBufferSize( VertexBufferHandle_t hVB, int nDataSize );
+	IndexBufferHandle_t SetIndexBufferSize( IndexBufferHandle_t hIB, int nDataSize );
+
+	inline int TriangulatePolygon( CastTo[Vector*] void* pPolygonVerts, int nNumVerts, CastTo[int*] void* pOutIndexList, int nMaxIndices )
+	{
+		return TriangulatePolygon( pPolygonVerts, nNumVerts, pOutIndexList, nMaxIndices );
+	}
+
+	inline void ClipPolygonLineSegment( CastTo[Vector*] void* pPolygonVerts, int nNumVerts, Vector3 vA, Vector3 vB, CUtlVectorVector pOutSegmentPointsInside )
+	{
+		CTriangulatedPolygon polygon( pPolygonVerts, nullptr, nNumVerts );
+		polygon.ClipLineSegment( vA, vB, pOutSegmentPointsInside, nullptr );
+	}
+}

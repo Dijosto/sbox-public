@@ -1,0 +1,19 @@
+﻿
+
+native class QObject as Native.QObject
+{
+	void deleteLater();
+
+	QString objectName();
+    void setObjectName(QString name);
+
+	inline void setParent( QObject parent )
+	{
+		((QObject*)self)->setParent( parent );
+	}
+
+	void setProperty( string key, bool value );
+	void setProperty( string key, float value );
+	void setProperty( string key, string value );
+}
+

@@ -1,0 +1,9 @@
+﻿
+#include "pvs.h"
+
+
+native accessor g_pEnginePVSManager
+{
+	IPVS BuildPvs( IWorldReference world );
+	void DestroyPvs( IPVS pvs );
+}

@@ -1,0 +1,12 @@
+﻿
+#include "mapdoclib/mapinstance.h"
+
+// This is inherited from : CMapEntityIONode but I haven't done a bind for that
+// And I'm not sure if we even need anything from it yet.
+
+[Handle:Editor.MapDoc.MapInstance]
+native class CMapInstance as NativeMapDoc.CMapInstance : CMapNode
+{
+	void SetTarget( CMapNode node );
+	CMapNode GetTarget();
+}

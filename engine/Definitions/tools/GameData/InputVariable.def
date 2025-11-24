@@ -1,0 +1,34 @@
+﻿
+#include "fgdlib/gdvar.h"
+
+//
+// Vars
+//
+
+native class CGameDataVariable as Native.CGameDataVariable
+{
+    string GetName();
+	string GetLongName();
+	string GetDescription();
+	string GetGroupName();
+
+    void SetName( string name );
+    void SetLongName( string name );
+    void SetDescription( string name );
+    void SetGroupName( string name );
+    void SetMetadataFromString( string name );
+
+    void SetTypeFromString( string type );
+ 
+    void SetDefaultValue( string val );
+    void SetDefaultValueNumber( int val );
+
+    GDIVItemSet GetItemSet();
+}
+
+native class GDIVItemSet as Native.GDIVItemSet
+{
+    void AddFlagItem( int value, string caption, bool bDefault );
+    void AddChoiceItem( string name, string caption );
+    void AddTagItem( string name, string caption, bool bDefault, bool custom );
+}

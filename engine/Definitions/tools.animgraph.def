@@ -1,0 +1,23 @@
+ident "animgraph"
+nativedll tools/animgraph_editor.dll
+inherit "engine.def"
+inherit "tools.def"
+skipall "tools.def"
+
+
+// A static function to report exceptions to in C#
+exceptions	"Sandbox.Interop.BindingException"
+
+// Management classes will appear under this namespace
+namespace "Managed.SourceAnimgraph"
+
+// Paths are relative to the def file
+cpp "../../src/tools/animgraph_editor/interop.animgraph.cpp"
+hpp "../../src/tools/animgraph_editor/interop.animgraph.h"
+cs	"../Sandbox.Tools/Interop.Animgraph.cs"
+
+include "tier3"
+include "common/*"
+include "resources"
+include "tools/*"
+include "animgraph/*"

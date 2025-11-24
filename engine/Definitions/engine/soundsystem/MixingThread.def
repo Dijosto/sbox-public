@@ -1,0 +1,6 @@
+#include "sbox/media/mediainterface.h"
+
+managed static class Sandbox.Audio.MixingThread
+{
+	static void MixOneBuffer();
+}

@@ -1,0 +1,52 @@
+
+native enum KeyValues3Type_t;
+
+
+native class KeyValues3
+{
+	void DeleteThis(); [delete]
+	static KeyValues3 Create(); [new]
+
+	bool IsArray();
+	bool IsTable();
+
+	KeyValues3Type_t GetType();
+
+	bool GetValueBool();
+	int GetValueInt();
+	long GetValueInt64();
+	ulong GetValueUint64();
+	float GetValueFloat();
+	double GetValueDouble();
+	string GetValueString();
+	Vector3 GetValueVector();
+	Color GetValueColor();
+
+	void SetValueBool( bool o );
+	void SetValueString( string o );
+	void SetValueResourceString( string o );
+	void SetValueInt( int o );
+	void SetValueFloat( float o );
+
+	void SetMemberString( CastTo[CKV3MemberName] string key, string value );
+	void SetMemberInt( CastTo[CKV3MemberName] string key, int value );
+	void SetMemberFloat( CastTo[CKV3MemberName] string key, float value );
+
+	string GetMemberString( CastTo[CKV3MemberName] string key );
+	int GetMemberInt( CastTo[CKV3MemberName] string key, int defaultValue );
+	float GetMemberFloat( CastTo[CKV3MemberName] string key, float defaultValue );
+	Vector3 GetMemberVector( CastTo[CKV3MemberName] string key, Vector3 defaultValue );
+
+	void SetToEmptyArray();
+	int GetArrayLength();
+	KeyValues3 ArrayAddToTail();
+	KeyValues3 GetArrayElement( int i );
+
+	KeyValues3 FindOrCreateMember( CastTo[CKV3MemberName] string name );
+
+	void SetToEmptyTable();
+
+	int GetMemberCount();
+	KeyValues3 GetMember( int idx );
+	string GetMemberName( int idx );
+}

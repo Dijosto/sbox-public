@@ -1,0 +1,48 @@
+﻿
+#include "toolblock.h"
+#include "mapdoclib/options.h"
+#include "toolblock.h"
+
+// Glue for the geometry tool, we could do the entire thing in C# with some more APIs exposed and avoid all this.
+managed static class Editor.MapEditor.BlockToolGlue
+{
+    void BuildGeometry( CMapMesh mesh, CToolBlockState blockState );
+    QWidget BuildUI( CToolBlock tool );
+
+    void SetInProgress( bool inProgress );
+    void SetOverrideEntity( string entityName );
+}
+
+// Glue - we won't need this when we do the ray picking in C# too
+native class CToolBlock
+{
+    void OnObjectTypeChanged();
+    void SetPrimitiveType2D( bool primitiveIs2D );
+
+    inline bool GetOrientPrimitives()
+    {
+        return Options.view2d.bOrientPrimitives;
+    }
+
+    inline void SetOrientPrimitives( bool bOrientPrimitives )
+    {
+        Options.view2d.bOrientPrimitives = bOrientPrimitives;
+    }    
+
+    string m_OverrideMaterial;
+}
+
+native class CToolBlockState
+{
+    inline BBox GetAABBBounds()
+    {
+        return self->GetBounds().AsAABB();
+    }
+
+    cref CWorkPlane GetDragWorkPlane();
+}
+
+native class CWorkPlane
+{
+    Matrix GetWorkPlaneToWorldTransform();
+}

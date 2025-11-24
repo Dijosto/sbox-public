@@ -1,0 +1,19 @@
+native enum ESteamNetworkingConfigValue as Steamworks.NetConfig;
+
+native class ISteamNetworkingUtils
+{
+	inline void SetConfig( ESteamNetworkingConfigValue key, int value )
+	{
+	    self->SetGlobalConfigValueInt32( key, value );
+	}
+	
+	inline void SetConfig( ESteamNetworkingConfigValue key, string value )
+	{
+	    self->SetGlobalConfigValueString( key, value );
+	}
+	
+	inline void InitializeRelayNetwork()
+	{
+	    self->InitRelayNetworkAccess();
+	}
+}

@@ -1,0 +1,28 @@
+﻿
+
+native class CSystemTrayIcon : QObject
+{
+	static CSystemTrayIcon Create( QObject parent, Editor.TrayIcon managedObject ); [new]
+
+	void setIcon( QIcon icon );
+	inline void setIconFromPixmap( QPixmap icon )
+	{
+		QIcon qicon( *icon );
+		self->setIcon( qicon );
+	}
+
+	void setToolTip( QString tip );
+	bool isVisible();
+	void showMessage( QString title, QString msg, QIcon icon, int msecs );
+
+	void show();
+	void hide();
+
+	void setContextMenu(QMenu menu);
+}
+
+managed class Editor.TrayIcon
+{
+	void InternalActivated();
+	void InternalMessageClicked();
+}

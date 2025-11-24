@@ -1,0 +1,26 @@
+﻿
+#include "mapdoclib/mapmesh.h"
+
+[Handle:Editor.MapDoc.MapMesh]
+native class CMapMesh as NativeMapDoc.CMapMesh : CMapNode
+{
+    void AssignMaterialToMesh( string materialName );
+
+    //
+    // Gluey, just passes down to the CHammerPolyMesh really.
+    //
+    void ConstructFromData( int numVerticies, CastTo[Vector*] void* vertexPositions, CastTo[Vector2D*] void* vertexTexCoords, int numIndices, CastTo[int*] void* vertexIndices, int numFaces, CastTo[int*] void* faceVertexCounts, CastTo[HMaterialStrong**] void* faceMaterialsPtr, bool mergeVertices, float vertexMergeTolerance );
+
+    inline void GetFaceMaterials( CUtlVectorString materials )
+	{
+    	CHammerPolyMesh &mesh = this->GetMesh();
+		for ( CHammerPolyMesh::FaceHandle_t hFace = mesh.GetFirstFace(); hFace != mesh.InvalidFace(); hFace = mesh.GetNextFace( hFace ) )
+		{
+			const char *pName = mesh.GetFaceMaterialName( hFace );
+			if ( pName )
+			{
+				materials->AddToTail( pName );
+			}
+		}
+    }
+}

@@ -1,0 +1,40 @@
+﻿
+native class QLabel as Native.QLabel : QFrame
+{
+	static QLabel Create( QWidget parent ); [new]
+	static QLabel Create( qstring title, QWidget parent ); [new]
+
+	void setText( qstring text );
+	qstring text();
+
+	void setWordWrap(bool on);
+	bool wordWrap();
+
+	int indent();
+	void setIndent(int);
+
+	int margin();
+	void setMargin(int);
+
+	int alignment();
+	void setAlignment( CastTo[Qt::Alignment] int flag );
+
+	bool openExternalLinks();
+	void setOpenExternalLinks(bool open);
+
+	bool hasSelectedText();
+	QString selectedText();
+
+	void setTextInteractionFlags( TextInteractionFlags flags);
+    TextInteractionFlags textInteractionFlags();
+}
+
+native class CLabel
+{
+	static CLabel CreateLabel( QWidget parent, Editor.Label managedobj ); [new]
+}
+
+managed class Editor.Label : Editor.Widget
+{
+
+}

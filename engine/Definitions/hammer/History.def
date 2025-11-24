@@ -1,0 +1,26 @@
+
+#include "mapdoclib/history.h"
+
+native class CHistory as NativeHammer.CHistory
+{
+	void MarkUndoPosition( CSelection pSelection, string pszName );
+	void Keep( CMapNode pUndoable );
+	void KeepNew( CMapNode pUndoable );
+
+	inline static CHistory GetHistory()
+	{
+		return GetHistory();
+	}
+}
+
+native class CSavedObjects as NativeHammer.CSavedObjects
+{
+	void DeleteThis(); [delete]
+	static CSavedObjects Create(); [new]
+
+	void RemoveAll();
+	void SaveObject( CMapNode pObject );
+
+	void RestoreObjects();
+	int Count();
+}

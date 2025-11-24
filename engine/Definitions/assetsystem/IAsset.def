@@ -1,0 +1,151 @@
+﻿
+#include "assetsystem/iassetsystem.h"
+#include "toolframework2/itoolframework2.h"
+
+native enum AssetLocation_t;
+native enum AssetRelatedPathType_t;
+
+native class CUtlVector<IAsset*> as NativeEngine.CUtlVectorAsset
+{
+	void DeleteThis(); [delete]
+	static CUtlVectorAsset Create( int growsize, int initialcapacity ); [new]
+
+	int Count();
+	IAsset Element( int i );
+}
+
+native class IAsset
+{
+	string GetFriendlyName_Transient();
+	string GetRelativePath_Transient( AssetLocation_t source );
+	string GetAbsolutePath_Transient( AssetLocation_t source );
+	bool HasAnyFiles();
+	bool IsCached();
+	bool CanReload();
+	bool CanRecompile();
+	uint GetAssetIndexInt();
+	bool OpenInTool();
+
+	inline bool OpenInSecondaryTool( string tool )
+	{
+		EngineToolID_t nEditorTool = g_pToolFramework2->FindEngineTool( tool );
+		if ( nEditorTool == ENGINE_TOOL_INVALID )
+			return false;
+
+		CUtlVector< IAsset* > assetFiles;
+		assetFiles.AddToTail( self );
+		g_pToolFramework2->GetEngineToolByID( nEditorTool )->OpenInTool( assetFiles );
+
+		return true;
+	}
+
+	void GetAssetsIDependOn( CUtlVectorAsset pOutAssetsIDependOn, bool bDeep );
+	void GetAssetsIParent(  CUtlVectorAsset pOutChildren, bool bDeep );
+	void GetAssetsIReference(  CUtlVectorAsset pOutReferencers, bool bDeep );
+	void GetAssetsDependingOnMe( CUtlVectorAsset pOutDependencies, bool bDeep );
+	void GetAssetsReferencingMe( CUtlVectorAsset pOutReferencers, bool bDeep );
+	void GetAssetsParentingMe( CUtlVectorAsset pOutParents, bool bDeep );
+
+	int AdditionalRelatedFileCount();
+	int AdditionalInputDependencyCount();
+	string GetAdditionalRelatedFile_Transient( int nIndex );
+	string GetAdditionalInputDependency_Transient( int nIndex );
+
+	inline void GetUnrecognizedRelatedPaths( AssetRelatedPathType_t filterType, CUtlVectorString paths )
+	{
+		int nUnrecognized = this->UnrecognizedRelatedPathCount( filterType );
+		for ( int iAsset = 0; iAsset < nUnrecognized; ++iAsset )
+		{
+			CUtlString pathVal;
+			AssetRelatedPathType_t nGarbage;
+			bool bOptional;
+
+			if ( !this->GetUnrecognizedRelatedPath( filterType, iAsset, &pathVal, &nGarbage, &bOptional ) )
+			{
+				continue;
+			}
+
+			paths->AddToTail( pathVal );
+		}
+	}
+
+	void RequireDependencyInfo_Virtual();
+	bool NeedAnyDependencyUpdate_Virtual();
+
+	bool IsTrivialChildAsset();
+	bool HasHiddenAssetFlag();
+
+	inline int GetAssetTypeId()
+	{
+		return this->GetType()->GetIndex();
+	}
+
+	virtual void CacheAsset( bool bIsBlocking );
+	virtual void UncacheAsset();
+
+	inline bool HasSourceFile()
+	{
+		return this->HasFileInLocation( ASSET_LOCATION_CONTENT );
+	}
+
+	inline bool HasCompiledFile()
+	{
+		return this->HasFileInLocation( ASSET_LOCATION_GAME );
+	}
+
+	inline bool IsCompiled()
+	{
+		// Must have a resource type
+		bool bResourceAsset = ( this->GetResourceType() != RESOURCE_TYPE_NONE );
+		if ( false == bResourceAsset )
+			return false;
+
+		// Must have a file in GAME
+		if ( !this->HasFileInLocation( ASSET_LOCATION_GAME ) )
+			return false;
+
+		return true;
+	}
+
+	inline bool IsCompiledAndUpToDate()
+	{
+		return this->CompileState() == ASSET_FILE_COMPILED;
+	}
+
+	inline bool IsCompileFailed()
+	{
+		return this->CompileState() == ASSET_FILE_COMPILE_FAILED;
+	}
+
+	inline bool CompileIfNeeded()
+	{
+		return this->RecompileAsset( COMPILE_AS_NEEDED );
+	}
+
+	inline int FindIntEditInfo( string name )
+	{
+		int output = 0;
+		this->FindIntEditInfo( name, &output );
+		return output;
+	}
+
+	inline string FindStringEditInfo( string name )
+	{
+		CUtlString output;
+		this->FindStringEditInfo( name, &output );
+		return output;
+	}
+
+	string GetCompileStateReason_Transient();
+
+
+	inline bool SetInMemoryReplacement( string data )
+	{
+		CUtlBuffer buf( 0, 0, CUtlBuffer::TEXT_BUFFER );
+		buf.PutString( data );
+		return self->CompileAndReplaceResource( buf );
+	}
+
+	void DiscardInMemoryReplacement();
+}
+

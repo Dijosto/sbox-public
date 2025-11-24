@@ -1,0 +1,170 @@
+﻿native enum RenderPrimitiveType_t as NativeEngine.RenderPrimitiveType
+native enum RenderTextureDimension_t as NativeEngine.RenderTextureDimension
+native enum RenderShaderType_t as NativeEngine.RenderShaderType
+native enum RenderColorSpace_t as NativeEngine.RenderColorSpace
+
+native enum RsFilter_t is Sandbox.Rendering.FilterMode;
+native enum RsTextureAddressMode_t is Sandbox.Rendering.TextureAddressMode;
+native enum RsComparison_t is NativeEngine.ComparisonMode;
+
+native enum RenderBarrierAccessFlags_t is NativeEngine.RenderBarrierAccessFlags_t;
+native enum RenderBarrierPipelineStageFlags_t is NativeEngine.RenderBarrierPipelineStageFlags_t;
+
+native pointer VertexBufferHandle_t as NativeEngine.VertexBufferHandle_t
+native pointer IndexBufferHandle_t as NativeEngine.IndexBufferHandle_t
+native pointer RenderShaderHandle_t as NativeEngine.RenderShaderHandle_t
+
+native enum RenderImageLayout_t is NativeEngine.RenderImageLayout_t;
+
+native class IReadTexturePixelsCallback as NativeEngine.IReadTexturePixelsCallback
+{
+}
+
+native class IReadBufferCallback as NativeEngine.IReadBufferCallback
+{
+}
+
+native class IRenderContext as NativeEngine.IRenderContext
+{
+	void Draw( RenderPrimitiveType type, int nFirstVertex, int nVertexCount );
+	void DrawInstanced( RenderPrimitiveType type, int nFirstVertex, int nVertexCountPerInstance, int nInstanceCount );
+	void DrawIndexed( RenderPrimitiveType type, int nFirstIndex, int nIndexCount, int nMaxVertexCount, int nBaseVertex );
+	void DrawIndexedInstanced( RenderPrimitiveType type, int nFirstIndex, int nIndexCountPerInstance, int nInstanceCount, int nMaxVertexCount, int nBaseVertex );
+	void DrawInstancedIndirect( RenderPrimitiveType type, RenderBufferHandle_t hDrawArgBuffer, uint nBufferOffset );
+	void DrawIndexedInstancedIndirect( RenderPrimitiveType type, RenderBufferHandle_t hDrawArgBuffer, uint nBufferOffset );
+
+	inline void TextureBarrierTransition( ITexture hSrc, int mips, RenderBarrierPipelineStageFlags_t srcStage, RenderBarrierPipelineStageFlags_t dstStage, RenderImageLayout_t layout, RenderBarrierAccessFlags_t srcFlags, RenderBarrierAccessFlags_t dstFlags )
+	{
+		RenderUAVBarrier_t uavBarrier { hSrc, srcStage, dstStage, srcFlags, dstFlags, -1, -1, layout };
+
+		self->TextureBarrier( 1, &hSrc, &layout );
+		self->UAVBarrier( 1, &uavBarrier );
+	}
+
+	inline void BufferBarrierTransition( RenderBufferHandle_t hSrc, RenderBarrierPipelineStageFlags_t srcStage, RenderBarrierPipelineStageFlags_t dstStage, RenderBarrierAccessFlags_t srcFlags, RenderBarrierAccessFlags_t dstFlags )
+	{
+		self->BufferBarrier( RenderBufferBarrier_t{ hSrc, srcStage, dstStage, srcFlags, dstFlags } );
+	}
+
+	void SetScissorRect( NativeRect rect );
+
+	CRenderAttributes GetAttributesPtrForModify();
+
+	void GenerateMipMaps( ITexture material );
+
+	inline void Clear( Vector4 col, bool clearColor, bool clearDepth, bool clearStencil )
+	{
+		RenderClearFlags_t flags = (RenderClearFlags_t)0;
+
+		if ( clearColor )  flags |= RENDER_CLEAR_FLAGS_CLEAR_COLOR;
+		if ( clearDepth )  flags |= RENDER_CLEAR_FLAGS_CLEAR_DEPTH;
+		if ( clearStencil )  flags |= RENDER_CLEAR_FLAGS_CLEAR_STENCIL;
+
+		self->Clear( col, flags );
+	}
+
+	inline void BindRenderTargets( ITexture colorTexture, ITexture depthTexture, ISceneLayer layer )
+	{
+		// We can have a layer that only renders to color but if we only bind depth assume we want to blit to main framebuffer
+		if( colorTexture == RENDER_TEXTURE_HANDLE_INVALID )
+			colorTexture = layer->GetRenderTargetDesc().m_pColorTargets[0];
+
+		RenderTargetDesc_t rtDesc( colorTexture, depthTexture, RENDER_SRGB );
+		
+		self->BindRenderTargets( rtDesc );
+	}
+
+	inline void RestoreRenderTargets( ISceneLayer layer )
+	{
+		self->BindRenderTargets( layer->GetRenderTargetDesc() );
+	}
+
+	inline void SetViewport( Rect_t rect )
+	{
+		RenderViewport_t vp;
+		vp.Init( rect );
+		self->SetViewports( 1, &vp );
+	}
+
+	inline void SetViewport( RenderViewport_t viewport )
+	{
+		self->SetViewports( 1, &viewport );
+	}
+
+	inline void SetViewport( int x, int y, int w, int h )
+	{
+		RenderViewport_t vp;
+		vp.Init( x, y, w, h );
+		self->SetViewports( 1, &vp );
+	}
+
+	inline RenderViewport_t GetViewport()
+	{
+		RenderViewport_t viewport;
+		self->GetViewport( &viewport, 0 );
+		return viewport;
+	}
+
+	void Submit();
+	void SetAssociatedThreadIndex();
+
+	inline void BindRenderTargets( SwapChainHandle_t swapChain, bool color, bool depth )
+	{
+		self->BindRenderTargets( RenderTargetDesc_t( swapChain, color, depth ) );
+	}
+	
+	bool BindIndexBuffer( IndexBufferHandle_t hIndexBuffer, int nOffset );
+	bool BindIndexBuffer( RenderBufferHandle_t hIndexBuffer, int nIndexSize, int nOffset );
+	bool BindVertexBuffer( int nSlot, VertexBufferHandle_t hVertexBuffer, int nOffset );
+	bool BindVertexBuffer( int nSlot, VertexBufferHandle_t hVertexBuffer, int nOffset, int nStride );
+	bool BindVertexBuffer( int nSlot, RenderBufferHandle_t hVertexBuffer, int nOffset );
+	bool BindVertexBuffer( int nSlot, RenderBufferHandle_t hVertexBuffer, int nOffset, int nStride );
+
+	inline void BindVertexShader( RenderShaderHandle_t hVertexShader, VertexBufferHandle_t hInputLayout )
+	{
+		self->BindVertexShader( hVertexShader, self->GetInputLayoutForVertexBuffer( hInputLayout ) );
+	}
+
+	inline void BindPixelShader( RenderShaderHandle_t hShader )
+	{
+		self->BindShader( RENDER_PIXEL_SHADER, hShader );
+	}
+
+	inline void SetDynamicConstantBufferData( RenderShaderType shaderType, void* pData, int nSize, int slot )
+	{
+		DynamicLockDesc_t lock;
+		ConstantBufferHandle_t hConstantBuffer = self->LockDynamicConstantBuffer( nSize, &lock );
+
+		if ( lock.m_pMemory != nullptr )
+		{
+			V_memcpy( lock.m_pMemory, pData, nSize );
+
+			self->UnlockDynamicConstantBuffer( hConstantBuffer, nSize );
+
+			self->BindConstantBuffer( shaderType, hConstantBuffer, 0 );
+		}
+	}
+
+	inline void BindTexture( int nTextureIndex, ITexture hTexture )
+	{
+		self->SetSamplerStatePS( 0, RS_FILTER_MIN_MAG_MIP_POINT, RS_TEXTURE_ADDRESS_WRAP, RS_TEXTURE_ADDRESS_WRAP, RS_TEXTURE_ADDRESS_WRAP );
+		self->BindTexture( nTextureIndex, hTexture, RENDER_TEXTURE_DIMENSION_2D, RENDER_PIXEL_SHADER, RENDER_SRGB );
+	}
+
+	inline void ReadTexturePixels(ITexture hTexture, IReadTexturePixelsCallback pCallback, NativeRect srcRect, int nSrcSlice, int nSrcMip, bool bDeleteCallbackWhenFinished )
+	{
+		Rect_t* pSrcRect = nullptr;
+		if ( !srcRect.IsEmpty() )
+		{
+			pSrcRect = &srcRect;
+		}
+		self->ReadTexturePixels( hTexture, pCallback, pSrcRect, nSrcSlice, nSrcMip, bDeleteCallbackWhenFinished );
+	}
+
+	void ReadBuffer( RenderBufferHandle_t hBuffer, IReadBufferCallback pCallback, int nOffset, int nBytesToRead, bool bDeleteCallbackWhenFinished );
+	
+	// PIX/RenderDoc markers
+	void BeginPixEvent( string name );
+	void EndPixEvent();
+	void PixSetMarker( string name );
+}

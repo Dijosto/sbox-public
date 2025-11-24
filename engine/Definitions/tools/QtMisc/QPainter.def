@@ -1,0 +1,136 @@
+﻿
+native enum QPainter::CompositionMode as CompositionMode
+
+native class QPainter 
+{
+	static QPainter Create( QPixmap pix ); [new]
+	void DeleteThis(); [delete]
+
+	void setCompositionMode(CompositionMode mode);
+
+	void drawLine( QPoint p1, QPoint p2 );
+	void drawRoundedRect( QRectF rect, float xRadius, float yRadius );
+	void drawRect( QRectF rect );
+	void drawEllipse( QRectF r);
+
+	float opacity();
+    void setOpacity(float opacity);
+
+	void setBrush( cref QBrush brush );
+	void setPen( cref QPen pen );
+
+	void drawText( QRectF r, int flags, QString text, out QRectF size );
+
+	inline QRectF MeasureText( QRectF rect, int flags, QString text)
+	{
+		auto oldpen = self->pen();
+		self->setPen( QPen( Qt::red ) );
+		QRectF r = self->boundingRect( rect, flags, text);
+		self->setPen( oldpen );
+
+		return r;
+	}
+
+	void translate( QPointF offset);
+	void resetTransform();
+    void scale( float sx, float sy);
+    void shear(float sh, float sv);
+    void rotate(float a);
+
+	void drawPoint( QPointF pt);
+
+	void setRenderHint( QPainter::RenderHint hint, bool on );
+
+	inline void drawPixmap( QRectF r, cref QPixmap pm, QRectF s, float alpha )
+	{
+		float f = self->opacity();
+		self->setOpacity( alpha * f );
+		self->drawPixmap( r, pm, s );
+		self->setOpacity( f );
+	}
+	void drawTiledPixmap( QRectF rect, cref QPixmap pm, QPointF offset );
+	void drawArc( QRectF rect, float a, float alen );
+	void drawPie( QRectF rect, float a, float alen );
+
+	inline void DrawPoly( QPoint[] points, int pointsCount )
+	{
+		QPolygonF polygon( pointsCount );
+		for ( int i=0; i<pointsCount; i++) polygon[i] = QPointF(points[i].x, points[i].y);
+
+		this->drawPolygon( polygon );
+	}
+
+	inline void DrawPoints( QPoint[] points, int pointsCount )
+	{
+		QPolygonF polygon( pointsCount );
+		for ( int i=0; i<pointsCount; i++) polygon[i] = QPointF(points[i].x, points[i].y);
+
+		this->drawPoints( polygon );
+	}
+
+	inline void DrawPolyLine( QPoint[] points, int pointsCount )
+	{
+		QPolygonF polygon( pointsCount );
+		for ( int i=0; i<pointsCount; i++) polygon[i] = QPointF(points[i].x, points[i].y);
+
+		this->drawPolyline( polygon );
+	}
+
+	inline void setBrush( QColor color )
+	{
+		this->setBrush( QBrush( color ) );
+	}
+
+	inline void clearBrush()
+	{
+		this->setBrush( QBrush( Qt::BrushStyle::NoBrush ) );
+	}
+
+	inline void setBrush( QPixmap pixmap )
+	{
+		if ( pixmap == nullptr ) return;
+		this->setBrush( QBrush( *pixmap ) );
+	}
+
+	inline void setPen( QColor color, float size, int style )
+	{
+		QPen pen( color );
+		pen.setWidth( size );
+		pen.setStyle( (Qt::PenStyle) style );
+		this->setPen( pen );
+	}
+
+	inline void clearPen()
+	{
+		QPen pen( Qt::PenStyle::NoPen );
+		this->setPen( pen );
+	}
+
+	inline void setBrushLinear( Vector2 from, Vector2 to, float apos, QColor a, float bpos, QColor b )
+	{
+		QLinearGradient gradient( from.x, from.y, to.x, to.y );
+		gradient.setColorAt(apos, a);
+		gradient.setColorAt(bpos, b);
+
+		QBrush brush(gradient);
+		this->setBrush( brush );
+	}
+
+	inline void setBrushRadial( Vector2 center, float radius, float apos, QColor a, float bpos, QColor b )
+	{
+		QRadialGradient gradient( center.x, center.y, radius );
+		gradient.setColorAt(apos, a);
+		gradient.setColorAt(bpos, b);
+
+		QBrush brush(gradient);
+		this->setBrush( brush );
+	}
+
+	inline void drawPixels( void* ptr, int width, int height )
+	{
+	    QImage img((uchar *)(ptr), width, height, QImage::Format_RGBA8888);
+		self->drawImage( QRect( 0, 0, width / self->device()->devicePixelRatioF(), height / self->device()->devicePixelRatioF() ), img, QRect( 0, 0, width, height ), Qt::NoFormatConversion | Qt::NoOpaqueDetection );
+	}
+
+
+}

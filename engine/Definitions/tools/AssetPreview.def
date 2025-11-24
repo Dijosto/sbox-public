@@ -1,0 +1,6 @@
+﻿
+managed static class Editor.AssetThumbnail
+{
+	QPixmap GetAssetThumb( uint index );
+	void RefreshThumbnail( uint index );
+}

@@ -1,0 +1,387 @@
+﻿using System;
+
+namespace Editor;
+
+/// <summary>
+/// Information about a <see cref="Widget"/>s mouse event.
+/// </summary>
+public ref struct MouseEvent
+{
+	QMouseEvent ptr;
+
+	internal MouseEvent( QMouseEvent ptr )
+	{
+		this.ptr = ptr;
+		KeyboardModifiers = QtHelpers.Translate( ptr.modifiers() );
+	}
+
+	/// <summary>
+	/// Whether the event was triggered by the left mouse button.
+	/// </summary>
+	public readonly bool LeftMouseButton => (Button == MouseButtons.Left);
+
+	/// <summary>
+	/// Whether the event was triggered by the left mouse button.
+	/// </summary>
+	public readonly bool RightMouseButton => (Button == MouseButtons.Right);
+
+	/// <summary>
+	/// Whether the event was triggered by the left mouse button.
+	/// </summary>
+	public readonly bool MiddleMouseButton => (Button == MouseButtons.Middle);
+
+	/// <summary>
+	/// The current mouse button state.
+	/// </summary>
+	public readonly MouseButtons ButtonState => ptr.buttons();
+
+	/// <summary>
+	/// The mouse button that triggered the event.
+	/// </summary>
+	public readonly MouseButtons Button => ptr.button();
+
+	/// <summary>
+	/// Position of the mouse cursor relative to the widgets top left corner.
+	/// </summary>
+	public readonly Vector2 LocalPosition => (Vector2)ptr.localPos();
+
+	/// <summary>
+	/// Position of the mouse cursor relative to the top left corner of the window the widget belongs to.
+	/// </summary>
+	public readonly Vector2 WindowPosition => (Vector2)ptr.windowPos();
+
+	/// <summary>
+	/// Absolute position of the mouse cursor on the screen.
+	/// </summary>
+	public readonly Vector2 ScreenPosition => (Vector2)ptr.screenPos();
+
+	/// <summary>
+	/// The keyboard modifier keys that were held down at the moment the event triggered.
+	/// </summary>
+	public KeyboardModifiers KeyboardModifiers { get; set; }
+
+	/// <summary>
+	/// Whether <c>Shift</c> key was being held down at the time of the event.
+	/// </summary>
+	public readonly bool HasShift => KeyboardModifiers.Contains( KeyboardModifiers.Shift );
+
+	/// <summary>
+	/// Whether <c>Control</c> key was being held down at the time of the event.
+	/// </summary>
+	public readonly bool HasCtrl => KeyboardModifiers.Contains( KeyboardModifiers.Ctrl );
+
+	/// <summary>
+	/// Whether <c>Alt</c> key was being held down at the time of the event.
+	/// </summary>
+	public readonly bool HasAlt => KeyboardModifiers.Contains( KeyboardModifiers.Alt );
+
+	/// <summary>
+	/// Whether this event should be propagated to parent widgets (<see langword="false"/>) or not (<see langword="true"/>).
+	/// </summary>
+	public readonly bool Accepted
+	{
+		get => ptr.isAccepted();
+		set => ptr.setAccepted( value );
+	}
+
+	/// <summary>
+	/// Whether this mouse event was a double click.
+	/// </summary>
+	public bool IsDoubleClick { get; internal set; }
+}
+
+/// <summary>
+/// Information about a <see cref="Widget"/>s keyboard event.
+/// </summary>
+public ref struct KeyEvent
+{
+	internal QKeyEvent ptr;
+
+	internal KeyEvent( QKeyEvent ptr )
+	{
+		this.ptr = ptr;
+		Key = (KeyCode)ptr.key();
+		Text = ptr.text();
+		NativeKeyCode = ptr.nativeVirtualKey();
+		NativeScanCode = ptr.nativeScanCode();
+		KeyboardModifiers = QtHelpers.Translate( ptr.modifiers() );
+		Name = GetKeyName();
+
+		if ( Key == KeyCode.Backspace ) Text = "";
+		if ( Key == KeyCode.Delete ) Text = "";
+		if ( Key == KeyCode.Left ) Text = "";
+		if ( Key == KeyCode.Right ) Text = "";
+		if ( Key == KeyCode.Up ) Text = "";
+		if ( Key == KeyCode.Down ) Text = "";
+		if ( Key == KeyCode.Escape ) Text = "";
+		if ( Key == KeyCode.Home ) Text = "";
+		if ( Key == KeyCode.End ) Text = "";
+		if ( Key == KeyCode.PageUp ) Text = "";
+		if ( Key == KeyCode.PageDown ) Text = "";
+	}
+
+	/// <summary>
+	/// The key that triggered this event.
+	/// </summary>
+	public KeyCode Key { get; set; }
+
+	/// <summary>
+	/// Text the <see cref="Key"/> would type in a text field.
+	/// </summary>
+	public string Text { get; set; }
+
+	/// <summary>
+	/// The name of the key that triggered this event.
+	/// </summary>
+	public string Name { get; set; }
+
+	/// <summary>
+	/// OS specific key code that triggered this event.
+	/// </summary>
+	public uint NativeKeyCode { get; set; }
+
+	/// <summary>
+	/// The native scan code.
+	/// </summary>
+	public uint NativeScanCode { get; set; }
+
+	/// <inheritdoc cref="MouseEvent.KeyboardModifiers"/>
+	public KeyboardModifiers KeyboardModifiers { get; set; }
+
+	/// <inheritdoc cref="MouseEvent.HasShift"/>
+	public readonly bool HasShift => KeyboardModifiers.Contains( KeyboardModifiers.Shift );
+
+	/// <inheritdoc cref="MouseEvent.HasCtrl"/>
+	public readonly bool HasCtrl => KeyboardModifiers.Contains( KeyboardModifiers.Ctrl );
+
+	/// <inheritdoc cref="MouseEvent.HasAlt"/>
+	public readonly bool HasAlt => KeyboardModifiers.Contains( KeyboardModifiers.Alt );
+
+	/// <inheritdoc cref="MouseEvent.Accepted"/>
+	public readonly bool Accepted
+	{
+		get => ptr.isAccepted();
+		set => ptr.setAccepted( value );
+	}
+
+	public string GetButtonCodeName()
+	{
+		var name = Name.ToUpperInvariant();
+		switch ( name )
+		{
+			case "LEFT": return "LEFTARROW";
+			case "RIGHT": return "RIGHTARROW";
+			case "UP": return "UPARROW";
+			case "DOWN": return "DOWNARROW";
+		}
+		return name;
+	}
+
+	string GetKeyName()
+	{
+		// Check if the key is a native key that isn't supported by KeyCode
+		switch ( NativeKeyCode )
+		{
+			case 0x0D: return "Enter"; // Enter
+			case 0x20: return "Space"; // Spacebar
+			case 0x30: return "0"; // Main keyboard 0
+			case 0x31: return "1"; // Main keyboard 1
+			case 0x32: return "2"; // Main keyboard 2
+			case 0x33: return "3"; // Main keyboard 3
+			case 0x34: return "4"; // Main keyboard 4
+			case 0x35: return "5"; // Main keyboard 5
+			case 0x36: return "6"; // Main keyboard 6
+			case 0x37: return "7"; // Main keyboard 7
+			case 0x38: return "8"; // Main keyboard 8
+			case 0x39: return "9"; // Main keyboard 9
+			case 0x3B: return ";"; // Semicolon
+			case 0x41: return "A";
+			case 0x42: return "B";
+			case 0x43: return "C";
+			case 0x44: return "D";
+			case 0x45: return "E";
+			case 0x46: return "F";
+			case 0x47: return "G";
+			case 0x48: return "H";
+			case 0x49: return "I";
+			case 0x4A: return "J";
+			case 0x4B: return "K";
+			case 0x4C: return "L";
+			case 0x4D: return "M";
+			case 0x4E: return "N";
+			case 0x4F: return "O";
+			case 0x50: return "P";
+			case 0x51: return "Q";
+			case 0x52: return "R";
+			case 0x53: return "S";
+			case 0x54: return "T";
+			case 0x55: return "U";
+			case 0x56: return "V";
+			case 0x57: return "W";
+			case 0x58: return "X";
+			case 0x59: return "Y";
+			case 0x5A: return "Z";
+			case 0x60: return "KP_0"; // Numpad 0
+			case 0x61: return "KP_1"; // Numpad 1
+			case 0x62: return "KP_2"; // Numpad 2
+			case 0x63: return "KP_3"; // Numpad 3
+			case 0x64: return "KP_4"; // Numpad 4
+			case 0x65: return "KP_5"; // Numpad 5
+			case 0x66: return "KP_6"; // Numpad 6
+			case 0x67: return "KP_7"; // Numpad 7
+			case 0x68: return "KP_8"; // Numpad 8
+			case 0x69: return "KP_9"; // Numpad 9
+			case 0x6A: return "KP_Multiply"; // Numpad *
+			case 0x6B: return "KP_Add"; // Numpad +
+			case 0x6D: return "KP_Minus"; // Numpad -
+			case 0x6E: return "KP_Del"; // Numpad .
+			case 0x6F: return "KP_Divide"; // Numpad /
+			case 0xBC: return ","; // Comma
+			case 0xBE: return "."; // Period
+			case 0xBF: return "/"; // Slash
+			case 0xC0: return "`"; // Tilde
+			case 0xDB: return "["; // Left bracket
+			case 0xDC: return "\\"; // Backslash
+			case 0xDD: return "]"; // Right bracket
+			case 0xDE: return "'"; // Apostrophe
+		}
+
+		// If it's a Keycode, then remap a few keys to their more common names
+		switch ( Key )
+		{
+			case KeyCode.Delete: return "Del";
+			case KeyCode.Escape: return "Esc";
+			case KeyCode.Insert: return "Ins";
+			case KeyCode.Control: return "Ctrl";
+			case KeyCode.BracketLeft: return "[";
+			case KeyCode.BracketRight: return "]";
+			case KeyCode.Equal: return "=";
+			case KeyCode.Minus: return "-";
+			case KeyCode.Comma: return ",";
+			case KeyCode.Period: return ".";
+			case KeyCode.Semicolon: return ";";
+			case KeyCode.Apostrophe: return "'";
+			case KeyCode.Backslash: return "\\";
+			case KeyCode.AsciiTilde: return "`";
+			case KeyCode.Slash: return "/";
+			case KeyCode.Enter: return "Enter";
+		}
+
+		// Otherwise, just return the name of the Enum
+		var keyName = Enum.GetName( typeof( KeyCode ), Key );
+
+		// If keyName is null then we likely have a non-english keyboard layout
+		if ( keyName is null )
+		{
+			// Try to get the key name from the text
+			keyName = Text;
+		}
+
+		return keyName;
+	}
+}
+
+/// <summary>
+/// Information about a <see cref="Widget"/>s context menu event.
+/// </summary>
+public ref struct ContextMenuEvent
+{
+	internal QContextMenuEvent ptr;
+
+	/// <inheritdoc cref="MouseEvent.LocalPosition"/>
+	public readonly Vector2 LocalPosition => (Vector2)ptr.pos();
+
+	/// <inheritdoc cref="MouseEvent.ScreenPosition"/>
+	public readonly Vector2 ScreenPosition => (Vector2)ptr.globalPos();
+
+	/// <inheritdoc cref="MouseEvent.Accepted"/>
+	public readonly bool Accepted
+	{
+		get => ptr.isAccepted();
+		set => ptr.setAccepted( value );
+	}
+}
+
+/// <summary>
+/// Information about a <see cref="GraphicsItem"/>s mouse click event.
+/// </summary>
+public ref struct GraphicsMouseEvent
+{
+	internal QGraphicsSceneMouseEvent ptr;
+
+	internal GraphicsMouseEvent( QGraphicsSceneMouseEvent ptr )
+	{
+		this.ptr = ptr;
+		KeyboardModifiers = QtHelpers.Translate( ptr.modifiers() );
+	}
+
+	// Button seems to be used for release so check both
+	/// <inheritdoc cref="MouseEvent.LeftMouseButton"/>
+	public readonly bool LeftMouseButton => (Buttons & MouseButtons.Left) != 0 || (Button == MouseButtons.Left);
+
+	/// <inheritdoc cref="MouseEvent.RightMouseButton"/>
+	public readonly bool RightMouseButton => (Buttons & MouseButtons.Right) != 0 || (Button == MouseButtons.Right);
+
+	/// <inheritdoc cref="MouseEvent.MiddleMouseButton"/>
+	public readonly bool MiddleMouseButton => (Buttons & MouseButtons.Middle) != 0 || (Button == MouseButtons.Middle);
+
+	/// <inheritdoc cref="MouseEvent.ButtonState"/>
+	public readonly MouseButtons Buttons => ptr.buttons();
+
+	/// <inheritdoc cref="MouseEvent.Button"/>
+	public readonly MouseButtons Button => ptr.button();
+
+	/// <inheritdoc cref="MouseEvent.LocalPosition"/>
+	public readonly Vector2 LocalPosition => (Vector2)ptr.pos();
+
+	/// <summary>
+	/// Position of the mouse cursor within the <see cref="GraphicsScene"/>.
+	/// </summary>
+	public readonly Vector2 ScenePosition => (Vector2)ptr.scenePos();
+
+	/// <inheritdoc cref="MouseEvent.ScreenPosition"/>
+	public readonly Vector2 ScreenPosition => (Vector2)ptr.screenPos();
+
+	/// <inheritdoc cref="MouseEvent.KeyboardModifiers"/>
+	public KeyboardModifiers KeyboardModifiers { get; set; }
+
+	/// <inheritdoc cref="MouseEvent.HasShift"/>
+	public readonly bool HasShift => KeyboardModifiers.Contains( KeyboardModifiers.Shift );
+
+	/// <inheritdoc cref="MouseEvent.HasCtrl"/>
+	public readonly bool HasCtrl => KeyboardModifiers.Contains( KeyboardModifiers.Ctrl );
+
+	/// <inheritdoc cref="MouseEvent.HasAlt"/>
+	public readonly bool HasAlt => KeyboardModifiers.Contains( KeyboardModifiers.Alt );
+
+	/// <inheritdoc cref="MouseEvent.Accepted"/>
+	public readonly bool Accepted
+	{
+		get => ptr.isAccepted();
+		set => ptr.setAccepted( value );
+	}
+}
+
+/// <summary>
+/// Information about a <see cref="GraphicsItem"/>s mouse hover event.
+/// </summary>
+public ref struct GraphicsHoverEvent
+{
+	internal QGraphicsSceneHoverEvent ptr;
+
+	/// <inheritdoc cref="MouseEvent.LocalPosition"/>
+	public readonly Vector2 LocalPosition => (Vector2)ptr.pos();
+
+	/// <inheritdoc cref="GraphicsMouseEvent.ScenePosition"/>
+	public readonly Vector2 ScenePosition => (Vector2)ptr.scenePos();
+
+	/// <inheritdoc cref="MouseEvent.ScreenPosition"/>
+	public readonly Vector2 ScreenPosition => (Vector2)ptr.screenPos();
+
+	/// <inheritdoc cref="MouseEvent.Accepted"/>
+	public readonly bool Accepted
+	{
+		get => ptr.isAccepted();
+		set => ptr.setAccepted( value );
+	}
+}

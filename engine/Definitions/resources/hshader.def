@@ -1,0 +1,152 @@
+#include "vfx/vfx_common.h"
+#include "vfx/ivfx_dll.h"
+#include "vfx/vfx_bytecode_manager.h"
+
+native enum VfxCompileTarget_t is NativeEngine.VfxCompileTarget_t;
+native enum VfxProgram_t is Sandbox.ShaderProgramType;
+
+native class CVfxProgramData as NativeEngine.CVfxProgramData
+{
+	bool m_bLoadedFromVcsFile;
+}
+
+[ResourceHandle:HShader]
+native class CVfx as NativeEngine.CVfx
+{
+	inline static CVfx Create( string debugName )
+	{
+		auto ptr = new CVfx();
+		CResourceName name( debugName, RESOURCE_TYPE_SHADER );
+		HShader t = g_pResourceSystem->FindOrCreateProceduralResource<RESOURCE_TYPE_SHADER>( name, ptr, PROCEDURAL_RESOURCE_ANONYMOUS );
+		return t;
+	}
+
+	string GetFilename();
+
+	bool CreateFromResourceFile( string pShaderFile, VfxCompileTarget_t compileTarget, uint nCreateFlags, bool bFailSilently );
+	bool CreateFromShaderFile( string pShaderFile, VfxCompileTarget_t compileTarget, uint nCreateFlags );
+
+	inline CVfxProgramData GetProgramData( ShaderProgramType pass )
+	{
+		return &(self->m_programArray[(int)pass]);
+	}
+
+	inline CVfxComboIterator GetIterator( ShaderProgramType program )
+	{
+		return new CVfxComboIterator( self, program );
+	}
+
+	CUtlBuffer Serialize();
+	bool HasShaderProgram( ShaderProgramType programType );
+
+	bool InitializeWrite();
+	bool FinalizeCompile();
+	bool WriteProgramToBuffer( ShaderProgramType programType, CVfxByteCodeManager byteCodeManager, CUtlBuffer outBuffer );
+	bool WriteCombo( ShaderProgramType programType, ulong staticId, ulong dynamicId, VfxCompiledShaderInfo_t shaderInfo );
+
+	string GetPropertiesJson();
+}
+
+native static class ShaderTools
+{
+	inline static string GetShaderSource( string pShaderFile )
+	{
+		CUtlBuffer shaderFileBuf;
+		if ( !ReadVfxFile( pShaderFile, shaderFileBuf) )
+		{
+			return "";
+		}
+
+		return shaderFileBuf.Base();
+	}
+
+	inline static string MaskShaderSource( string sourcecode, ShaderProgramType program, bool bIsForCrc )
+	{
+		CUtlBuffer shaderFileBuf;
+		shaderFileBuf.Put( sourcecode, V_strlen(sourcecode) );
+
+		if ( !VfxMaskUnusedParts( ( char * )shaderFileBuf.Base(), program, bIsForCrc ) )
+		{
+			return shaderFileBuf.Base();
+		}
+
+		return shaderFileBuf.Base();
+	}
+}
+
+
+native class CVfxComboIterator
+{
+	void Delete(); [delete]
+
+	ulong InvalidIndex();
+
+	ulong SetStaticCombo( ulong c );
+	ulong FirstStaticCombo();
+	ulong NextStaticCombo();
+
+	ulong SetDynamicCombo( ulong c );
+	ulong FirstDynamicCombo();
+	ulong NextDynamicCombo();
+}
+
+native class IVfx
+{
+	inline void Init( void* factory )
+	{
+		self->Init( (CreateInterfaceFn)factory );
+	}
+
+	inline VfxCompiledShaderInfo_t CompileShader( IShaderCompileContext ctx, ulong staticcombo, ulong dynamiccombo, CVfx pVfx, VfxCompileTarget_t compileTarget, ShaderProgramType programType, bool useShaderCache, uint flags )
+	{
+		VfxCompiledShaderInfo_t* result = new VfxCompiledShaderInfo_t();
+		self->CompileShaderAndGetVariables( staticcombo, dynamiccombo, pVfx, compileTarget, programType, result, useShaderCache, flags, ctx );
+		return result;
+	}
+
+	void ClearShaderCache();
+	IShaderCompileContext CreateSharedContext();
+}
+
+native class VfxCompiledShaderInfo_t
+{
+	inline void Delete()
+	{
+		delete self;
+	}
+
+	CUtlString compilerOutput;
+	bool compileFailed;
+}
+
+native class IShaderCompileContext
+{
+	void Delete(); [delete]
+	void SetMaskedCode( string code );
+}
+
+native class CVfxByteCodeManager
+{
+	static CVfxByteCodeManager Create(); [new]
+	void Delete(); [delete]
+
+	void OnStaticCombo( ulong id );
+	void OnDynamicCombo( VfxCompiledShaderInfo_t data );
+	void Reset();
+}
+
+native class CVfxCombo
+{
+	inline string GetName()
+	{
+		return self->m_szName;
+	}	
+
+	inline string GetGroup()
+	{
+		return self->m_szUiGroup;
+	}
+
+	byte m_nMin;
+	byte m_nMax;
+}

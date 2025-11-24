@@ -1,0 +1,109 @@
+
+#include "scenesystem/iscenesystem.h"
+#include "scenesystem/sceneobject.h"
+
+native enum ESceneObjectFlags is Sandbox.Rendering.SceneObjectFlags;
+native enum ESceneObjectTypeFlags is NativeEngine.ESceneObjectTypeFlags;
+
+[Handle:Sandbox.SceneObject]
+native class CSceneObject as NativeEngine.CSceneObject
+{
+	void ChangeFlags(ESceneObjectFlags nNewFlags, ESceneObjectFlags nNewFlagsMask);
+
+	void SetFlags(ESceneObjectFlags nFlagsToOR);
+
+	bool HasFlags(ESceneObjectFlags nFlags);
+
+	ESceneObjectFlags GetFlags();
+
+	ESceneObjectFlags GetOriginalFlags();
+
+	void ClearFlags(ESceneObjectFlags nFlagsToClear);
+	
+	void SetCullDistance( float dist );
+
+	void EnableLightingCache();
+	void SetLightingOrigin( Vector3 vPos, bool worldspace );
+	Vector3 GetLightingOrigin();
+	bool HasLightingOrigin();
+
+	void SetTintRGBA( Vector4 color );
+
+	Vector4 GetTintRGBA();
+
+	void SetAlphaFade( float nAlpha );
+	float GetAlphaFade();
+
+	void SetMaterialOverrideForMeshInstances( IMaterial mat );
+	void ClearMaterialOverrideList();
+	void SetMaterialOverride( IMaterial hMaterial, StringToken nAttr, int nAttrValueMatch );
+
+	bool IsLoaded();
+	bool IsRenderingEnabled();
+	void SetLoaded();
+	void ClearLoaded();
+	void DisableRendering();
+	void EnableRendering();
+	void SetRenderingEnabled( bool bEnabled );
+
+	float GetBoundingSphereRadius();
+
+	void SetTransform( Transform tx );
+
+	Transform GetCTransform();
+
+	void SetBounds( BBox box );
+
+	BBox GetBounds();
+
+	void SetBoundsInfinite();
+
+	CSceneObject GetParent();
+	void AddChildObject( StringToken nId, CSceneObject pChild, uint nChildUpdateFlags );
+	void RemoveChild( CSceneObject obj );
+
+	CRenderAttributes GetAttributesPtrForModify();
+
+	void EnableMeshGroups( ulong nMask );
+	void DisableMeshGroups( ulong nMask );
+	void ResetMeshGroups( ulong nMask );
+	ulong GetCurrentMeshGroupMask();
+
+	ISceneWorld GetWorld();
+
+	void SetLOD( int nLOD );
+	void DisableLOD();
+	ulong GetCurrentLODGroupMask();
+	int GetCurrentLODLevel();
+
+	IModel GetModelHandle();
+
+	void SetMaterialGroup( StringToken token );
+
+	void SetBodyGroup( StringToken token, int value );
+
+	void SetBatchable( bool bIsBatchable );
+	bool IsNotBatchable();
+	void SetUniqueBatchGroup( bool bUnique );
+
+	void RemoveTag( uint tag );
+	void RemoveAllTags();
+	int GetTagCount();
+	uint GetTagAt( int i);
+	void AddTag( uint tag );
+	bool HasTag( uint tag );
+
+	// draw on this layer regardless of flags
+	void SetForceLayerID( StringToken nTok );
+
+	// draw only on this layer
+	void SetLayerMatchID( StringToken nTok );
+
+	inline void UpdateFlagsBasedOnMaterial()
+	{
+		g_pMeshSystem->UpdateTranslucencyFlagsOnMaterialChange( self );
+		self->UpdateFlagsBasedOnMaterial();
+	}
+
+	void SetMaterialOverrideByIndex( int index, IMaterial material );
+}

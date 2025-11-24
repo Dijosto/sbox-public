@@ -1,0 +1,23 @@
+﻿
+native class QGraphicsProxyWidget as Native.QGraphicsProxyWidget : QGraphicsItem
+{
+    void setWidget(QWidget widget);
+    QWidget widget();
+
+	void resize(QSizeF size);
+    QSizeF size();
+
+	QSizeF minimumSize();
+	void setMinimumSize( QSizeF x );
+
+	QSizeF maximumSize();
+	void setMaximumSize( QSizeF x );
+
+	void setAttribute( Editor.Widget.Flag, bool on );
+    bool testAttribute( Editor.Widget.Flag attribute );
+}
+
+managed class Editor.GraphicsWidget
+{
+	void Poop();
+}

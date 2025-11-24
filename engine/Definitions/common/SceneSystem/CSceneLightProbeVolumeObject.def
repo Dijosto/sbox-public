@@ -1,0 +1,17 @@
+
+#include "scenesystem/scenelightprobevolumeobject.h"
+
+[Handle:Sandbox.SceneLightProbe]
+native class CSceneLightProbeVolumeObject as NativeEngine.CSceneLightProbeVolumeObject : CSceneObject
+{
+	Vector3 m_vBoxMins;
+	Vector3 m_vBoxMaxs;
+	int m_nHandshake;
+	int m_nRenderPriority;
+
+	ITexture m_hLightProbeTexture;
+	ITexture m_hLightProbeDirectLightIndicesTexture;
+	ITexture m_hLightProbeDirectLightScalarsTexture;
+
+	void CreateConstants();
+}

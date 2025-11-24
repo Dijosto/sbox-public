@@ -1,0 +1,55 @@
+#include "scenesystem/iscenelayer.h"
+
+native enum ELayerFlags as Sandbox.Rendering.LayerFlags
+native enum ELayerEnum as Sandbox.SceneLayerType
+
+native pointer HSceneViewRenderTarget as Sandbox.Rendering.SceneViewRenderTargetHandle
+
+native enum SceneLayerMSAAMode_t is NativeEngine.SceneLayerMSAAMode_t
+
+native class ISceneLayer as NativeEngine.ISceneLayer
+{
+    void SetObjectMatchID( StringToken nTok );
+
+    void AddObjectFlagsRequiredMask( ESceneObjectFlags nRequiredFlags );
+    void AddObjectFlagsExcludedMask( ESceneObjectFlags nExcludedFlags );
+    void RemoveObjectFlagsRequiredMask( ESceneObjectFlags nRequiredFlags );
+    void RemoveObjectFlagsExcludedMask( ESceneObjectFlags nExcludedFlags );
+    ESceneObjectFlags GetObjectFlagsRequiredMask() const;
+    ESceneObjectFlags GetObjectFlagsExcludedMask() const;
+
+    string GetDebugName();
+
+    ELayerFlags m_nLayerFlags;
+    SceneLayerType LayerEnum;
+    RenderViewport m_viewport;
+    int m_nClearFlags;
+
+    inline CRenderAttributes GetRenderAttributesPtr()
+    {
+        return &self->m_Attrs;
+    }
+
+    void SetAttr( StringToken nTokenID, HSceneViewRenderTarget hRenderTarget, SceneLayerMSAAMode_t msaa, uint flags );
+
+    void SetBoundingVolumeSizeCullThresholdInPercent( float flSizeCullThreshold );
+    
+    void SetClearColor( Vector4 vecColor, int nRenderTargetIndex );
+    ITexture GetTextureValue( StringToken nTokenID, ITexture nDefaultValue );
+    ITexture GetTextureValue( StringToken nTokenID );
+
+    inline ITexture GetColorTarget()
+    {
+        return this->GetRenderTargetDesc().m_pColorTargets[0];
+    }
+
+    inline ITexture GetDepthTarget()
+    {
+        return this->GetRenderTargetDesc().m_hDepthTarget;
+    }
+
+    inline void SetOutput( HSceneViewRenderTarget hColor, HSceneViewRenderTarget hDepth )
+    {
+        this->m_RenderTargetOutputs.Init( hColor, hDepth );
+    }
+}

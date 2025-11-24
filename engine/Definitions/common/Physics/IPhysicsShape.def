@@ -1,0 +1,86 @@
+
+#include "vphysics2/iphysicsbody.h"
+#include "vphysics2/iphysicsshape.h"
+#include "vphysics2/iphysicsjoint.h"
+
+native class CQueryResult as NativeEngine.CQueryResult
+{
+	void DeleteThis(); [delete]
+	static CQueryResult Create(); [new]
+
+	int Count();
+	IPhysicsShape Element( int i );
+}
+
+[Handle:Sandbox.PhysicsShape]
+native class IPhysicsShape as NativeEngine.IPhysicsShape
+{
+	void AddCollisionFunctionMask( byte nMask );
+	void RemoveCollisionFunctionMask( byte nMask );
+	inline byte GetCollisionFunctionMask()
+	{
+		return self->GetCollisionAttributes().GetCollisionFunctionMask();
+	}
+
+	bool HasTag( uint tag );
+	bool AddTag( uint tag );
+	bool RemoveTag( uint tag );
+	bool ClearTags();
+
+	IPhysicsBody GetBody();
+
+	void SetMaterialIndex( StringToken name );
+	void SetSurfaceIndex( int nSurfaceIndex, int index );
+
+	inline string GetMaterialName()
+	{
+		if ( !self->GetMaterial().m_pUserData ) return "";
+		return self->GetMaterial().m_pUserData->m_name.Get();
+	}
+
+	PhysicsShapeType GetType();
+
+	void UpdateMeshShape( int numVertices, CastTo[Vector*] void* vertices, int numIndices, CastTo[uint32*] void* indices );
+	void UpdateHeightShape( CastTo[uint16_t*] void* pHeights, CastTo[uint8_t*] void* pMaterials, int x, int y, int w, int h, float SizeScale, float HeightScale );
+	void UpdateSphereShape( Vector3 vCenter, float flRadius );
+	void UpdateCapsuleShape( Vector3 vCenter1, Vector3 vCenter2, float flRadius );
+	void UpdateHullShape( Vector position, Rotation rotation, int nVertexCount, CastTo[Vector*] void* pvVertexBase );
+
+	inline IPhysicsShape ManagedObject()
+	{
+		return self;
+	}
+
+	void SetTrigger( bool trigger );
+	bool IsTrigger();
+
+	void GetTriangulation( CUtlVectorVector arrVectors, CUtlVectorUInt32 arrIndices );
+	void GetTriangulationForNavmesh( CUtlVectorVector arrVectors, CUtlVectorUInt32 arrIndices, BBox bounds );
+	void GetOutline( CUtlVectorVector arrVectors );
+
+	Sphere AsSphere();
+	Capsule AsCapsule();
+	
+	void UpdateBoxShape( Vector3 vCenter, Rotation qRotation, Vector3 vExtents );
+
+	void SetFriction( float f );
+	float GetFriction();
+
+	void SetLocalVelocity( Vector3 v );
+	Vector3 GetLocalVelocity();
+
+	void SetElasticity( float f );
+	void SetRollingResistance( float f );
+
+	void SetIgnoreTraces( bool b );
+	void SetHasNoMass( bool b );
+
+	BBox BuildBounds();
+
+	inline BBox LocalBounds()
+	{
+		return self->BuildBounds( g_MatrixIdentity );
+	}
+
+	bool IsTouching( IPhysicsShape pShape, bool bTriggers );
+}

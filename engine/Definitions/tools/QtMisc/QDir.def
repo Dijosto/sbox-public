@@ -1,0 +1,5 @@
+﻿
+native static class QDir 
+{
+	static void addSearchPath( QString prefix, QString path );
+}

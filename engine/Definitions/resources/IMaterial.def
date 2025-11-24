@@ -1,0 +1,51 @@
+
+#include "sbox/resourcehandles.h"
+
+[ResourceHandle:HMaterial]
+native class IMaterial2 as NativeEngine.IMaterial
+{
+	string GetName();
+	string GetNameWithMod();
+
+	ulong GetSimilarityKey();
+
+	bool IsLoaded();
+
+	IMaterialMode GetMode( StringToken token );
+	IMaterialMode GetMode();
+
+	inline IMaterialMode GetMode( ISceneLayer layer )
+	{
+		return self->GetMode( layer->GetShaderMode() );
+	}
+
+	CRenderAttributes GetRenderAttributes();
+
+	void RecreateAllStaticConstantAndCommandBuffers();
+
+	ITexture GetFirstTextureAttribute();
+
+	bool GetBoolAttributeOrDefault( StringToken name, bool i );
+	int GetIntAttributeOrDefault( StringToken name, int i );
+	float GetFloatAttributeOrDefault( StringToken name, float f );
+	ITexture GetTextureAttributeOrDefault( StringToken name );
+
+	bool HasParam( string name );
+
+	void Set( string name, string val );
+	string GetString( string name, string defaultValue );
+
+	void Set( string name, Vector4 value );
+	Vector4 GetVector4( string name );
+
+	void Set( string name, ITexture value );
+	ITexture GetTexture( string name );
+
+	void SetEdited( bool b );
+	bool IsEdited();
+
+	inline void ReloadStaticCombos()
+	{
+		self->ReloadStaticCombos( *((HMaterialStrong *)__self) );
+	}
+}

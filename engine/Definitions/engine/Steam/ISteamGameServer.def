@@ -1,0 +1,34 @@
+include "steam/steam_gameserver.h"
+
+native class ISteamGameServer
+{
+	void SetServerName( string name );
+	void SetMapName( string name );
+	void SetGameTags( string tags );
+	void SetDedicatedServer( bool isDedicatedServer );
+	void SetAdvertiseServerActive( bool heartbeats );
+	void SetMaxPlayerCount( int maxPlayers );
+	void LogOnAnonymous();
+	void LogOn( string token );
+	void LogOff();
+	void SetGameDescription( string description );
+	void SetProduct( string productName );
+	void SetModDir( string modDir );
+	bool BLoggedOn();
+	
+	inline HAuthTicket GetAuthSessionTicket( ulong targetSteamId, void* buffer, out uint ticketLength )
+	{
+	    SteamNetworkingIdentity ident;
+	    ident.SetSteamID64( targetSteamId );
+	    return self->GetAuthSessionTicket( buffer, 1024, ticketLength, &ident );
+	}
+	
+	inline EBeginAuthSessionResult BeginAuthSession( ulong senderSteamId, void* buffer, int length )
+	{
+	    CSteamID ident = CSteamID( senderSteamId );
+	    return self->BeginAuthSession( buffer, length, ident );
+	}
+	
+	void CancelAuthTicket( HAuthTicket ticket );
+	void EndAuthSession( ulong steamId );
+}

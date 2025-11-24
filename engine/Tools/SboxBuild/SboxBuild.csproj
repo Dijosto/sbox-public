@@ -1,0 +1,37 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+	<OutputType>Exe</OutputType>
+	<TargetFramework>net10.0</TargetFramework>
+	<OutputPath>bin</OutputPath>
+	<ImplicitUsings>enable</ImplicitUsings>
+
+	<PackAsTool>true</PackAsTool>
+	<ToolCommandName>sboxbuild</ToolCommandName>
+	<PackageId>sboxbuild</PackageId>
+	<PackageOutputPath>./nupkg</PackageOutputPath>
+	<Version>1.0.0</Version>
+	<AssemblyName>sboxbuild</AssemblyName>
+	<RootNamespace>Facepunch</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+	<PackageReference Include="System.CommandLine" Version="2.0.0-beta4.22272.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+	<ProjectReference Include="..\InteropGen\InteropGen.csproj" />
+	<ProjectReference Include="..\ShaderProc\ShaderProc.csproj" />
+  </ItemGroup>
+
+   <ItemGroup>
+		<PackageReference Include="Facepunch.AssemblySchema" Version="1.0.13" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<None Update="sentry-cli.exe">
+			<CopyToOutputDirectory>Always</CopyToOutputDirectory>
+		</None>
+	</ItemGroup>
+
+</Project>

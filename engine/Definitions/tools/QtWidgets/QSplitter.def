@@ -1,0 +1,39 @@
+﻿#include "qcontrols/qsplittablemdiframe.h"
+
+native enum Qt::Orientation as Editor.Orientation;
+
+native class QSplitter as Native.QSplitter : QFrame
+{
+	static QSplitter CreateSplitter( QWidget parent ); [new]
+
+	void addWidget(QWidget widget);
+    void insertWidget(int index, QWidget widget);
+    QWidget replaceWidget(int index, QWidget widget);
+
+	void setOrientation(Orientation);
+    Orientation orientation();
+
+	void setChildrenCollapsible(bool b);
+    bool childrenCollapsible();
+
+    void setCollapsible(int index, bool b);
+    bool isCollapsible(int index);
+    void setOpaqueResize(bool opaque);
+    bool opaqueResize();
+    void refresh();
+
+    int handleWidth();
+    void setHandleWidth(int i);
+
+    void setStretchFactor(int index, int stretch);
+
+    QByteArray saveState();
+    bool restoreState(const QByteArray state );
+}
+
+native class CQLinkableSplitter as Native.CQLinkableSplitter : QSplitter
+{
+	static CQLinkableSplitter CreateSplitter( Orientation orientation, QWidget parent ); [new]
+
+	void LinkWith(CQLinkableSplitter splitter);
+}

@@ -1,0 +1,88 @@
+﻿
+native enum QComboBox::InsertPolicy is Editor.ComboBox.InsertMode
+
+native class QComboBox as Native.QComboBox : QWidget
+{
+     int maxVisibleItems();
+    void setMaxVisibleItems(int maxItems);
+
+    int count();
+    void setMaxCount(int max);
+    int maxCount();
+
+    bool duplicatesEnabled();
+    void setDuplicatesEnabled(bool enable);
+
+     void setFrame(bool x);
+    bool hasFrame();
+
+    InsertMode insertPolicy();
+    void setInsertPolicy( InsertMode policy);
+
+    int minimumContentsLength();
+    void setMinimumContentsLength(int characters);
+    QSize iconSize();
+    void setIconSize(QSize size);
+
+    bool isEditable();
+    void setEditable(bool editable);
+
+    void setLineEdit(QLineEdit edit);
+    QLineEdit lineEdit() const;
+
+     int modelColumn();
+    void setModelColumn(int visibleColumn);
+
+    int currentIndex();
+    QString currentText();
+
+    QString itemText(int index);
+
+     void addItem(QString text );
+     void addItem(QIcon icon, const QString text );
+
+     void removeItem(int index);
+
+    void setItemText(int index, QString text);
+    void setItemIcon(int index, QIcon icon);
+
+    void showPopup();
+    void hidePopup();
+
+    void clear();
+    void clearEditText();
+    void setEditText(QString text);
+    void setCurrentIndex(int index);
+    void setCurrentText(QString text);
+
+    int findText( QString text );
+
+    inline void setItemDescription( int index, QString text )
+    {
+        self->setItemData( index, text, Qt::ToolTipRole );
+        self->setItemData( index, text, Qt::StatusTipRole );
+    }
+
+    inline void setItemEnabled( int index, bool enabled )
+    {
+        auto *model = qobject_cast<QStandardItemModel*>( self->model() );
+        if ( !model ) return;
+
+        auto *i = model->item( index );
+        if ( !i ) return;
+
+        i->setEnabled( enabled );
+    }
+}
+
+
+native class CComboBox
+{
+	static QComboBox Create( QWidget parent, Editor.ComboBox managedobj ); [new]
+}
+
+managed class Editor.ComboBox : Editor.Widget
+{
+    void InternalTextChanged();
+    void InternalIndexChanged();
+}

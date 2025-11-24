@@ -1,0 +1,17 @@
+﻿
+native class QPushButton as Native.QPushButton : QAbstractButton
+{
+}
+
+native class CPushButton
+{
+	static CPushButton CreatePushButton( QWidget parent, Editor.Button managedobj ); [new]
+}
+
+managed class Editor.Button : Editor.Widget
+{
+    void InternalOnPressed();
+	void InternalOnReleased();
+	void InternalOnClicked();
+	void InternalOnToggled();
+}
