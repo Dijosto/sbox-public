@@ -788,9 +788,34 @@ internal partial class GameInstanceDll : Engine.IGameInstanceDll
 	[ConCmd( "game", ConVarFlags.Protected, Help = "Play a game" )]
 	public static async Task StartGame( string gameIdent, string mapIdent = null )
 	{
-		// We don't want to open games in the editor
+		// In editor mode, extract the published game to the current project
 		if ( Application.IsEditor )
+		{
+			if ( Project.Current is null )
+			{
+				Log.Error( "No project is currently open. Open a project first." );
+				return;
+			}
+
+			Log.Info( $"Extracting game '{gameIdent}' to current project..." );
+
+			// Extract source and assets to current project
+			if ( !await PackageManager.ExtractPublishedGameToProject( gameIdent ) )
+			{
+				Log.Error( "Failed to extract game to project" );
+				return;
+			}
+
+			// Wait for compilation to complete
+			Log.Info( "Waiting for compilation..." );
+			await Project.CompileAsync();
+
+			// Load the game using the current project (which now has the extracted code)
+			Log.Info( $"Loading game from project '{Project.Current.Package.FullIdent}'..." );
+			await IGameInstanceDll.Current.LoadGamePackageAsync( Project.Current.Package.FullIdent, GameLoadingFlags.Host | GameLoadingFlags.Reload, default );
+			Log.Info( "Load Complete" );
 			return;
+		}
 
 		// We can load and run projects if we're a Dedicated Server.
 		if ( Application.IsDedicatedServer && gameIdent.ToLower().Contains( ".sbproj" ) )

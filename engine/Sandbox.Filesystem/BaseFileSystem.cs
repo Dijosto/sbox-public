@@ -269,9 +269,9 @@ public class BaseFileSystem
 	}
 
 	/// <summary>
-	/// Read the contents of path and return it as a string
+	/// Read the contents of path and return it as a byte array
 	/// </summary>
-	public Span<byte> ReadAllBytes( string path )
+	public byte[] ReadAllBytes( string path )
 	{
 		using ( var f = OpenRead( path ) )
 		{

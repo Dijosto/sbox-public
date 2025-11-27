@@ -286,9 +286,14 @@ internal static class EngineLoop
 		MainThread.RunQueues();
 
 		//
-		// Trigger recompile of Project 
+		// Trigger recompile of Project
 		//
 		Project.Tick();
+
+		//
+		// Trigger hot-reload for published packages in editor
+		//
+		PackageManager.TickHotReload();
 
 		//
 		// Free anything that needs to be disposed of at end of frame
