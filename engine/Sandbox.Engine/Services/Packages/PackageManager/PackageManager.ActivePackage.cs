@@ -36,6 +36,30 @@ internal static partial class PackageManager
 		/// </summary>
 		MemoryFileSystem memoryFileSystem;
 
+		/// <summary>
+		/// Whether the memory filesystem has been mounted to the main FileSystem
+		/// </summary>
+		bool memoryFileSystemMounted;
+
+		/// <summary>
+		/// Persistent compile group for hot-reload support in editor.
+		/// Only created for published games when running in editor mode.
+		/// </summary>
+		CompileGroup compileGroup;
+
+		/// <summary>
+		/// The local filesystem path where extracted source is stored for editing.
+		/// Only set when hot-reload is enabled (editor mode).
+		/// </summary>
+		public string ExtractedSourcePath => extractedSourcePath;
+		string extractedSourcePath;
+
+		/// <summary>
+		/// Returns true if this package has hot-reload enabled.
+		/// Hot-reload is only available for published games when running in editor mode.
+		/// </summary>
+		public bool HasHotReload => compileGroup != null;
+
 		internal static async Task<ActivePackage> Create( Package package, CancellationToken token, PackageLoadOptions options )
 		{
 			var o = new ActivePackage();
@@ -187,6 +211,27 @@ internal static partial class PackageManager
 		/// </summary>
 		public void Delete()
 		{
+			// Clean up hot-reload compile group if it exists
+			if ( compileGroup != null )
+			{
+				compileGroup.Dispose();
+				compileGroup = null;
+			}
+
+			// Clean up extracted source directory
+			if ( !string.IsNullOrEmpty( extractedSourcePath ) && Directory.Exists( extractedSourcePath ) )
+			{
+				try
+				{
+					Directory.Delete( extractedSourcePath, true );
+				}
+				catch ( System.Exception e )
+				{
+					Log.Warning( e, $"Failed to clean up extracted source: {e.Message}" );
+				}
+				extractedSourcePath = null;
+			}
+
 			MountedFileSystem.UnMount( FileSystem );
 			MountedFileSystem.UnMount( AssemblyFileSystem );
 
@@ -227,9 +272,18 @@ internal static partial class PackageManager
 
 			Assert.AreNotEqual( 0, codeArchives.Length, "We have package files mounted" );
 
-			var group = new CompileGroup( Package.Ident );
-			group.AccessControl = AccessControl;
-			group.ReferenceProvider = this;
+			// In editor mode, enable hot-reload by extracting source and keeping a persistent CompileGroup
+			bool enableHotReload = Application.IsEditor;
+
+			compileGroup = new CompileGroup( Package.Ident );
+			compileGroup.AccessControl = AccessControl;
+			compileGroup.ReferenceProvider = this;
+
+			// If in editor, extract source for hot-reload support
+			if ( enableHotReload )
+			{
+				extractedSourcePath = ExtractSourceFromArchives( codeArchives );
+			}
 
 			using ( analytic.ScopeTimer( "LoadArchives" ) )
 			{
@@ -241,30 +295,69 @@ internal static partial class PackageManager
 					// Deserialize to a code archive
 					var archive = new CodeArchive( bytes );
 					// Create a compiler for it
-					var compiler = group.GetOrCreateCompiler( archive.CompilerName );
-					compiler.UpdateFromArchive( archive );
+					var compiler = compileGroup.GetOrCreateCompiler( archive.CompilerName );
+
+					if ( enableHotReload && extractedSourcePath != null )
+					{
+						// Set up compiler to read from extracted source directory for hot-reload
+						var compilerSourcePath = Path.Combine( extractedSourcePath, archive.CompilerName );
+						if ( Directory.Exists( compilerSourcePath ) )
+						{
+							compiler.SetConfiguration( archive.Configuration );
+							compiler.AddSourcePath( compilerSourcePath );
+							foreach ( var reference in archive.References )
+							{
+								compiler.AddReference( reference );
+							}
+							compiler.MarkForRecompile();
+							compiler.WatchForChanges();
+						}
+						else
+						{
+							// Fallback to archive-based compilation if source extraction failed
+							compiler.UpdateFromArchive( archive );
+						}
+					}
+					else
+					{
+						compiler.UpdateFromArchive( archive );
+					}
 				}
+			}
+
+			// Set up hot-reload callbacks if in editor
+			if ( enableHotReload )
+			{
+				compileGroup.OnCompileSuccess = OnHotReloadCompileSuccess;
+				compileGroup.PrintErrorsInConsole = true;
 			}
 
 			// Compile that bad boy
 			using ( analytic.ScopeTimer( "Compile" ) )
 			{
-				await group.BuildAsync();
+				await compileGroup.BuildAsync();
 			}
 
-			if ( !group.BuildResult.Success )
+			if ( !compileGroup.BuildResult.Success )
 			{
 				// Add an analytic so we can track these failures on the backend
 				var er = new Api.Events.EventRecord( "package.compile.error" );
 				er.SetValue( "package", Package.FullIdent );
 				er.SetValue( "version", Package.Revision?.VersionId );
-				er.SetValue( "errors", group.BuildResult.BuildDiagnosticsString( Microsoft.CodeAnalysis.DiagnosticSeverity.Error ) );
+				er.SetValue( "errors", compileGroup.BuildResult.BuildDiagnosticsString( Microsoft.CodeAnalysis.DiagnosticSeverity.Error ) );
 				er.Submit();
+
+				// Clean up if not enabling hot-reload (no point keeping broken compile group)
+				if ( !enableHotReload )
+				{
+					compileGroup.Dispose();
+					compileGroup = null;
+				}
 
 				return false;
 			}
 
-			analytic.SetValue( "Diagnostics", group.BuildResult.Diagnostics
+			analytic.SetValue( "Diagnostics", compileGroup.BuildResult.Diagnostics
 												.Where( x => x.Severity > Microsoft.CodeAnalysis.DiagnosticSeverity.Warning )
 												.Select( x => new
 												{
@@ -276,24 +369,168 @@ internal static partial class PackageManager
 												.ToArray() );
 
 			// Should be successful
-			Assert.True( group.BuildResult.Success );
+			Assert.True( compileGroup.BuildResult.Success );
 
 			using ( analytic.ScopeTimer( "Write" ) )
 			{
-				memoryFileSystem = new MemoryFileSystem();
-				memoryFileSystem.CreateDirectory( "/.bin" );
-				// Copy the compiled assemblies to the filesystem
-				foreach ( var assembly in group.BuildResult.Output )
-				{
-					Log.Trace( $"WRITE /.bin/{assembly.Compiler.AssemblyName}.dll" );
-					memoryFileSystem.WriteAllBytes( $"/.bin/{assembly.Compiler.AssemblyName}.dll", assembly.AssemblyData );
-				}
-				FileSystem.Mount( memoryFileSystem );
+				WriteCompiledAssemblies();
 			}
 
 			analytic.Submit();
 
+			// If not enabling hot-reload, dispose the compile group since we don't need it anymore
+			if ( !enableHotReload )
+			{
+				compileGroup.Dispose();
+				compileGroup = null;
+			}
+			else
+			{
+				Log.Info( $"Hot-reload enabled for {Package.FullIdent}. Source extracted to: {extractedSourcePath}" );
+			}
+
 			return true;
+		}
+
+		/// <summary>
+		/// Extract source code from .cll archives to a local directory for editing.
+		/// </summary>
+		private string ExtractSourceFromArchives( string[] codeArchives )
+		{
+			try
+			{
+				// Create extraction directory in .source2/temp/package-source/{package-ident}
+				var safeIdent = Package.Ident.Replace( ".", "_" ).Replace( "/", "_" );
+				var basePath = EngineFileSystem.EditorTemporary?.GetFullPath( $"/package-source/{safeIdent}" );
+
+				if ( string.IsNullOrEmpty( basePath ) )
+				{
+					Log.Warning( $"Could not get editor temporary path for source extraction" );
+					return null;
+				}
+
+				// Clean up any existing extraction
+				if ( Directory.Exists( basePath ) )
+				{
+					Directory.Delete( basePath, true );
+				}
+				Directory.CreateDirectory( basePath );
+
+				foreach ( var archivePath in codeArchives )
+				{
+					var bytes = FileSystem.ReadAllBytes( archivePath );
+					if ( bytes is null || bytes.Length <= 1 )
+						continue;
+
+					var archive = new CodeArchive( bytes );
+					var compilerPath = Path.Combine( basePath, archive.CompilerName );
+					Directory.CreateDirectory( compilerPath );
+
+					// Extract .cs files from syntax trees
+					foreach ( var tree in archive.SyntaxTrees )
+					{
+						var filePath = tree.FilePath;
+						if ( string.IsNullOrEmpty( filePath ) )
+							continue;
+
+						// Convert to relative path if needed
+						var relativePath = filePath;
+						if ( Path.IsPathRooted( filePath ) )
+						{
+							relativePath = Path.GetFileName( filePath );
+						}
+
+						// Remove leading slashes
+						relativePath = relativePath.TrimStart( '/', '\\' );
+
+						var fullPath = Path.Combine( compilerPath, relativePath );
+						var dir = Path.GetDirectoryName( fullPath );
+						if ( !string.IsNullOrEmpty( dir ) && !Directory.Exists( dir ) )
+						{
+							Directory.CreateDirectory( dir );
+						}
+
+						var sourceText = tree.GetText().ToString();
+						File.WriteAllText( fullPath, sourceText, System.Text.Encoding.UTF8 );
+					}
+
+					// Extract additional files (like .razor files)
+					foreach ( var file in archive.AdditionalFiles )
+					{
+						if ( string.IsNullOrEmpty( file.LocalPath ) )
+							continue;
+
+						var relativePath = file.LocalPath.TrimStart( '/', '\\' );
+						var fullPath = Path.Combine( compilerPath, relativePath );
+						var dir = Path.GetDirectoryName( fullPath );
+						if ( !string.IsNullOrEmpty( dir ) && !Directory.Exists( dir ) )
+						{
+							Directory.CreateDirectory( dir );
+						}
+
+						File.WriteAllText( fullPath, file.Text, System.Text.Encoding.UTF8 );
+					}
+
+					Log.Trace( $"Extracted source for {archive.CompilerName} to {compilerPath}" );
+				}
+
+				return basePath;
+			}
+			catch ( System.Exception e )
+			{
+				Log.Warning( e, $"Failed to extract source from archives: {e.Message}" );
+				return null;
+			}
+		}
+
+		/// <summary>
+		/// Write compiled assemblies to the memory filesystem.
+		/// </summary>
+		private void WriteCompiledAssemblies()
+		{
+			memoryFileSystem ??= new MemoryFileSystem();
+			memoryFileSystem.CreateDirectory( "/.bin" );
+
+			foreach ( var assembly in compileGroup.BuildResult.Output )
+			{
+				Log.Trace( $"WRITE /.bin/{assembly.Compiler.AssemblyName}.dll" );
+				memoryFileSystem.WriteAllBytes( $"/.bin/{assembly.Compiler.AssemblyName}.dll", assembly.AssemblyData );
+			}
+
+			// Mount if not already mounted
+			if ( !memoryFileSystemMounted )
+			{
+				FileSystem.Mount( memoryFileSystem );
+				memoryFileSystemMounted = true;
+			}
+		}
+
+		/// <summary>
+		/// Called when hot-reload compilation succeeds. Updates the assemblies.
+		/// </summary>
+		private void OnHotReloadCompileSuccess()
+		{
+			WriteCompiledAssemblies();
+			Log.Info( $"Hot-reload: Recompiled {Package.FullIdent}" );
+		}
+
+		/// <summary>
+		/// Check if the compile group needs recompilation and trigger it.
+		/// Should be called from the main tick loop when in editor mode.
+		/// </summary>
+		internal void TickHotReload()
+		{
+			if ( compileGroup == null )
+				return;
+
+			if ( !compileGroup.NeedsBuild )
+				return;
+
+			if ( compileGroup.IsBuilding )
+				return;
+
+			compileGroup.AllowFastHotload = HotloadManager.hotload_fast;
+			_ = compileGroup.BuildAsync();
 		}
 
 		public Microsoft.CodeAnalysis.PortableExecutableReference Lookup( string reference )

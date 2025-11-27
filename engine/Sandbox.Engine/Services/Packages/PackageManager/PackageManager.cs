@@ -235,5 +235,20 @@ internal static partial class PackageManager
 			(exactName ? string.Equals( x.Package.FullIdent, packageIdent, StringComparison.OrdinalIgnoreCase ) : x.Package.IsNamed( packageIdent ))
 			&& (allowLocalPackages || x.Package is not LocalPackage) );
 	}
+
+	/// <summary>
+	/// Tick hot-reload for all active packages that support it.
+	/// Should be called from the main tick loop when in editor mode.
+	/// </summary>
+	internal static void TickHotReload()
+	{
+		if ( !Application.IsEditor )
+			return;
+
+		foreach ( var package in ActivePackages )
+		{
+			package.TickHotReload();
+		}
+	}
 }
 
