@@ -788,10 +788,6 @@ internal partial class GameInstanceDll : Engine.IGameInstanceDll
 	[ConCmd( "game", ConVarFlags.Protected, Help = "Play a game" )]
 	public static async Task StartGame( string gameIdent, string mapIdent = null )
 	{
-		// We don't want to open games in the editor
-		if ( Application.IsEditor )
-			return;
-
 		// We can load and run projects if we're a Dedicated Server.
 		if ( Application.IsDedicatedServer && gameIdent.ToLower().Contains( ".sbproj" ) )
 		{
@@ -834,7 +830,10 @@ internal partial class GameInstanceDll : Engine.IGameInstanceDll
 			Log.Info( $" with map: '{LaunchArguments.Map}'" );
 		}
 
-		await IGameInstanceDll.Current.LoadGamePackageAsync( gameIdent, GameLoadingFlags.Host, default );
+		var flags = GameLoadingFlags.Host;
+		if ( Application.IsEditor ) flags |= GameLoadingFlags.Developer;
+
+		await IGameInstanceDll.Current.LoadGamePackageAsync( gameIdent, flags, default );
 		Log.Info( $"Load Complete" );
 	}
 
