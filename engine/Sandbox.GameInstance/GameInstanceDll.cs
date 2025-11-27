@@ -830,10 +830,7 @@ internal partial class GameInstanceDll : Engine.IGameInstanceDll
 			Log.Info( $" with map: '{LaunchArguments.Map}'" );
 		}
 
-		var flags = GameLoadingFlags.Host;
-		if ( Application.IsEditor ) flags |= GameLoadingFlags.Developer;
-
-		await IGameInstanceDll.Current.LoadGamePackageAsync( gameIdent, flags, default );
+		await IGameInstanceDll.Current.LoadGamePackageAsync( gameIdent, GameLoadingFlags.Host, default );
 		Log.Info( $"Load Complete" );
 	}
 

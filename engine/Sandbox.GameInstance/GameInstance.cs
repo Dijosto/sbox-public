@@ -219,7 +219,7 @@ internal partial class GameInstance : IGameInstance
 		{
 			// Load the package. Mount it and add it to the file system.
 			// Only load the assemblies inside the package if we're not a developer host
-			// (If we're a develop host we load assemblies from the network table)
+			// (If we're a developer host we load assemblies from the network table)
 			if ( !enroller.LoadPackage( Package.FullIdent, !IsDeveloperHost ) )
 			{
 				if ( IsDeveloperHost )
