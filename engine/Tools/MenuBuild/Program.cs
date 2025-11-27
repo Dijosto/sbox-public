@@ -34,7 +34,7 @@ class Program
 	{
 		foreach ( var assembly in project.AssemblyFileSystem.FindFile( "", "*.dll", true ) )
 		{
-			var bytes = project.AssemblyFileSystem.ReadAllBytes( assembly ).ToArray();
+			var bytes = project.AssemblyFileSystem.ReadAllBytes( assembly );
 			var outputPath = Path.Combine( project.GetRootPath(), assembly );
 			System.IO.Directory.CreateDirectory( Path.GetDirectoryName( outputPath ) );
 			System.IO.File.WriteAllBytes( outputPath, bytes );
