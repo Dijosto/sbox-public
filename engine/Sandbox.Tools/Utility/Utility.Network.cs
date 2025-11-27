@@ -1,5 +1,8 @@
 ﻿using Sandbox.Network;
 using System;
+using System.Collections.Generic;
+using System.Threading;
+using System.Threading.Tasks;
 namespace Editor;
 
 public static partial class EditorUtility
@@ -40,6 +43,45 @@ public static partial class EditorUtility
 		/// Connenct to a network address
 		/// </summary>
 		public static void Connect( string address ) => Networking.Connect( address );
+
+		/// <summary>
+		/// Query available lobbies for a specific game.
+		/// </summary>
+		public static Task<List<LobbyInformation>> QueryLobbies( string gameIdent, CancellationToken ct = default )
+			=> Networking.QueryLobbies( gameIdent, ct );
+
+		/// <summary>
+		/// Query available lobbies with custom filters.
+		/// </summary>
+		public static Task<List<LobbyInformation>> QueryLobbies( Dictionary<string, string> filters, bool includeServers = true, CancellationToken ct = default )
+			=> Networking.QueryLobbies( filters, includeServers, ct );
+
+		/// <summary>
+		/// Try to join a lobby by its Steam ID. Returns true if connection was successful.
+		/// This allows the editor to join normal s&box games on the platform.
+		/// </summary>
+		public static async Task<bool> JoinLobby( ulong lobbyId )
+		{
+			if ( !Game.IsPlaying )
+			{
+				EditorScene.Play();
+			}
+
+			return await Networking.TryConnectSteamId( lobbyId );
+		}
+
+		/// <summary>
+		/// Try to join any available lobby for the specified game. Returns true if joined successfully.
+		/// </summary>
+		public static async Task<bool> JoinBestLobby( string gameIdent )
+		{
+			if ( !Game.IsPlaying )
+			{
+				EditorScene.Play();
+			}
+
+			return await Networking.JoinBestLobby( gameIdent );
+		}
 
 		/// <summary>
 		/// Start hosting a lobby. If we're not already in play mode, we'll enter play mode first.
