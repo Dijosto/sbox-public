@@ -250,5 +250,163 @@ internal static partial class PackageManager
 			package.TickHotReload();
 		}
 	}
+
+	/// <summary>
+	/// Extract a published game's source code and assets to the current project.
+	/// This allows editing and hot-reloading of published games in the editor.
+	/// </summary>
+	internal static async Task<bool> ExtractPublishedGameToProject( string gameIdent, CancellationToken token = default )
+	{
+		if ( Project.Current is null )
+		{
+			Log.Error( "No project is currently open" );
+			return false;
+		}
+
+		log.Info( $"Extracting published game '{gameIdent}' to project '{Project.Current.Config.FullIdent}'" );
+
+		// Fetch the package info
+		var package = await Package.Fetch( gameIdent, false );
+		if ( package is null )
+		{
+			Log.Error( $"Could not find package '{gameIdent}'" );
+			return false;
+		}
+
+		if ( package is LocalPackage )
+		{
+			Log.Warning( $"Package '{gameIdent}' is already a local package" );
+			return false;
+		}
+
+		// Download the package
+		var packageFs = await package.Download( token, new PackageLoadOptions { PackageIdent = gameIdent } );
+		if ( packageFs is null )
+		{
+			Log.Error( $"Failed to download package '{gameIdent}'" );
+			return false;
+		}
+
+		try
+		{
+			var codePath = Project.Current.GetCodePath();
+			var assetsPath = Project.Current.GetAssetsPath();
+
+			// Create directories if they don't exist
+			Directory.CreateDirectory( codePath );
+			Directory.CreateDirectory( assetsPath );
+
+			// Extract source code from .cll archives
+			var codeArchives = packageFs.FindFile( "/", "*.cll", true ).ToArray();
+			if ( codeArchives.Length > 0 )
+			{
+				log.Info( $"Extracting source from {codeArchives.Length} code archive(s)" );
+
+				foreach ( var archivePath in codeArchives )
+				{
+					var bytes = packageFs.ReadAllBytes( archivePath );
+					if ( bytes is null || bytes.Length <= 1 )
+						continue;
+
+					var archive = new CodeArchive( bytes );
+
+					// Extract .cs files from syntax trees
+					foreach ( var tree in archive.SyntaxTrees )
+					{
+						var filePath = tree.FilePath;
+						if ( string.IsNullOrEmpty( filePath ) )
+							continue;
+
+						// Use the local path from the archive
+						var relativePath = filePath.TrimStart( '/', '\\' );
+
+						// Skip generated files
+						if ( relativePath.StartsWith( "__gen_" ) )
+							continue;
+
+						var fullPath = Path.Combine( codePath, relativePath );
+						var dir = Path.GetDirectoryName( fullPath );
+						if ( !string.IsNullOrEmpty( dir ) && !Directory.Exists( dir ) )
+						{
+							Directory.CreateDirectory( dir );
+						}
+
+						var sourceText = tree.GetText().ToString();
+						File.WriteAllText( fullPath, sourceText, System.Text.Encoding.UTF8 );
+						log.Trace( $"Extracted: {relativePath}" );
+					}
+
+					// Extract additional files (like .razor files)
+					foreach ( var file in archive.AdditionalFiles )
+					{
+						if ( string.IsNullOrEmpty( file.LocalPath ) )
+							continue;
+
+						var relativePath = file.LocalPath.TrimStart( '/', '\\' );
+						var fullPath = Path.Combine( codePath, relativePath );
+						var dir = Path.GetDirectoryName( fullPath );
+						if ( !string.IsNullOrEmpty( dir ) && !Directory.Exists( dir ) )
+						{
+							Directory.CreateDirectory( dir );
+						}
+
+						File.WriteAllText( fullPath, file.Text, System.Text.Encoding.UTF8 );
+						log.Trace( $"Extracted: {relativePath}" );
+					}
+				}
+			}
+
+			// Copy assets from the package (excluding code archives and .bin folder)
+			var allFiles = packageFs.FindFile( "/", "*", true ).ToArray();
+			foreach ( var file in allFiles )
+			{
+				// Skip code archives, binaries, and hidden folders
+				if ( file.EndsWith( ".cll", StringComparison.OrdinalIgnoreCase ) )
+					continue;
+				if ( file.StartsWith( ".bin", StringComparison.OrdinalIgnoreCase ) || file.Contains( "/.bin" ) )
+					continue;
+				if ( file.StartsWith( "." ) )
+					continue;
+
+				try
+				{
+					var fileBytes = packageFs.ReadAllBytes( file );
+					if ( fileBytes is null )
+						continue;
+
+					var relativePath = file.TrimStart( '/', '\\' );
+					var fullPath = Path.Combine( assetsPath, relativePath );
+					var dir = Path.GetDirectoryName( fullPath );
+					if ( !string.IsNullOrEmpty( dir ) && !Directory.Exists( dir ) )
+					{
+						Directory.CreateDirectory( dir );
+					}
+
+					File.WriteAllBytes( fullPath, fileBytes.ToArray() );
+					log.Trace( $"Copied asset: {relativePath}" );
+				}
+				catch ( Exception e )
+				{
+					log.Warning( $"Failed to copy asset '{file}': {e.Message}" );
+				}
+			}
+
+			log.Info( $"Extraction complete. Source: {codePath}, Assets: {assetsPath}" );
+
+			// Trigger rebuild of project compilers to pick up new source
+			Project.RebuildCompilers();
+
+			return true;
+		}
+		catch ( Exception e )
+		{
+			Log.Error( e, $"Failed to extract game: {e.Message}" );
+			return false;
+		}
+		finally
+		{
+			packageFs?.Dispose();
+		}
+	}
 }
 
