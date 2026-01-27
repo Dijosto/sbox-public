@@ -1,0 +1,15 @@
+{
+  "Title": "Code Obfuscation",
+  "Type": "library",
+  "Org": "local",
+  "Ident": "obfuscation",
+  "Tags": "editor tools",
+  "Schema": 1,
+  "HasAssets": false,
+  "HasCode": true,
+  "Metadata": {
+    "Compiler": {
+      "TreatWarningsAsErrors": true
+    }
+  }
+}
