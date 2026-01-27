@@ -80,43 +80,10 @@ public class SymbolRenamer : CSharpSyntaxRewriter
 		return true;
 	}
 
-	/// <summary>
-	/// Check if a node has attributes that suggest it shouldn't be renamed.
-	/// </summary>
-	private bool HasPreservationAttribute( SyntaxList<AttributeListSyntax> attributeLists )
-	{
-		foreach ( var attrList in attributeLists )
-		{
-			foreach ( var attr in attrList.Attributes )
-			{
-				var name = attr.Name.ToString();
-				// Common serialization/reflection attributes that need stable names
-				if ( name.Contains( "Serializable" ) ||
-					 name.Contains( "JsonProperty" ) ||
-					 name.Contains( "JsonInclude" ) ||
-					 name.Contains( "DataMember" ) ||
-					 name.Contains( "XmlElement" ) ||
-					 name.Contains( "Property" ) ||  // s&box [Property]
-					 name.Contains( "Sync" ) ||      // s&box [Sync]
-					 name.Contains( "Net" ) ||       // s&box networking
-					 name.Contains( "Event" ) ||     // s&box events
-					 name.Contains( "ConVar" ) ||    // s&box console vars
-					 name.Contains( "ConCmd" ) )     // s&box console commands
-				{
-					return true;
-				}
-			}
-		}
-		return false;
-	}
-
 	// ===== FIELDS =====
 	public override SyntaxNode VisitFieldDeclaration( FieldDeclarationSyntax node )
 	{
 		if ( !IsPrivateMember( node.Modifiers ) )
-			return base.VisitFieldDeclaration( node );
-
-		if ( HasPreservationAttribute( node.AttributeLists ) )
 			return base.VisitFieldDeclaration( node );
 
 		var variables = node.Declaration.Variables;
@@ -142,9 +109,6 @@ public class SymbolRenamer : CSharpSyntaxRewriter
 		if ( !IsPrivateMember( node.Modifiers ) )
 			return base.VisitPropertyDeclaration( node );
 
-		if ( HasPreservationAttribute( node.AttributeLists ) )
-			return base.VisitPropertyDeclaration( node );
-
 		// Don't rename if it's an interface implementation (has explicit interface specifier)
 		if ( node.ExplicitInterfaceSpecifier != null )
 			return base.VisitPropertyDeclaration( node );
@@ -160,9 +124,6 @@ public class SymbolRenamer : CSharpSyntaxRewriter
 	public override SyntaxNode VisitMethodDeclaration( MethodDeclarationSyntax node )
 	{
 		if ( !CanRenameMethod( node.Modifiers ) )
-			return base.VisitMethodDeclaration( node );
-
-		if ( HasPreservationAttribute( node.AttributeLists ) )
 			return base.VisitMethodDeclaration( node );
 
 		// Don't rename if it's an interface implementation
@@ -182,9 +143,6 @@ public class SymbolRenamer : CSharpSyntaxRewriter
 		if ( !IsPrivateMember( node.Modifiers ) )
 			return base.VisitEventDeclaration( node );
 
-		if ( HasPreservationAttribute( node.AttributeLists ) )
-			return base.VisitEventDeclaration( node );
-
 		var newName = GetOrCreateName( node.Identifier.Text );
 		var newIdentifier = SyntaxFactory.Identifier( newName )
 			.WithTriviaFrom( node.Identifier );
@@ -195,9 +153,6 @@ public class SymbolRenamer : CSharpSyntaxRewriter
 	public override SyntaxNode VisitEventFieldDeclaration( EventFieldDeclarationSyntax node )
 	{
 		if ( !IsPrivateMember( node.Modifiers ) )
-			return base.VisitEventFieldDeclaration( node );
-
-		if ( HasPreservationAttribute( node.AttributeLists ) )
 			return base.VisitEventFieldDeclaration( node );
 
 		var variables = node.Declaration.Variables;
@@ -223,9 +178,6 @@ public class SymbolRenamer : CSharpSyntaxRewriter
 		if ( !IsPrivateMember( node.Modifiers ) )
 			return base.VisitDelegateDeclaration( node );
 
-		if ( HasPreservationAttribute( node.AttributeLists ) )
-			return base.VisitDelegateDeclaration( node );
-
 		var newName = GetOrCreateName( node.Identifier.Text );
 		var newIdentifier = SyntaxFactory.Identifier( newName )
 			.WithTriviaFrom( node.Identifier );
@@ -241,9 +193,6 @@ public class SymbolRenamer : CSharpSyntaxRewriter
 			return base.VisitClassDeclaration( node );
 
 		if ( !IsPrivateMember( node.Modifiers ) )
-			return base.VisitClassDeclaration( node );
-
-		if ( HasPreservationAttribute( node.AttributeLists ) )
 			return base.VisitClassDeclaration( node );
 
 		var newName = GetOrCreateName( node.Identifier.Text );
@@ -262,9 +211,6 @@ public class SymbolRenamer : CSharpSyntaxRewriter
 		if ( !IsPrivateMember( node.Modifiers ) )
 			return base.VisitStructDeclaration( node );
 
-		if ( HasPreservationAttribute( node.AttributeLists ) )
-			return base.VisitStructDeclaration( node );
-
 		var newName = GetOrCreateName( node.Identifier.Text );
 		var newIdentifier = SyntaxFactory.Identifier( newName )
 			.WithTriviaFrom( node.Identifier );
@@ -279,9 +225,6 @@ public class SymbolRenamer : CSharpSyntaxRewriter
 			return base.VisitEnumDeclaration( node );
 
 		if ( !IsPrivateMember( node.Modifiers ) )
-			return base.VisitEnumDeclaration( node );
-
-		if ( HasPreservationAttribute( node.AttributeLists ) )
 			return base.VisitEnumDeclaration( node );
 
 		var newName = GetOrCreateName( node.Identifier.Text );
