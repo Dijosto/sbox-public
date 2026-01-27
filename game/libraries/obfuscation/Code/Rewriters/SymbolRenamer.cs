@@ -57,30 +57,66 @@ public class SymbolRenamer : CSharpSyntaxRewriter
 		return newName;
 	}
 
-	private bool IsPrivateField( FieldDeclarationSyntax field )
+	/// <summary>
+	/// Check if a member has private accessibility (no public/protected/internal modifiers).
+	/// </summary>
+	private bool IsPrivateMember( SyntaxTokenList modifiers )
 	{
-		// Consider it private if no access modifier or explicit private
-		var modifiers = field.Modifiers;
 		if ( modifiers.Any( SyntaxKind.PublicKeyword ) ) return false;
 		if ( modifiers.Any( SyntaxKind.ProtectedKeyword ) ) return false;
 		if ( modifiers.Any( SyntaxKind.InternalKeyword ) ) return false;
 		return true;
 	}
 
-	private bool IsPrivateMethod( MethodDeclarationSyntax method )
+	/// <summary>
+	/// Check if a method can be renamed (private and not override/virtual/interface impl).
+	/// </summary>
+	private bool CanRenameMethod( SyntaxTokenList modifiers )
 	{
-		var modifiers = method.Modifiers;
-		if ( modifiers.Any( SyntaxKind.PublicKeyword ) ) return false;
-		if ( modifiers.Any( SyntaxKind.ProtectedKeyword ) ) return false;
-		if ( modifiers.Any( SyntaxKind.InternalKeyword ) ) return false;
+		if ( !IsPrivateMember( modifiers ) ) return false;
 		if ( modifiers.Any( SyntaxKind.OverrideKeyword ) ) return false;
 		if ( modifiers.Any( SyntaxKind.VirtualKeyword ) ) return false;
+		if ( modifiers.Any( SyntaxKind.AbstractKeyword ) ) return false;
 		return true;
 	}
 
+	/// <summary>
+	/// Check if a node has attributes that suggest it shouldn't be renamed.
+	/// </summary>
+	private bool HasPreservationAttribute( SyntaxList<AttributeListSyntax> attributeLists )
+	{
+		foreach ( var attrList in attributeLists )
+		{
+			foreach ( var attr in attrList.Attributes )
+			{
+				var name = attr.Name.ToString();
+				// Common serialization/reflection attributes that need stable names
+				if ( name.Contains( "Serializable" ) ||
+					 name.Contains( "JsonProperty" ) ||
+					 name.Contains( "JsonInclude" ) ||
+					 name.Contains( "DataMember" ) ||
+					 name.Contains( "XmlElement" ) ||
+					 name.Contains( "Property" ) ||  // s&box [Property]
+					 name.Contains( "Sync" ) ||      // s&box [Sync]
+					 name.Contains( "Net" ) ||       // s&box networking
+					 name.Contains( "Event" ) ||     // s&box events
+					 name.Contains( "ConVar" ) ||    // s&box console vars
+					 name.Contains( "ConCmd" ) )     // s&box console commands
+				{
+					return true;
+				}
+			}
+		}
+		return false;
+	}
+
+	// ===== FIELDS =====
 	public override SyntaxNode VisitFieldDeclaration( FieldDeclarationSyntax node )
 	{
-		if ( !IsPrivateField( node ) )
+		if ( !IsPrivateMember( node.Modifiers ) )
+			return base.VisitFieldDeclaration( node );
+
+		if ( HasPreservationAttribute( node.AttributeLists ) )
 			return base.VisitFieldDeclaration( node );
 
 		var variables = node.Declaration.Variables;
@@ -100,9 +136,37 @@ public class SymbolRenamer : CSharpSyntaxRewriter
 		return base.VisitFieldDeclaration( node.WithDeclaration( newDeclaration ) );
 	}
 
+	// ===== PROPERTIES =====
+	public override SyntaxNode VisitPropertyDeclaration( PropertyDeclarationSyntax node )
+	{
+		if ( !IsPrivateMember( node.Modifiers ) )
+			return base.VisitPropertyDeclaration( node );
+
+		if ( HasPreservationAttribute( node.AttributeLists ) )
+			return base.VisitPropertyDeclaration( node );
+
+		// Don't rename if it's an interface implementation (has explicit interface specifier)
+		if ( node.ExplicitInterfaceSpecifier != null )
+			return base.VisitPropertyDeclaration( node );
+
+		var newName = GetOrCreateName( node.Identifier.Text );
+		var newIdentifier = SyntaxFactory.Identifier( newName )
+			.WithTriviaFrom( node.Identifier );
+
+		return base.VisitPropertyDeclaration( node.WithIdentifier( newIdentifier ) );
+	}
+
+	// ===== METHODS =====
 	public override SyntaxNode VisitMethodDeclaration( MethodDeclarationSyntax node )
 	{
-		if ( !IsPrivateMethod( node ) )
+		if ( !CanRenameMethod( node.Modifiers ) )
+			return base.VisitMethodDeclaration( node );
+
+		if ( HasPreservationAttribute( node.AttributeLists ) )
+			return base.VisitMethodDeclaration( node );
+
+		// Don't rename if it's an interface implementation
+		if ( node.ExplicitInterfaceSpecifier != null )
 			return base.VisitMethodDeclaration( node );
 
 		var newName = GetOrCreateName( node.Identifier.Text );
@@ -112,6 +176,122 @@ public class SymbolRenamer : CSharpSyntaxRewriter
 		return base.VisitMethodDeclaration( node.WithIdentifier( newIdentifier ) );
 	}
 
+	// ===== EVENTS =====
+	public override SyntaxNode VisitEventDeclaration( EventDeclarationSyntax node )
+	{
+		if ( !IsPrivateMember( node.Modifiers ) )
+			return base.VisitEventDeclaration( node );
+
+		if ( HasPreservationAttribute( node.AttributeLists ) )
+			return base.VisitEventDeclaration( node );
+
+		var newName = GetOrCreateName( node.Identifier.Text );
+		var newIdentifier = SyntaxFactory.Identifier( newName )
+			.WithTriviaFrom( node.Identifier );
+
+		return base.VisitEventDeclaration( node.WithIdentifier( newIdentifier ) );
+	}
+
+	public override SyntaxNode VisitEventFieldDeclaration( EventFieldDeclarationSyntax node )
+	{
+		if ( !IsPrivateMember( node.Modifiers ) )
+			return base.VisitEventFieldDeclaration( node );
+
+		if ( HasPreservationAttribute( node.AttributeLists ) )
+			return base.VisitEventFieldDeclaration( node );
+
+		var variables = node.Declaration.Variables;
+		var newVariables = new List<VariableDeclaratorSyntax>();
+
+		foreach ( var variable in variables )
+		{
+			var newName = GetOrCreateName( variable.Identifier.Text );
+			var newIdentifier = SyntaxFactory.Identifier( newName )
+				.WithTriviaFrom( variable.Identifier );
+			newVariables.Add( variable.WithIdentifier( newIdentifier ) );
+		}
+
+		var newDeclaration = node.Declaration.WithVariables(
+			SyntaxFactory.SeparatedList( newVariables ) );
+
+		return base.VisitEventFieldDeclaration( node.WithDeclaration( newDeclaration ) );
+	}
+
+	// ===== DELEGATES =====
+	public override SyntaxNode VisitDelegateDeclaration( DelegateDeclarationSyntax node )
+	{
+		if ( !IsPrivateMember( node.Modifiers ) )
+			return base.VisitDelegateDeclaration( node );
+
+		if ( HasPreservationAttribute( node.AttributeLists ) )
+			return base.VisitDelegateDeclaration( node );
+
+		var newName = GetOrCreateName( node.Identifier.Text );
+		var newIdentifier = SyntaxFactory.Identifier( newName )
+			.WithTriviaFrom( node.Identifier );
+
+		return base.VisitDelegateDeclaration( node.WithIdentifier( newIdentifier ) );
+	}
+
+	// ===== NESTED TYPES =====
+	public override SyntaxNode VisitClassDeclaration( ClassDeclarationSyntax node )
+	{
+		// Only rename nested private classes
+		if ( node.Parent is not TypeDeclarationSyntax )
+			return base.VisitClassDeclaration( node );
+
+		if ( !IsPrivateMember( node.Modifiers ) )
+			return base.VisitClassDeclaration( node );
+
+		if ( HasPreservationAttribute( node.AttributeLists ) )
+			return base.VisitClassDeclaration( node );
+
+		var newName = GetOrCreateName( node.Identifier.Text );
+		var newIdentifier = SyntaxFactory.Identifier( newName )
+			.WithTriviaFrom( node.Identifier );
+
+		return base.VisitClassDeclaration( node.WithIdentifier( newIdentifier ) );
+	}
+
+	public override SyntaxNode VisitStructDeclaration( StructDeclarationSyntax node )
+	{
+		// Only rename nested private structs
+		if ( node.Parent is not TypeDeclarationSyntax )
+			return base.VisitStructDeclaration( node );
+
+		if ( !IsPrivateMember( node.Modifiers ) )
+			return base.VisitStructDeclaration( node );
+
+		if ( HasPreservationAttribute( node.AttributeLists ) )
+			return base.VisitStructDeclaration( node );
+
+		var newName = GetOrCreateName( node.Identifier.Text );
+		var newIdentifier = SyntaxFactory.Identifier( newName )
+			.WithTriviaFrom( node.Identifier );
+
+		return base.VisitStructDeclaration( node.WithIdentifier( newIdentifier ) );
+	}
+
+	public override SyntaxNode VisitEnumDeclaration( EnumDeclarationSyntax node )
+	{
+		// Only rename nested private enums
+		if ( node.Parent is not TypeDeclarationSyntax )
+			return base.VisitEnumDeclaration( node );
+
+		if ( !IsPrivateMember( node.Modifiers ) )
+			return base.VisitEnumDeclaration( node );
+
+		if ( HasPreservationAttribute( node.AttributeLists ) )
+			return base.VisitEnumDeclaration( node );
+
+		var newName = GetOrCreateName( node.Identifier.Text );
+		var newIdentifier = SyntaxFactory.Identifier( newName )
+			.WithTriviaFrom( node.Identifier );
+
+		return base.VisitEnumDeclaration( node.WithIdentifier( newIdentifier ) );
+	}
+
+	// ===== LOCAL VARIABLES =====
 	public override SyntaxNode VisitVariableDeclarator( VariableDeclaratorSyntax node )
 	{
 		// Check if this is a local variable (inside a method/property)
@@ -127,6 +307,7 @@ public class SymbolRenamer : CSharpSyntaxRewriter
 		return base.VisitVariableDeclarator( node );
 	}
 
+	// ===== PARAMETERS =====
 	public override SyntaxNode VisitParameter( ParameterSyntax node )
 	{
 		var newName = GetOrCreateName( node.Identifier.Text );
@@ -135,6 +316,7 @@ public class SymbolRenamer : CSharpSyntaxRewriter
 		return base.VisitParameter( node.WithIdentifier( newIdentifier ) );
 	}
 
+	// ===== IDENTIFIER REFERENCES =====
 	public override SyntaxNode VisitIdentifierName( IdentifierNameSyntax node )
 	{
 		// Look up if this identifier was renamed
