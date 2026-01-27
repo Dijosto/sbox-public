@@ -1,7 +1,7 @@
 namespace Obfuscation;
 
 /// <summary>
-/// Renames private members and local variables to obfuscated names.
+/// Renames all members and local variables to obfuscated names.
 /// Uses a consistent naming scheme so references remain valid.
 /// </summary>
 public class SymbolRenamer : CSharpSyntaxRewriter
@@ -58,22 +58,10 @@ public class SymbolRenamer : CSharpSyntaxRewriter
 	}
 
 	/// <summary>
-	/// Check if a member has private accessibility (no public/protected/internal modifiers).
-	/// </summary>
-	private bool IsPrivateMember( SyntaxTokenList modifiers )
-	{
-		if ( modifiers.Any( SyntaxKind.PublicKeyword ) ) return false;
-		if ( modifiers.Any( SyntaxKind.ProtectedKeyword ) ) return false;
-		if ( modifiers.Any( SyntaxKind.InternalKeyword ) ) return false;
-		return true;
-	}
-
-	/// <summary>
-	/// Check if a method can be renamed (private and not override/virtual/interface impl).
+	/// Check if a method can be renamed (not override/virtual/abstract - these must match base class).
 	/// </summary>
 	private bool CanRenameMethod( SyntaxTokenList modifiers )
 	{
-		if ( !IsPrivateMember( modifiers ) ) return false;
 		if ( modifiers.Any( SyntaxKind.OverrideKeyword ) ) return false;
 		if ( modifiers.Any( SyntaxKind.VirtualKeyword ) ) return false;
 		if ( modifiers.Any( SyntaxKind.AbstractKeyword ) ) return false;
@@ -83,9 +71,6 @@ public class SymbolRenamer : CSharpSyntaxRewriter
 	// ===== FIELDS =====
 	public override SyntaxNode VisitFieldDeclaration( FieldDeclarationSyntax node )
 	{
-		if ( !IsPrivateMember( node.Modifiers ) )
-			return base.VisitFieldDeclaration( node );
-
 		var variables = node.Declaration.Variables;
 		var newVariables = new List<VariableDeclaratorSyntax>();
 
@@ -106,10 +91,7 @@ public class SymbolRenamer : CSharpSyntaxRewriter
 	// ===== PROPERTIES =====
 	public override SyntaxNode VisitPropertyDeclaration( PropertyDeclarationSyntax node )
 	{
-		if ( !IsPrivateMember( node.Modifiers ) )
-			return base.VisitPropertyDeclaration( node );
-
-		// Don't rename if it's an interface implementation (has explicit interface specifier)
+		// Don't rename if it's an explicit interface implementation
 		if ( node.ExplicitInterfaceSpecifier != null )
 			return base.VisitPropertyDeclaration( node );
 
@@ -140,9 +122,6 @@ public class SymbolRenamer : CSharpSyntaxRewriter
 	// ===== EVENTS =====
 	public override SyntaxNode VisitEventDeclaration( EventDeclarationSyntax node )
 	{
-		if ( !IsPrivateMember( node.Modifiers ) )
-			return base.VisitEventDeclaration( node );
-
 		var newName = GetOrCreateName( node.Identifier.Text );
 		var newIdentifier = SyntaxFactory.Identifier( newName )
 			.WithTriviaFrom( node.Identifier );
@@ -152,9 +131,6 @@ public class SymbolRenamer : CSharpSyntaxRewriter
 
 	public override SyntaxNode VisitEventFieldDeclaration( EventFieldDeclarationSyntax node )
 	{
-		if ( !IsPrivateMember( node.Modifiers ) )
-			return base.VisitEventFieldDeclaration( node );
-
 		var variables = node.Declaration.Variables;
 		var newVariables = new List<VariableDeclaratorSyntax>();
 
@@ -175,9 +151,6 @@ public class SymbolRenamer : CSharpSyntaxRewriter
 	// ===== DELEGATES =====
 	public override SyntaxNode VisitDelegateDeclaration( DelegateDeclarationSyntax node )
 	{
-		if ( !IsPrivateMember( node.Modifiers ) )
-			return base.VisitDelegateDeclaration( node );
-
 		var newName = GetOrCreateName( node.Identifier.Text );
 		var newIdentifier = SyntaxFactory.Identifier( newName )
 			.WithTriviaFrom( node.Identifier );
@@ -185,16 +158,9 @@ public class SymbolRenamer : CSharpSyntaxRewriter
 		return base.VisitDelegateDeclaration( node.WithIdentifier( newIdentifier ) );
 	}
 
-	// ===== NESTED TYPES =====
+	// ===== TYPES =====
 	public override SyntaxNode VisitClassDeclaration( ClassDeclarationSyntax node )
 	{
-		// Only rename nested private classes
-		if ( node.Parent is not TypeDeclarationSyntax )
-			return base.VisitClassDeclaration( node );
-
-		if ( !IsPrivateMember( node.Modifiers ) )
-			return base.VisitClassDeclaration( node );
-
 		var newName = GetOrCreateName( node.Identifier.Text );
 		var newIdentifier = SyntaxFactory.Identifier( newName )
 			.WithTriviaFrom( node.Identifier );
@@ -204,13 +170,6 @@ public class SymbolRenamer : CSharpSyntaxRewriter
 
 	public override SyntaxNode VisitStructDeclaration( StructDeclarationSyntax node )
 	{
-		// Only rename nested private structs
-		if ( node.Parent is not TypeDeclarationSyntax )
-			return base.VisitStructDeclaration( node );
-
-		if ( !IsPrivateMember( node.Modifiers ) )
-			return base.VisitStructDeclaration( node );
-
 		var newName = GetOrCreateName( node.Identifier.Text );
 		var newIdentifier = SyntaxFactory.Identifier( newName )
 			.WithTriviaFrom( node.Identifier );
@@ -220,18 +179,20 @@ public class SymbolRenamer : CSharpSyntaxRewriter
 
 	public override SyntaxNode VisitEnumDeclaration( EnumDeclarationSyntax node )
 	{
-		// Only rename nested private enums
-		if ( node.Parent is not TypeDeclarationSyntax )
-			return base.VisitEnumDeclaration( node );
-
-		if ( !IsPrivateMember( node.Modifiers ) )
-			return base.VisitEnumDeclaration( node );
-
 		var newName = GetOrCreateName( node.Identifier.Text );
 		var newIdentifier = SyntaxFactory.Identifier( newName )
 			.WithTriviaFrom( node.Identifier );
 
 		return base.VisitEnumDeclaration( node.WithIdentifier( newIdentifier ) );
+	}
+
+	public override SyntaxNode VisitEnumMemberDeclaration( EnumMemberDeclarationSyntax node )
+	{
+		var newName = GetOrCreateName( node.Identifier.Text );
+		var newIdentifier = SyntaxFactory.Identifier( newName )
+			.WithTriviaFrom( node.Identifier );
+
+		return base.VisitEnumMemberDeclaration( node.WithIdentifier( newIdentifier ) );
 	}
 
 	// ===== LOCAL VARIABLES =====
@@ -274,7 +235,7 @@ public class SymbolRenamer : CSharpSyntaxRewriter
 	}
 
 	/// <summary>
-	/// Process a syntax tree, renaming private symbols.
+	/// Process a syntax tree, renaming all symbols.
 	/// </summary>
 	public static SyntaxTree Process( SyntaxTree tree, HashSet<string> preservedNames = null )
 	{
