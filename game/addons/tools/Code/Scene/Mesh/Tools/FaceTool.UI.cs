@@ -29,6 +29,13 @@ partial class FaceTool
 		[Range( 0, 64, slider: false ), Step( 1 ), WideMode]
 		private Vector2Int NumCuts = 1;
 
+		public bool SelectByMaterial { get; set; } = false;
+		public bool SelectByNormal { get; set; } = true;
+
+		[Range( 0.1f, 90f, slider: false ), Step( 1 ), Title( "Normal Threshold" )]
+		public float NormalThreshold { get; set; } = 12.0f;
+		public bool OverlaySelection { get; set; } = true;
+
 		public FaceSelectionWidget( SerializedObject so, MeshTool tool ) : base()
 		{
 			AddTitle( "Face Mode", "change_history" );
@@ -40,6 +47,28 @@ partial class FaceTool
 
 			_faceGroups = _faces.GroupBy( x => x.Component ).ToList();
 			_components = _faceGroups.Select( x => x.Key ).ToList();
+
+			SelectByMaterial = EditorCookie.Get( "FaceTool.SelectByMaterial", false );
+			SelectByNormal = EditorCookie.Get( "FaceTool.SelectByNormal", true );
+			NormalThreshold = EditorCookie.Get( "FaceTool.NormalThreshold", 12.0f );
+			OverlaySelection = EditorCookie.Get( "FaceTool.OverlaySelection", true );
+
+			if ( _meshTool.CurrentTool is FaceTool ft )
+			{
+				ft.SelectByMaterial = SelectByMaterial;
+				ft.SelectByNormal = SelectByNormal;
+				ft.NormalThreshold = NormalThreshold;
+				ft.OverlaySelection = OverlaySelection;
+			}
+
+			var target = this.GetSerialized();
+			target.OnPropertyChanged = ( p ) =>
+			{
+				EditorCookie.Set( "FaceTool.SelectByMaterial", SelectByMaterial );
+				EditorCookie.Set( "FaceTool.SelectByNormal", SelectByNormal );
+				EditorCookie.Set( "FaceTool.NormalThreshold", NormalThreshold );
+				EditorCookie.Set( "FaceTool.OverlaySelection", OverlaySelection );
+			};
 
 			{
 				var group = AddGroup( "Move Mode" );
@@ -98,6 +127,57 @@ partial class FaceTool
 			}
 
 			Layout.AddStretchCell();
+
+			{
+				var group = AddGroup( "Filtered Selection [Alt + Double Click]" );
+
+				var normalRow = Layout.Row();
+				normalRow.Spacing = 4;
+
+				var materialRow = Layout.Row();
+				materialRow.Spacing = 4;
+
+				var useMaterial = ControlWidget.Create( target.GetProperty( nameof( SelectByMaterial ) ) );
+				useMaterial.FixedHeight = Theme.ControlHeight;
+
+				var materialLabel = new Label { Text = "Use Material" };
+
+				materialRow.Add( useMaterial );
+				materialRow.Add( materialLabel );
+				materialRow.AddStretchCell();
+
+				group.Add( materialRow );
+
+				var useNormal = ControlWidget.Create( target.GetProperty( nameof( SelectByNormal ) ) );
+				useNormal.FixedHeight = Theme.ControlHeight;
+
+				var normalLabel = new Label { Text = "Use Normal" };
+				var normalControl = ControlWidget.Create( target.GetProperty( nameof( NormalThreshold ) ) );
+				normalControl.FixedHeight = Theme.ControlHeight;
+				normalControl.FixedWidth = 72;
+
+				normalRow.Add( useNormal );
+				normalRow.Add( normalLabel );
+				normalRow.AddStretchCell();
+				normalRow.Add( normalControl );
+
+				group.Add( normalRow );
+			}
+
+			{
+				var group = AddGroup( "Display" );
+				var overlayRow = Layout.Row();
+				overlayRow.Spacing = 4;
+
+				var selectionOverlay = ControlWidget.Create( target.GetProperty( nameof( OverlaySelection ) ) );
+				var selectionOverlayLabel = new Label { Text = "Overlay Selection" };
+				selectionOverlay.FixedHeight = Theme.ControlHeight;
+
+				overlayRow.Add( selectionOverlay );
+				overlayRow.Add( selectionOverlayLabel );
+
+				group.Add( overlayRow );
+			}
 		}
 
 		[Shortcut( "mesh.edge-cut-tool", "C", typeof( SceneViewWidget ) )]
@@ -468,6 +548,115 @@ partial class FaceTool
 					{
 						selection.Add( new MeshFace( group.Key, hFace ) );
 					}
+				}
+			}
+		}
+
+		[Shortcut( "mesh.grow-selection", "KP_ADD", typeof( SceneViewWidget ) )]
+		private void GrowSelection()
+		{
+			if ( _faces.Length == 0 ) return;
+
+			using var scope = SceneEditorSession.Scope();
+
+			using ( SceneEditorSession.Active.UndoScope( "Grow Selection" )
+				.WithComponentChanges( _components )
+				.Push() )
+			{
+				var selection = SceneEditorSession.Active.Selection;
+				var newFaces = new HashSet<MeshFace>();
+
+				foreach ( var face in _faces )
+				{
+					if ( !face.IsValid() )
+						continue;
+
+					newFaces.Add( face );
+				}
+
+				foreach ( var face in _faces )
+				{
+					if ( !face.IsValid() )
+						continue;
+
+					var mesh = face.Component.Mesh;
+					var edges = mesh.GetFaceEdges( face.Handle );
+
+					foreach ( var edge in edges )
+					{
+						mesh.GetFacesConnectedToEdge( edge, out var faceA, out var faceB );
+
+						if ( faceA.IsValid && faceA != face.Handle )
+							newFaces.Add( new MeshFace( face.Component, faceA ) );
+
+						if ( faceB.IsValid && faceB != face.Handle )
+							newFaces.Add( new MeshFace( face.Component, faceB ) );
+					}
+				}
+
+				selection.Clear();
+				foreach ( var face in newFaces )
+				{
+					if ( face.IsValid() )
+						selection.Add( face );
+				}
+			}
+		}
+
+		[Shortcut( "mesh.shrink-selection", "KP_MINUS", typeof( SceneViewWidget ) )]
+		private void ShrinkSelection()
+		{
+			if ( _faces.Length == 0 ) return;
+
+			using var scope = SceneEditorSession.Scope();
+
+			using ( SceneEditorSession.Active.UndoScope( "Shrink Selection" )
+				.WithComponentChanges( _components )
+				.Push() )
+			{
+				var selection = SceneEditorSession.Active.Selection;
+				var facesToKeep = new HashSet<MeshFace>();
+
+				foreach ( var face in _faces )
+				{
+					if ( !face.IsValid() )
+						continue;
+
+					var mesh = face.Component.Mesh;
+					var edges = mesh.GetFaceEdges( face.Handle );
+					bool isInterior = true;
+
+					foreach ( var edge in edges )
+					{
+						mesh.GetFacesConnectedToEdge( edge, out var faceA, out var faceB );
+
+						var otherFace = faceA == face.Handle ? faceB : faceA;
+
+						if ( !otherFace.IsValid )
+						{
+							isInterior = false;
+							break;
+						}
+
+						var otherMeshFace = new MeshFace( face.Component, otherFace );
+						if ( !_faces.Contains( otherMeshFace ) )
+						{
+							isInterior = false;
+							break;
+						}
+					}
+
+					if ( isInterior )
+					{
+						facesToKeep.Add( face );
+					}
+				}
+
+				selection.Clear();
+				foreach ( var face in facesToKeep )
+				{
+					if ( face.IsValid() )
+						selection.Add( face );
 				}
 			}
 		}

@@ -152,10 +152,10 @@ public class EditorMainWindow : DockWindow
 		}
 
 		{
-			var projectMenu = MenuBar.AddMenu( "Project" );
-			projectMenu.AddOption( "Play", "play_arrow", EditorScene.TogglePlay, "editor.toggle-play" );
+			var gameMenu = MenuBar.AddMenu( "Game" );
+			gameMenu.AddOption( "Play", "play_arrow", EditorScene.TogglePlay, "editor.toggle-play" );
 
-			projectMenu.AddOption( new Option()
+			gameMenu.AddOption( new Option()
 			{
 				Checkable = true,
 				Checked = EditorScene.PlayMode,
@@ -164,9 +164,7 @@ public class EditorMainWindow : DockWindow
 				Icon = "sports_esports"
 			} );
 
-			projectMenu.AddSeparator();
-			projectMenu.AddOption( "Open Project Folder", "folder", () => EditorUtility.OpenFolder( Project.Current.GetRootPath() ) );
-			projectMenu.AddOption( "Open Solution", "integration_instructions", OpenSolution, "editor.open-solution" );
+			gameMenu.AddSeparator();
 		}
 
 		{
@@ -187,7 +185,7 @@ public class EditorMainWindow : DockWindow
 
 			help.AddOption( "Open Log Folder", "source", () => EditorUtility.OpenFolder( FileSystem.Root.GetFullPath( "/logs/" ) ) );
 			help.AddOption( "Developer Documentation", "article", () => EditorUtility.OpenFolder( "https://sbox.game/dev/" ) );
-			help.AddOption( "Report a Bug", "bug_report", () => EditorUtility.OpenFolder( "https://github.com/Facepunch/sbox-issues" ) );
+			help.AddOption( "Report a Bug", "bug_report", () => EditorUtility.OpenFolder( "https://github.com/Facepunch/sbox-public/issues" ) );
 
 			help.AddSeparator();
 			help.AddOption( "About s&box editor", "info", () =>
@@ -506,8 +504,7 @@ public class EditorMainWindow : DockWindow
 
 	public void UpdateEditorTitle( string title )
 	{
-		var projectName = Project.Current?.Config.Title ?? "No Project";
-		Title = $"{title} - {projectName} - s&box editor{(Global.IsApiConnected ? "" : " - offline")}";
+		Title = $"{title} - s&box editor{(Global.IsApiConnected ? "" : " - offline")}";
 	}
 
 	void BuildRecentScenes()
