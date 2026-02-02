@@ -344,17 +344,17 @@ Compare:
 - [x] World map service
 - [x] Complete Dragons of Atlantis data extraction (1266 lines of game mechanics)
 
-### Phase 2: Game Systems 🚧 (In Progress)
+### Phase 2: Game Systems ✅ (Complete)
 - [x] Game configuration utilities (buildings, troops, research, resources)
 - [x] Building definitions (12+ types, 35 levels, cost formulas)
 - [x] Troop stats & combat calculations (11+ troop types)
 - [x] Research tree implementation (13+ technologies, 20 levels each)
 - [x] Resource production formulas (with research & wilderness bonuses)
 - [x] Economic calculations (taxation, population, happiness)
-- [ ] Building upgrade logic with timers (in progress)
-- [ ] Troop training queue system
-- [ ] Research queue system with prerequisites
-- [ ] Durable Object alarms for timer completion
+- [x] Building upgrade logic with timers and queue management
+- [x] Troop training queue system with garrison-based speed
+- [x] Research queue system with prerequisites and dependency chains
+- [x] Durable Object alarms for automatic timer completion
 
 ### Phase 3: Combat & Marches 📋
 - [ ] March system with DO alarms

@@ -369,16 +369,16 @@ See `schema.sql` for complete schema.
 - [x] WebSocket notifications
 - [x] Complete game data extraction from Dragons of Atlantis wiki
 
-**Phase 2: Game Systems** 🚧 (In Progress)
+**Phase 2: Game Systems** ✅ (Complete)
 - [x] Game configuration utilities (buildings, troops, research, resources)
 - [x] Building definitions with cost formulas (12+ building types, 35 levels)
 - [x] Troop stats & combat calculations (11+ troop types with full stats)
 - [x] Research tree with bonuses (13+ technologies, 20 levels each)
 - [x] Resource production & economy formulas (taxation, population, happiness)
-- [ ] Building upgrade logic with queue management (in progress)
-- [ ] Troop training queue system with timers
-- [ ] Research queue system with prerequisites
-- [ ] Durable Object alarms for timer completion
+- [x] Building upgrade logic with queue management and worker limits
+- [x] Troop training queue system with garrison-based speed timers
+- [x] Research queue system with prerequisites and dependency validation
+- [x] Durable Object alarms for automatic timer completion
 
 **Phase 3: Combat & Marches** 📋
 - [ ] March scheduling with DO alarms
