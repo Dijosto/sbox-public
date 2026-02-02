@@ -57,13 +57,19 @@ sbox-public/
 │   │   │   ├── player.ts             # Player state
 │   │   │   ├── building.ts           # Building actions
 │   │   │   └── world.ts              # World map
-│   │   └── durable-objects/
-│   │       ├── PlayerDO.ts           # Per-player state
-│   │       ├── AllianceDO.ts         # Alliance management
-│   │       ├── WorldRegionDO.ts      # World map regions
-│   │       └── CombatDO.ts           # Combat resolution
+│   │   ├── durable-objects/
+│   │   │   ├── PlayerDO.ts           # Per-player state
+│   │   │   ├── AllianceDO.ts         # Alliance management
+│   │   │   ├── WorldRegionDO.ts      # World map regions
+│   │   │   └── CombatDO.ts           # Combat resolution
+│   │   └── utils/
+│   │       ├── buildings.ts          # Building configurations & formulas
+│   │       ├── troops.ts             # Troop stats & combat calculations
+│   │       ├── research.ts           # Research tree & bonuses
+│   │       └── resources.ts          # Resource production & economy
 │   ├── schema.sql                    # D1 database schema
 │   ├── wrangler.toml                 # Cloudflare config
+│   ├── game-data.md                  # Complete Dragons of Atlantis data reference
 │   └── README.md                     # Backend setup guide
 │
 ├── STRATEGY_GAME_ARCHITECTURE.md    # Detailed architecture doc
@@ -336,13 +342,19 @@ Compare:
 - [x] State synchronization
 - [x] WebSocket notifications
 - [x] World map service
+- [x] Complete Dragons of Atlantis data extraction (1266 lines of game mechanics)
 
-### Phase 2: Game Systems 🚧
-- [ ] Building upgrade logic with timers
-- [ ] Troop training queues
-- [ ] Resource production formulas
-- [ ] Research tech tree implementation
-- [ ] Resource cost validation
+### Phase 2: Game Systems 🚧 (In Progress)
+- [x] Game configuration utilities (buildings, troops, research, resources)
+- [x] Building definitions (12+ types, 35 levels, cost formulas)
+- [x] Troop stats & combat calculations (11+ troop types)
+- [x] Research tree implementation (13+ technologies, 20 levels each)
+- [x] Resource production formulas (with research & wilderness bonuses)
+- [x] Economic calculations (taxation, population, happiness)
+- [ ] Building upgrade logic with timers (in progress)
+- [ ] Troop training queue system
+- [ ] Research queue system with prerequisites
+- [ ] Durable Object alarms for timer completion
 
 ### Phase 3: Combat & Marches 📋
 - [ ] March system with DO alarms
@@ -376,10 +388,23 @@ Compare:
 
 ## 📚 Key Files to Read
 
-1. **STRATEGY_GAME_ARCHITECTURE.md** - Detailed architecture decisions
-2. **backend-cloudflare/README.md** - Backend setup guide
-3. **stratgame/Code/Game.cs** - Client entry point
-4. **backend-cloudflare/src/durable-objects/PlayerDO.ts** - Server state management
+**Documentation:**
+1. **STRATEGY_GAME_ARCHITECTURE.md** - Detailed architecture decisions & design patterns
+2. **backend-cloudflare/game-data.md** - Complete Dragons of Atlantis mechanics reference
+3. **backend-cloudflare/README.md** - Backend setup & deployment guide
+
+**Client (s&box C#):**
+4. **stratgame/Code/Game.cs** - Main game controller & entry point
+5. **stratgame/Code/API/CloudflareClient.cs** - HTTP client with retries & auth
+6. **stratgame/Code/Services/GameStateManager.cs** - State synchronization
+7. **stratgame/Code/Services/GameActionsService.cs** - Player actions (build, train, attack)
+
+**Backend (Cloudflare Workers TypeScript):**
+8. **backend-cloudflare/src/durable-objects/PlayerDO.ts** - Server state management
+9. **backend-cloudflare/src/utils/buildings.ts** - Building configs, costs, formulas (12+ types)
+10. **backend-cloudflare/src/utils/troops.ts** - Troop stats, training, combat (11+ types)
+11. **backend-cloudflare/src/utils/research.ts** - Research tree, bonuses, prerequisites (13+ types)
+12. **backend-cloudflare/src/utils/resources.ts** - Production, economy, taxation formulas
 
 ## 🔒 Security Considerations
 

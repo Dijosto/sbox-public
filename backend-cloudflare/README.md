@@ -36,9 +36,14 @@ backend-cloudflare/
 │   │   ├── AllianceDO.ts # Alliance management
 │   │   ├── WorldRegionDO.ts # World map regions
 │   │   └── CombatDO.ts   # Combat resolution
-│   └── utils/            # Shared utilities
+│   └── utils/            # Game configuration & formulas
+│       ├── buildings.ts  # Building definitions (12+ types, 35 levels)
+│       ├── troops.ts     # Troop stats & combat calculations (11+ types)
+│       ├── research.ts   # Research tree & bonuses (13+ technologies)
+│       └── resources.ts  # Resource production & economy formulas
 ├── schema.sql            # D1 database schema
 ├── wrangler.toml         # Cloudflare configuration
+├── game-data.md          # Complete Dragons of Atlantis mechanics reference
 ├── package.json          # Dependencies
 └── tsconfig.json         # TypeScript configuration
 ```
@@ -362,12 +367,18 @@ See `schema.sql` for complete schema.
 - [x] Player Durable Objects
 - [x] Basic state management
 - [x] WebSocket notifications
+- [x] Complete game data extraction from Dragons of Atlantis wiki
 
-**Phase 2: Game Systems** 🚧
-- [ ] Building upgrade logic
-- [ ] Troop training queues
-- [ ] Resource production formulas
-- [ ] Research tech tree
+**Phase 2: Game Systems** 🚧 (In Progress)
+- [x] Game configuration utilities (buildings, troops, research, resources)
+- [x] Building definitions with cost formulas (12+ building types, 35 levels)
+- [x] Troop stats & combat calculations (11+ troop types with full stats)
+- [x] Research tree with bonuses (13+ technologies, 20 levels each)
+- [x] Resource production & economy formulas (taxation, population, happiness)
+- [ ] Building upgrade logic with queue management (in progress)
+- [ ] Troop training queue system with timers
+- [ ] Research queue system with prerequisites
+- [ ] Durable Object alarms for timer completion
 
 **Phase 3: Combat & Marches** 📋
 - [ ] March scheduling with DO alarms
