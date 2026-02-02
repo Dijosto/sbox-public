@@ -1,0 +1,80 @@
+{
+  "__guid": "7e5a5c2a-8f3d-4c9e-b5f3-9a8c7d6e5f4a",
+  "__schema": "scene",
+  "__version": 1,
+  "GameObjects": [
+    {
+      "__guid": "1a2b3c4d-5e6f-7a8b-9c0d-1e2f3a4b5c6d",
+      "Name": "Game Manager",
+      "Enabled": true,
+      "NetworkMode": 0,
+      "Components": [
+        {
+          "__guid": "a1b2c3d4-e5f6-7a8b-9c0d-1e2f3a4b5c6d",
+          "__type": "AtlantisStrategy.Game",
+          "__enabled": true
+        }
+      ]
+    },
+    {
+      "__guid": "2b3c4d5e-6f7a-8b9c-0d1e-2f3a4b5c6d7e",
+      "Name": "Camera",
+      "Position": "0,0,300",
+      "Rotation": "0.7071068,0,0,-0.7071068",
+      "Enabled": true,
+      "NetworkMode": 0,
+      "Components": [
+        {
+          "__guid": "b2c3d4e5-f6a7-8b9c-0d1e-2f3a4b5c6d7e",
+          "__type": "Sandbox.CameraComponent",
+          "__enabled": true,
+          "BackgroundColor": "0.05,0.05,0.08,1",
+          "ClearFlags": "All",
+          "FieldOfView": 60,
+          "ZNear": 10,
+          "ZFar": 10000
+        }
+      ]
+    },
+    {
+      "__guid": "3c4d5e6f-7a8b-9c0d-1e2f-3a4b5c6d7e8f",
+      "Name": "Directional Light",
+      "Position": "0,0,200",
+      "Rotation": "0.3826834,0.3826834,0,0.8408964",
+      "Enabled": true,
+      "NetworkMode": 0,
+      "Components": [
+        {
+          "__guid": "c3d4e5f6-a7b8-9c0d-1e2f-3a4b5c6d7e8f",
+          "__type": "Sandbox.DirectionalLight",
+          "__enabled": true,
+          "LightColor": "1,0.95,0.85,1",
+          "Shadows": true,
+          "ShadowTextureResolution": 2048
+        }
+      ]
+    },
+    {
+      "__guid": "4d5e6f7a-8b9c-0d1e-2f3a-4b5c6d7e8f9a",
+      "Name": "Ambient Light",
+      "Enabled": true,
+      "NetworkMode": 0,
+      "Components": [
+        {
+          "__guid": "d4e5f6a7-b8c9-0d1e-2f3a-4b5c6d7e8f9a",
+          "__type": "Sandbox.SkyBox2D",
+          "__enabled": true,
+          "SkyMaterial": "materials/skybox/light_test_sky_sunny.vmat",
+          "Tint": "1,1,1,1"
+        }
+      ]
+    }
+  ],
+  "SceneProperties": {
+    "FixedUpdateFrequency": 50,
+    "MaxFixedUpdates": 5,
+    "NetworkFrequency": 30,
+    "ThreadedAnimation": true,
+    "UseFixedUpdate": true
+  }
+}
