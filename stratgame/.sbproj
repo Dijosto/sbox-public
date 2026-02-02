@@ -1,0 +1,37 @@
+{
+  "Title": "Atlantis Strategy",
+  "Type": "game",
+  "Org": "local",
+  "Ident": "atlantis_strategy",
+  "Tags": ["strategy", "multiplayer", "mmo"],
+  "Schema": 1,
+  "HasAssets": true,
+  "AssetsPath": "",
+  "Resources": null,
+  "MenuResources": "*",
+  "HasCode": true,
+  "CodePath": "/Code/",
+  "PackageReferences": [],
+  "EditorReferences": null,
+  "Metadata": {
+    "MaxPlayers": 1,
+    "MinPlayers": 1,
+    "TickRate": 30,
+    "GameNetworkType": "Singleplayer",
+    "MapSelect": "Unrestricted",
+    "MapList": [],
+    "RankType": "None",
+    "PerMapRanking": false,
+    "LeaderboardType": "None",
+    "CsProjName": "Atlantis Strategy",
+    "StartupScene": "scenes/main.scene",
+    "Compiler": {
+      "RootNamespace": "AtlantisStrategy",
+      "DefineConstants": "SANDBOX;GAME;DEBUG",
+      "NoWarn": "1701;1702;1591;",
+      "TreatWarningsAsErrors": false
+    },
+    "Summary": "Server-authoritative multiplayer strategy game inspired by Dragons of Atlantis. All game logic runs on Cloudflare Workers backend.",
+    "Description": "Build your city, train troops, research technology, and conquer the world map in this persistent MMO strategy game. Features server-authoritative gameplay to prevent cheating, with all state managed by Cloudflare's edge infrastructure."
+  }
+}

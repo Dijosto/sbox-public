@@ -1,0 +1,55 @@
+name = "atlantis-strategy"
+main = "src/workers/index.ts"
+compatibility_date = "2025-02-02"
+node_compat = true
+
+# Worker configuration
+workers_dev = true
+
+# Durable Objects
+[durable_objects]
+bindings = [
+  { name = "PLAYER_DO", class_name = "PlayerDurableObject", script_name = "atlantis-strategy" },
+  { name = "ALLIANCE_DO", class_name = "AllianceDurableObject", script_name = "atlantis-strategy" },
+  { name = "WORLD_REGION_DO", class_name = "WorldRegionDurableObject", script_name = "atlantis-strategy" },
+  { name = "COMBAT_DO", class_name = "CombatDurableObject", script_name = "atlantis-strategy" }
+]
+
+# D1 Database
+[[d1_databases]]
+binding = "DB"
+database_name = "atlantis-strategy-db"
+database_id = "YOUR_DATABASE_ID" # Replace with: wrangler d1 create atlantis-strategy-db
+
+# KV Namespace for game config
+[[kv_namespaces]]
+binding = "GAME_CONFIG"
+id = "YOUR_KV_ID" # Replace with: wrangler kv:namespace create GAME_CONFIG
+
+# Queue for async tasks
+[[queues.producers]]
+binding = "GAME_QUEUE"
+queue = "atlantis-game-queue"
+
+[[queues.consumers]]
+queue = "atlantis-game-queue"
+max_batch_size = 100
+max_batch_timeout = 30
+max_retries = 3
+
+# Environment variables
+[vars]
+ENVIRONMENT = "development"
+JWT_SECRET = "your-secret-key-change-in-production"
+STEAM_API_KEY = "your-steam-api-key"
+
+# Development configuration
+[env.development]
+vars = { ENVIRONMENT = "development" }
+
+# Production configuration
+[env.production]
+vars = { ENVIRONMENT = "production" }
+routes = [
+  { pattern = "api.yourgame.workers.dev/*", zone_name = "yourgame.workers.dev" }
+]
