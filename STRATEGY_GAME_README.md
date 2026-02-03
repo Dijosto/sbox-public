@@ -356,12 +356,17 @@ Compare:
 - [x] Research queue system with prerequisites and dependency chains
 - [x] Durable Object alarms for automatic timer completion
 
-### Phase 3: Combat & Marches 📋
-- [ ] March system with DO alarms
-- [ ] Combat resolution (deterministic)
-- [ ] Battle replay visualization
-- [ ] NPC camp regeneration
-- [ ] Loot calculation
+### Phase 3: Combat & Marches ✅ (Complete)
+- [x] March system with DO alarms (send, recall, auto-arrival/return)
+- [x] Combat resolution (deterministic, round-by-round)
+- [x] Battle reports saved to D1 database
+- [x] Messages/mail system for battle reports
+- [x] Persistent NPC camps from D1
+- [x] Real NPC combat with garrison troops
+- [x] Loot calculation based on victory severity
+- [x] March travel time based on troop speed
+- [x] Troop casualties system
+- [x] Gather resources from wilderness
 
 ### Phase 4: World Map 📋
 - [ ] City placement on login
@@ -400,11 +405,14 @@ Compare:
 7. **stratgame/Code/Services/GameActionsService.cs** - Player actions (build, train, attack)
 
 **Backend (Cloudflare Workers TypeScript):**
-8. **backend-cloudflare/src/durable-objects/PlayerDO.ts** - Server state management
+8. **backend-cloudflare/src/durable-objects/PlayerDO.ts** - Server state management, queues, marches
 9. **backend-cloudflare/src/utils/buildings.ts** - Building configs, costs, formulas (12+ types)
 10. **backend-cloudflare/src/utils/troops.ts** - Troop stats, training, combat (11+ types)
 11. **backend-cloudflare/src/utils/research.ts** - Research tree, bonuses, prerequisites (13+ types)
 12. **backend-cloudflare/src/utils/resources.ts** - Production, economy, taxation formulas
+13. **backend-cloudflare/src/utils/marches.ts** - March system, travel time, validation
+14. **backend-cloudflare/src/utils/combat.ts** - Combat resolution, casualties, loot calculation
+15. **backend-cloudflare/schema.sql** - D1 database schema (messages, battle_reports, npc_camps)
 
 ## 🔒 Security Considerations
 
