@@ -431,14 +431,22 @@ Start-Sleep -Seconds 1
 if ($null -ne $npcX) {
     Write-Host "[11/14] Sending scout march to NPC camp..." -ForegroundColor Yellow
     try {
-        # First recall the gathering march if it exists
+        # Wait for gathering march to complete if it exists
         if ($null -ne $gatherMarchId) {
-            $state = Invoke-RestMethod -Uri "$BaseUrl/api/player/state" -Method Get -Headers $headers
-            $gatherMarch = $state.activeMarches | Where-Object { $_.marchId -eq $gatherMarchId }
+            Write-Host "  Waiting for gathering march to complete..." -ForegroundColor Gray
 
-            if ($null -ne $gatherMarch -and $gatherMarch.status -eq "outbound") {
-                Write-Host "  Waiting for gathering march to complete..." -ForegroundColor Gray
-                Start-Sleep -Seconds 5
+            for ($i = 0; $i -lt 20; $i++) {
+                $state = Invoke-RestMethod -Uri "$BaseUrl/api/player/state" -Method Get -Headers $headers
+                $gatherMarch = $state.activeMarches | Where-Object { $_.marchId -eq $gatherMarchId }
+
+                if ($null -eq $gatherMarch) {
+                    Write-Host "  Gathering march completed" -ForegroundColor Gray
+                    break
+                }
+
+                if ($i -lt 19) {
+                    Start-Sleep -Seconds 2
+                }
             }
         }
 

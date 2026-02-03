@@ -421,7 +421,22 @@ if [ -n "$NPC_X" ]; then
   # Wait for gathering march to complete if it exists
   if [ -n "$GATHER_MARCH_ID" ]; then
     echo "  Waiting for gathering march to complete..."
-    sleep 5
+
+    for i in {1..20}; do
+      STATE=$(curl -s -X GET "$BASE_URL/api/player/state" \
+        -H "Authorization: Bearer $TOKEN")
+
+      MARCH_FOUND=$(echo "$STATE" | jq -r ".activeMarches[] | select(.marchId == \"$GATHER_MARCH_ID\") | .marchId")
+
+      if [ -z "$MARCH_FOUND" ]; then
+        echo "  Gathering march completed"
+        break
+      fi
+
+      if [ $i -lt 20 ]; then
+        sleep 2
+      fi
+    done
   fi
 
   SCOUT_RESPONSE=$(curl -s -X POST "$BASE_URL/api/player/march/send" \
