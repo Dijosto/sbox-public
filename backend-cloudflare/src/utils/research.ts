@@ -186,7 +186,11 @@ function generateProductionResearch(
         gold: Math.floor(100 * Math.pow(1.5, level - 1))
       },
       researchTime: calculateResearchTime(level),
-      prerequisites: level === 1 ? [] : [{ type: 'research', id, level: level - 1 }],
+      prerequisites: level === 1 ? [
+        { type: 'building', id: 'scienceCenter', level: 1 }
+      ] : [
+        { type: 'research', id, level: level - 1 }
+      ],
       bonus: `+${bonus}% ${resource} production`,
       effect: {
         type: 'production',
@@ -274,7 +278,11 @@ function generateWeaponsCalibrationLevels(): ResearchLevel[] {
         gold: Math.floor(200 * Math.pow(1.6, level - 1))
       },
       researchTime: calculateResearchTime(level),
-      prerequisites: level > 1 ? [{ type: 'research', id: 'weaponsCalibration', level: level - 1 }] : [],
+      prerequisites: level > 1 ? [
+        { type: 'research', id: 'weaponsCalibration', level: level - 1 }
+      ] : [
+        { type: 'building', id: 'scienceCenter', level: 1 }
+      ],
       bonus: `+${5 + level}% ranged damage`,
       effect: {
         type: 'combat',
@@ -305,7 +313,11 @@ function generateDragonyLevels(): ResearchLevel[] {
         gold: Math.floor(300 * Math.pow(1.65, level - 1))
       },
       researchTime: calculateResearchTime(level),
-      prerequisites: level > 1 ? [{ type: 'research', id: 'dragonry', level: level - 1 }] : [],
+      prerequisites: level > 1 ? [
+        { type: 'research', id: 'dragonry', level: level - 1 }
+      ] : [
+        { type: 'building', id: 'scienceCenter', level: 1 }
+      ],
       bonus: `+5% dragon speed${unlocks}`,
       effect: {
         type: 'combat',
@@ -390,7 +402,11 @@ function generateRapidDeploymentLevels(): ResearchLevel[] {
         gold: Math.floor(250 * Math.pow(1.6, level - 1))
       },
       researchTime: calculateResearchTime(level),
-      prerequisites: level > 1 ? [{ type: 'research', id: 'rapidDeployment', level: level - 1 }] : [],
+      prerequisites: level > 1 ? [
+        { type: 'research', id: 'rapidDeployment', level: level - 1 }
+      ] : [
+        { type: 'building', id: 'scienceCenter', level: 1 }
+      ],
       bonus: `+5% march speed`,
       effect: {
         type: 'speed',
@@ -416,7 +432,11 @@ function generateRationingLevels(): ResearchLevel[] {
         gold: Math.floor(200 * Math.pow(1.55, level - 1))
       },
       researchTime: calculateResearchTime(level),
-      prerequisites: level > 1 ? [{ type: 'research', id: 'rationing', level: level - 1 }] : [],
+      prerequisites: level > 1 ? [
+        { type: 'research', id: 'rationing', level: level - 1 }
+      ] : [
+        { type: 'building', id: 'scienceCenter', level: 1 }
+      ],
       bonus: `-${reduction}% food consumption`,
       effect: {
         type: 'consumption',
@@ -473,7 +493,11 @@ function generateClairvoyanceLevels(): ResearchLevel[] {
         gold: Math.floor(400 * Math.pow(1.65, level - 1))
       },
       researchTime: calculateResearchTime(level),
-      prerequisites: level > 1 ? [{ type: 'research', id: 'clairvoyance', level: level - 1 }] : [],
+      prerequisites: level > 1 ? [
+        { type: 'research', id: 'clairvoyance', level: level - 1 }
+      ] : [
+        { type: 'building', id: 'scienceCenter', level: 1 }
+      ],
       bonus: `Intelligence capacity increased${unlocks}`,
       effect: {
         type: 'unlock',
