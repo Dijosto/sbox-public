@@ -1,7 +1,7 @@
 name = "atlantis-strategy"
 main = "src/workers/index.ts"
 compatibility_date = "2025-02-02"
-node_compat = true
+compatibility_flags = ["nodejs_compat"]
 
 # Worker configuration
 workers_dev = true
