@@ -435,25 +435,39 @@ if ($null -ne $npcX) {
         if ($null -ne $gatherMarchId) {
             Write-Host "  Waiting for gathering march to complete (full round trip)..." -ForegroundColor Gray
 
-            # Get the march to check its return time
-            $state = Invoke-RestMethod -Uri "$BaseUrl/api/player/state" -Method Get -Headers $headers
-            $gatherMarch = $state.activeMarches | Where-Object { $_.marchId -eq $gatherMarchId }
+            # Step 1: Poll until returnTime is set (march has arrived and is returning)
+            $returnTime = $null
+            for ($i = 0; $i -lt 30; $i++) {
+                $state = Invoke-RestMethod -Uri "$BaseUrl/api/player/state" -Method Get -Headers $headers
+                $gatherMarch = $state.activeMarches | Where-Object { $_.marchId -eq $gatherMarchId }
 
-            if ($null -ne $gatherMarch -and $null -ne $gatherMarch.returnTime) {
-                $currentTime = [int64](([datetime]::UtcNow - [datetime]'1970-01-01').TotalMilliseconds)
-                $waitTime = [math]::Max(0, $gatherMarch.returnTime - $currentTime)
-                $waitSeconds = [math]::Ceiling($waitTime / 1000)
-
-                Write-Host "  March will return in ~$waitSeconds seconds (status: $($gatherMarch.status))" -ForegroundColor Gray
-
-                if ($waitSeconds -gt 0) {
-                    Start-Sleep -Seconds ($waitSeconds + 2)  # Add 2 second buffer
+                if ($null -eq $gatherMarch) {
+                    Write-Host "  March completed during initial wait" -ForegroundColor Gray
+                    break
                 }
-            } else {
-                Write-Host "  March already completed or no return time set" -ForegroundColor Gray
+
+                if ($null -ne $gatherMarch.returnTime) {
+                    $returnTime = $gatherMarch.returnTime
+                    Write-Host "  March status: $($gatherMarch.status), returnTime set" -ForegroundColor Gray
+                    break
+                }
+
+                Start-Sleep -Seconds 2
             }
 
-            # Verify march is gone
+            # Step 2: If returnTime is set, wait for that exact time
+            if ($null -ne $returnTime) {
+                $currentTime = [int64](([datetime]::UtcNow - [datetime]'1970-01-01').TotalMilliseconds)
+                $waitTime = [math]::Max(0, $returnTime - $currentTime)
+                $waitSeconds = [math]::Ceiling($waitTime / 1000)
+
+                if ($waitSeconds -gt 0) {
+                    Write-Host "  Waiting $waitSeconds seconds for march to return home..." -ForegroundColor Gray
+                    Start-Sleep -Seconds ($waitSeconds + 2)  # Add 2 second buffer
+                }
+            }
+
+            # Step 3: Verify march is gone
             $finalState = Invoke-RestMethod -Uri "$BaseUrl/api/player/state" -Method Get -Headers $headers
             $finalMarch = $finalState.activeMarches | Where-Object { $_.marchId -eq $gatherMarchId }
 

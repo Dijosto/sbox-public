@@ -422,13 +422,31 @@ if [ -n "$NPC_X" ]; then
   if [ -n "$GATHER_MARCH_ID" ]; then
     echo "  Waiting for gathering march to complete (full round trip)..."
 
-    # Get the march to check its return time
-    STATE=$(curl -s -X GET "$BASE_URL/api/player/state" \
-      -H "Authorization: Bearer $TOKEN")
+    # Step 1: Poll until returnTime is set (march has arrived and is returning)
+    RETURN_TIME=""
+    for i in {1..30}; do
+      STATE=$(curl -s -X GET "$BASE_URL/api/player/state" \
+        -H "Authorization: Bearer $TOKEN")
 
-    RETURN_TIME=$(echo "$STATE" | jq -r ".activeMarches[] | select(.marchId == \"$GATHER_MARCH_ID\") | .returnTime")
-    MARCH_STATUS=$(echo "$STATE" | jq -r ".activeMarches[] | select(.marchId == \"$GATHER_MARCH_ID\") | .status")
+      MARCH_FOUND=$(echo "$STATE" | jq -r ".activeMarches[] | select(.marchId == \"$GATHER_MARCH_ID\") | .marchId")
 
+      if [ -z "$MARCH_FOUND" ]; then
+        echo "  March completed during initial wait"
+        break
+      fi
+
+      RETURN_TIME=$(echo "$STATE" | jq -r ".activeMarches[] | select(.marchId == \"$GATHER_MARCH_ID\") | .returnTime")
+      MARCH_STATUS=$(echo "$STATE" | jq -r ".activeMarches[] | select(.marchId == \"$GATHER_MARCH_ID\") | .status")
+
+      if [ -n "$RETURN_TIME" ] && [ "$RETURN_TIME" != "null" ]; then
+        echo "  March status: $MARCH_STATUS, returnTime set"
+        break
+      fi
+
+      sleep 2
+    done
+
+    # Step 2: If returnTime is set, wait for that exact time
     if [ -n "$RETURN_TIME" ] && [ "$RETURN_TIME" != "null" ]; then
       CURRENT_TIME=$(date +%s)000  # Convert to milliseconds
       WAIT_TIME=$((RETURN_TIME - CURRENT_TIME))
@@ -438,16 +456,13 @@ if [ -n "$NPC_X" ]; then
         WAIT_SECONDS=0
       fi
 
-      echo "  March will return in ~$WAIT_SECONDS seconds (status: $MARCH_STATUS)"
-
       if [ $WAIT_SECONDS -gt 0 ]; then
+        echo "  Waiting $WAIT_SECONDS seconds for march to return home..."
         sleep $((WAIT_SECONDS + 2))  # Add 2 second buffer
       fi
-    else
-      echo "  March already completed or no return time set"
     fi
 
-    # Verify march is gone
+    # Step 3: Verify march is gone
     FINAL_STATE=$(curl -s -X GET "$BASE_URL/api/player/state" \
       -H "Authorization: Bearer $TOKEN")
     FINAL_MARCH=$(echo "$FINAL_STATE" | jq -r ".activeMarches[] | select(.marchId == \"$GATHER_MARCH_ID\") | .marchId")
