@@ -256,8 +256,25 @@ if (-not $troopsReady) {
 }
 Write-Host ""
 
-# Step 12: Send PvP march (with retry for Wrangler race condition)
-Write-Host "[12/13] Sending PvP march (Player 1 → Player 2)..." -ForegroundColor Yellow
+# Step 12: Station Player 2's troops on the wall
+Write-Host "[12/14] Stationing Player 2's troops on wall for defense..." -ForegroundColor Yellow
+$stationBody = @{
+    troopType = "conscript"
+    quantity = 10
+} | ConvertTo-Json
+
+try {
+    $stationResult = Invoke-RestMethod -Uri "$BaseUrl/api/player/troops/station" -Method Post -Body $stationBody -ContentType "application/json" -Headers $headers2
+    Write-Host "[OK] Stationed 10 conscripts on wall" -ForegroundColor Green
+} catch {
+    Write-Host "[ERROR] Failed to station troops: $($_.Exception.Message)" -ForegroundColor Red
+    exit 1
+}
+Write-Host ""
+Start-Sleep -Milliseconds 200
+
+# Step 13: Send PvP march (with retry for Wrangler race condition)
+Write-Host "[13/14] Sending PvP march (Player 1 → Player 2)..." -ForegroundColor Yellow
 Write-Host "Attacker: ($player1X, $player1Y) → Defender: ($player2X, $player2Y)" -ForegroundColor Blue
 
 $marchBody = @{
@@ -302,8 +319,8 @@ $travelTime = if ($march.travelTime) { $march.travelTime } else { 10 }
 Write-Host "Waiting ${travelTime}s for march to arrive..." -ForegroundColor Blue
 Start-Sleep -Seconds ($travelTime + 2)
 
-# Step 13: Check results
-Write-Host "[13/13] Checking battle results..." -ForegroundColor Yellow
+# Step 14: Check results
+Write-Host "[14/14] Checking battle results..." -ForegroundColor Yellow
 Start-Sleep -Milliseconds 200
 
 Write-Host "Player 1 (Attacker) Messages:" -ForegroundColor Blue
