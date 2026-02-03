@@ -150,10 +150,11 @@ CREATE TABLE IF NOT EXISTS npc_camps (
   y INTEGER NOT NULL,
   camp_type TEXT NOT NULL, -- 'goblin', 'barbarian', 'dragon_lair', 'ancient_ruins'
   level INTEGER NOT NULL,
-  garrison TEXT NOT NULL, -- JSON: troop composition
+  garrison TEXT NOT NULL, -- JSON: troop composition (full strength)
   resources TEXT NOT NULL, -- JSON: available loot
   last_defeated INTEGER, -- Timestamp of last defeat
   respawn_time INTEGER, -- When camp regenerates
+  current_strength_percent INTEGER DEFAULT 100, -- Current garrison strength (0-100%)
   max_attacks_per_day INTEGER DEFAULT 3,
   attacks_today INTEGER DEFAULT 0,
   attacks_reset_at INTEGER,

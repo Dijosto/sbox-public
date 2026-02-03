@@ -26,6 +26,7 @@ import {
 } from '../utils/marches';
 import { resolveCombat, calculateLoot, CombatSide, CombatTroop } from '../utils/combat';
 import { applySpeedMultiplier } from '../utils/timing';
+import { calculateNPCStrength, scaleNPCGarrison, scaleNPCResources, calculatePostBattleStrength } from '../utils/npcCamps';
 
 interface PlayerState {
   playerId: string;
@@ -1360,9 +1361,21 @@ export class PlayerDurableObject {
         return;
       }
 
-      // Parse NPC garrison and resources
-      const npcGarrison = JSON.parse(npcCamp.garrison as string);
-      const npcResources = JSON.parse(npcCamp.resources as string);
+      // Parse NPC garrison and resources (full strength)
+      const fullGarrison = JSON.parse(npcCamp.garrison as string);
+      const fullResources = JSON.parse(npcCamp.resources as string);
+
+      // Calculate current strength based on regeneration
+      const currentStrength = calculateNPCStrength(
+        npcCamp.last_defeated as number | null,
+        npcCamp.current_strength_percent as number
+      );
+
+      // Scale garrison and resources based on current strength
+      const currentGarrison = scaleNPCGarrison(fullGarrison, currentStrength);
+      const currentResources = scaleNPCResources(fullResources, currentStrength);
+
+      console.log(`[PlayerDO] NPC camp at ${currentStrength}% strength`);
 
       // Convert march troops to combat format
       const attackerTroops: CombatTroop[] = march.troops.map(t => ({
@@ -1371,7 +1384,7 @@ export class PlayerDurableObject {
       }));
 
       // Convert NPC garrison to combat format
-      const defenderTroops: CombatTroop[] = Object.entries(npcGarrison).map(([type, data]: [string, any]) => ({
+      const defenderTroops: CombatTroop[] = Object.entries(currentGarrison).map(([type, data]: [string, any]) => ({
         troopType: type,
         quantity: data.quantity
       }));
@@ -1401,9 +1414,31 @@ export class PlayerDurableObject {
       if (combatResult.winner === 'attacker') {
         const capacity = calculateMarchCapacity(march.troops);
         const victorySeverity = combatResult.defenderSurvivors.reduce((sum, t) => sum + t.quantity, 0) === 0 ? 1.0 : 0.7;
-        loot = calculateLoot(npcResources, capacity, victorySeverity);
+        loot = calculateLoot(currentResources, capacity, victorySeverity);
         march.resources = loot;
       }
+
+      // Calculate post-battle strength
+      const survivingGarrison: Record<string, { quantity: number }> = {};
+      for (const survivor of combatResult.defenderSurvivors) {
+        survivingGarrison[survivor.troopType] = { quantity: survivor.quantity };
+      }
+      const newStrength = calculatePostBattleStrength(survivingGarrison, fullGarrison);
+
+      // Update NPC camp strength in database
+      const now = Date.now();
+      await this.env.DB.prepare(`
+        UPDATE npc_camps
+        SET current_strength_percent = ?,
+            last_defeated = ?
+        WHERE camp_id = ?
+      `).bind(
+        newStrength,
+        newStrength === 0 ? now : (npcCamp.last_defeated || null),
+        npcCamp.camp_id
+      ).run();
+
+      console.log(`[PlayerDO] NPC camp strength after battle: ${newStrength}%`);
 
       // Update march with survivors
       march.troops = combatResult.attackerSurvivors;
@@ -1613,14 +1648,71 @@ export class PlayerDurableObject {
       // Gathering from wilderness
       const capacity = calculateMarchCapacity(march.troops);
 
-      // Simulate gathering (50% of capacity)
+      // Query wilderness tile to get resource type
+      const wildernessTile = await this.env.DB.prepare(
+        'SELECT resource_type, level FROM world_tiles WHERE x = ? AND y = ? AND tile_type = ?'
+      ).bind(march.destination.x, march.destination.y, 'wilderness').first();
+
+      // Calculate gather amount (50% of capacity)
       const gatherAmount = Math.floor(capacity * 0.5);
-      march.resources = {
-        food: Math.floor(gatherAmount * 0.4),
-        wood: Math.floor(gatherAmount * 0.3),
-        stone: Math.floor(gatherAmount * 0.2),
-        metal: Math.floor(gatherAmount * 0.1)
-      };
+
+      // Allocate resources based on wilderness type
+      // Primary resource gets 70%, others split remaining 30%
+      march.resources = { food: 0, wood: 0, stone: 0, metal: 0 };
+
+      if (wildernessTile && wildernessTile.resource_type) {
+        const resourceType = wildernessTile.resource_type as string;
+        const primaryAmount = Math.floor(gatherAmount * 0.70);
+        const secondaryAmount = Math.floor(gatherAmount * 0.10);
+
+        switch (resourceType) {
+          case 'forest':
+            march.resources.wood = primaryAmount;
+            march.resources.food = secondaryAmount;
+            march.resources.stone = secondaryAmount;
+            march.resources.metal = secondaryAmount;
+            break;
+          case 'savanna':
+          case 'lakes':
+            march.resources.food = primaryAmount;
+            march.resources.wood = secondaryAmount;
+            march.resources.stone = secondaryAmount;
+            march.resources.metal = secondaryAmount;
+            break;
+          case 'hills':
+            march.resources.stone = primaryAmount;
+            march.resources.food = secondaryAmount;
+            march.resources.wood = secondaryAmount;
+            march.resources.metal = secondaryAmount;
+            break;
+          case 'mountains':
+            march.resources.metal = primaryAmount;
+            march.resources.food = secondaryAmount;
+            march.resources.wood = secondaryAmount;
+            march.resources.stone = secondaryAmount;
+            break;
+          case 'plains':
+            // Plains give food and some gold
+            march.resources.food = primaryAmount;
+            march.resources.wood = secondaryAmount;
+            march.resources.stone = secondaryAmount;
+            march.resources.metal = secondaryAmount;
+            march.resources.gold = Math.floor(gatherAmount * 0.05);
+            break;
+          default:
+            // Fallback to generic distribution
+            march.resources.food = Math.floor(gatherAmount * 0.4);
+            march.resources.wood = Math.floor(gatherAmount * 0.3);
+            march.resources.stone = Math.floor(gatherAmount * 0.2);
+            march.resources.metal = Math.floor(gatherAmount * 0.1);
+        }
+      } else {
+        // No wilderness tile found, use generic distribution
+        march.resources.food = Math.floor(gatherAmount * 0.4);
+        march.resources.wood = Math.floor(gatherAmount * 0.3);
+        march.resources.stone = Math.floor(gatherAmount * 0.2);
+        march.resources.metal = Math.floor(gatherAmount * 0.1);
+      }
 
       march.status = 'returning';
 
