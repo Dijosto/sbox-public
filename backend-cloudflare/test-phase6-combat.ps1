@@ -4,6 +4,10 @@
 $BaseUrl = "http://localhost:8787"
 $ErrorActionPreference = "Stop"
 
+# Generate unique player ID for each test run
+$timestamp = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+$steamId = "test_phase6_$timestamp"
+
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host "Phase 6: Advanced Combat Test Script" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
@@ -12,7 +16,7 @@ Write-Host ""
 # Step 1: Initialize Test Player
 Write-Host "[1/12] Initializing test player..." -ForegroundColor Yellow
 $playerBody = @{
-    steamId = "test-phase6-steam-1"
+    steamId = $steamId
     username = "CombatTester"
 } | ConvertTo-Json
 

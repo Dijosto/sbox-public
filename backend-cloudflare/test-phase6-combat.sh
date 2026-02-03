@@ -4,6 +4,10 @@
 
 BASE_URL="http://localhost:8787"
 
+# Generate unique player ID for each test run
+TIMESTAMP=$(date +%s%3N)
+STEAM_ID="test_phase6_$TIMESTAMP"
+
 echo "========================================"
 echo "Phase 6: Advanced Combat Test Script"
 echo "========================================"
@@ -13,10 +17,10 @@ echo ""
 echo "[1/12] Initializing test player..."
 PLAYER_RESPONSE=$(curl -s -X POST "$BASE_URL/api/auth/login" \
   -H "Content-Type: application/json" \
-  -d '{
-    "steamId": "test-phase6-steam-1",
-    "username": "CombatTester"
-  }')
+  -d "{
+    \"steamId\": \"$STEAM_ID\",
+    \"username\": \"CombatTester\"
+  }")
 
 TOKEN=$(echo "$PLAYER_RESPONSE" | jq -r '.token')
 PLAYER_ID=$(echo "$PLAYER_RESPONSE" | jq -r '.playerId')
@@ -294,7 +298,7 @@ if [ -n "$WILDERNESS_X" ]; then
         },
         \"troops\": [
           {
-            \"troopType\": \"militia\",
+            \"troopType\": \"conscript\",
             \"quantity\": 50
           }
         ],
@@ -314,7 +318,7 @@ if [ -n "$WILDERNESS_X" ]; then
         },
         \"troops\": [
           {
-            \"troopType\": \"militia\",
+            \"troopType\": \"conscript\",
             \"quantity\": 50
           }
         ],
