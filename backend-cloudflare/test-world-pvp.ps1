@@ -122,16 +122,32 @@ try {
     Invoke-RestMethod -Uri "$BaseUrl/api/player/troops/complete" -Method Post -Body "{}" -ContentType "application/json" -Headers $headers2 | Out-Null
 } catch {}
 Write-Host ""
-Start-Sleep -Milliseconds 200
+Write-Host "Waiting for Durable Object to settle..." -ForegroundColor Blue
+Start-Sleep -Seconds 1
 
-# Step 10: Train troops for Player 1
+# Step 10: Train troops for Player 1 (with retry for Wrangler race condition)
 Write-Host "[10/12] Training troops for Player 1 (Attacker)..." -ForegroundColor Yellow
 $trainBody1 = @{
     troopType = "conscript"
     quantity = 150
 } | ConvertTo-Json
 
-$train1 = Invoke-RestMethod -Uri "$BaseUrl/api/player/troops/train" -Method Post -Body $trainBody1 -ContentType "application/json" -Headers $headers1
+$train1 = $null
+$retries = 3
+for ($i = 0; $i -lt $retries; $i++) {
+    try {
+        $train1 = Invoke-RestMethod -Uri "$BaseUrl/api/player/troops/train" -Method Post -Body $trainBody1 -ContentType "application/json" -Headers $headers1
+        break
+    } catch {
+        if ($i -lt $retries - 1) {
+            Write-Host "Worker restarted, retrying ($($i+1)/$retries)..." -ForegroundColor Yellow
+            Start-Sleep -Seconds 2
+        } else {
+            throw
+        }
+    }
+}
+
 $train1 | ConvertTo-Json
 
 # Complete training
@@ -139,9 +155,9 @@ try {
     Invoke-RestMethod -Uri "$BaseUrl/api/player/troops/complete" -Method Post -Body "{}" -ContentType "application/json" -Headers $headers1 | Out-Null
 } catch {}
 Write-Host ""
-Start-Sleep -Milliseconds 200
+Start-Sleep -Milliseconds 500
 
-Start-Sleep -Seconds 2
+Start-Sleep -Seconds 1
 
 # Step 11: Send PvP march
 Write-Host "[11/12] Sending PvP march (Player 1 → Player 2)..." -ForegroundColor Yellow
