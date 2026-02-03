@@ -159,7 +159,7 @@ Start-Sleep -Milliseconds 500
 
 Start-Sleep -Seconds 1
 
-# Step 11: Send PvP march
+# Step 11: Send PvP march (with retry for Wrangler race condition)
 Write-Host "[11/12] Sending PvP march (Player 1 → Player 2)..." -ForegroundColor Yellow
 Write-Host "Attacker: ($player1X, $player1Y) → Defender: ($player2X, $player2Y)" -ForegroundColor Blue
 
@@ -172,7 +172,22 @@ $marchBody = @{
     targetType = "player"
 } | ConvertTo-Json -Depth 3
 
-$march = Invoke-RestMethod -Uri "$BaseUrl/api/player/march/send" -Method Post -Body $marchBody -ContentType "application/json" -Headers $headers1
+$march = $null
+$retries = 3
+for ($i = 0; $i -lt $retries; $i++) {
+    try {
+        $march = Invoke-RestMethod -Uri "$BaseUrl/api/player/march/send" -Method Post -Body $marchBody -ContentType "application/json" -Headers $headers1
+        break
+    } catch {
+        if ($i -lt $retries - 1) {
+            Write-Host "Worker restarted, retrying march ($($i+1)/$retries)..." -ForegroundColor Yellow
+            Start-Sleep -Seconds 2
+        } else {
+            throw
+        }
+    }
+}
+
 $march | ConvertTo-Json
 $marchId = $march.marchId
 
