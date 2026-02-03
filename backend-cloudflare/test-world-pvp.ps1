@@ -131,7 +131,36 @@ $garrisonBody1 = @{
 $garrison1 = Invoke-RestMethod -Uri "$BaseUrl/api/player/building/upgrade" -Method Post -Body $garrisonBody1 -ContentType "application/json" -Headers $headers1
 Write-Host "Garrison build started: $($garrison1.success)" -ForegroundColor Green
 Write-Host ""
-Start-Sleep -Milliseconds 200
+
+# Wait for garrisons to complete building
+Write-Host "Waiting for garrison construction to complete..." -ForegroundColor Blue
+Start-Sleep -Seconds 3
+
+# Verify garrisons are built
+Write-Host "Verifying garrisons are ready..." -ForegroundColor Blue
+$garrisonsReady = $false
+for ($i = 0; $i -lt 5; $i++) {
+    $verifyState1 = Invoke-RestMethod -Uri "$BaseUrl/api/player/state" -Method Get -Headers $headers1
+    $garrison1Check = $verifyState1.city.innerCity.garrison_1
+
+    $verifyState2 = Invoke-RestMethod -Uri "$BaseUrl/api/player/state" -Method Get -Headers $headers2
+    $garrison2Check = $verifyState2.city.innerCity.garrison_1
+
+    if ($garrison1Check -and $garrison2Check) {
+        Write-Host "[OK] Garrisons built! P1: Level $($garrison1Check.level), P2: Level $($garrison2Check.level)" -ForegroundColor Green
+        $garrisonsReady = $true
+        break
+    } else {
+        Write-Host "[WAIT] Waiting for building alarm to fire... ($($i+1)/5)" -ForegroundColor Yellow
+        Start-Sleep -Seconds 2
+    }
+}
+
+if (-not $garrisonsReady) {
+    Write-Host "[ERROR] Garrisons not ready after waiting, aborting test" -ForegroundColor Red
+    exit 1
+}
+Write-Host ""
 
 # Step 10: Train troops for Player 2
 Write-Host "[10/13] Training troops for Player 2 (Defender)..." -ForegroundColor Yellow
