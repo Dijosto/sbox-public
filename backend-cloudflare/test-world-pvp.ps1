@@ -167,17 +167,17 @@ for ($i = 0; $i -lt 5; $i++) {
     $verifyState = Invoke-RestMethod -Uri "$BaseUrl/api/player/state" -Method Get -Headers $headers1
     $conscripts = ($verifyState.troops | Where-Object { $_.troopType -eq 'conscript' } | Select-Object -First 1)
     if ($conscripts -and $conscripts.quantity -ge 100) {
-        Write-Host "✓ Troops verified: $($conscripts.quantity) conscripts available" -ForegroundColor Green
+        Write-Host "[OK] Troops verified: $($conscripts.quantity) conscripts available" -ForegroundColor Green
         $troopsReady = $true
         break
     } else {
-        Write-Host "⏳ Waiting for training alarm to fire... ($($i+1)/5)" -ForegroundColor Yellow
+        Write-Host "[WAIT] Waiting for training alarm to fire... ($($i+1)/5)" -ForegroundColor Yellow
         Start-Sleep -Seconds 2
     }
 }
 
 if (-not $troopsReady) {
-    Write-Host "⚠ Warning: Troops may not be ready yet, attempting march anyway..." -ForegroundColor Yellow
+    Write-Host "[WARN] Troops may not be ready yet, attempting march anyway..." -ForegroundColor Yellow
 }
 Write-Host ""
 
