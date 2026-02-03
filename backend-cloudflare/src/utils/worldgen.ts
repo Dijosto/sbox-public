@@ -6,7 +6,7 @@
 export interface WorldTile {
   x: number;
   y: number;
-  tile_type: 'empty' | 'wilderness' | 'npc_camp' | 'city' | 'outpost';
+  tile_type: 'empty' | 'wilderness' | 'npc' | 'city' | 'outpost';
   owner_id?: string;
   level: number;
   resource_type?: 'forest' | 'savanna' | 'hills' | 'mountains' | 'plains';
@@ -351,7 +351,7 @@ export function generateWorldMapSQL(seed: number = 12345, wildernessCount: numbe
 
   // Add camp tiles
   camps.forEach(camp => {
-    allTiles.push(`  (${camp.x}, ${camp.y}, 'npc_camp', ${camp.level}, NULL, 0)`);
+    allTiles.push(`  (${camp.x}, ${camp.y}, 'npc', ${camp.level}, NULL, 0)`);
   });
 
   // Add wilderness tiles
