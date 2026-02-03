@@ -362,41 +362,66 @@ See `schema.sql` for complete schema.
 
 ## Roadmap
 
-**Phase 1: Core Infrastructure** ✅
-- [x] Authentication with Steam
-- [x] Player Durable Objects
-- [x] Basic state management
-- [x] WebSocket notifications
+**Phase 1: Database & Authentication** ✅ COMPLETE
+- [x] JWT authentication system
+- [x] Player Durable Objects with state management
+- [x] D1 database schema (players, world_tiles, battle_reports, messages)
+- [x] WebSocket notifications via Durable Objects
 - [x] Complete game data extraction from Dragons of Atlantis wiki
 
-**Phase 2: Game Systems** ✅ (Complete)
-- [x] Game configuration utilities (buildings, troops, research, resources)
-- [x] Building definitions with cost formulas (12+ building types, 35 levels)
-- [x] Troop stats & combat calculations (11+ troop types with full stats)
-- [x] Research tree with bonuses (13+ technologies, 20 levels each)
-- [x] Resource production & economy formulas (taxation, population, happiness)
-- [x] Building upgrade logic with queue management and worker limits
-- [x] Troop training queue system with garrison-based speed timers
-- [x] Research queue system with prerequisites and dependency validation
-- [x] Durable Object alarms for automatic timer completion
+**Phase 2: World Map & NPCs** ✅ COMPLETE
+- [x] 1000x1000 world map generation with biomes
+- [x] Player city placement on map
+- [x] NPC camp system with garrison data
+- [x] Tile querying API (viewport, specific tiles, search)
+- [x] World region spatial partitioning
 
-**Phase 3: Combat & Marches** 📋
-- [ ] March scheduling with DO alarms
-- [ ] Combat resolution in Combat DO
-- [ ] Battle replay system
+**Phase 3: Combat & Marches** ✅ COMPLETE
+- [x] Building system with queues and Durable Object alarms
+- [x] Garrison requirement for troop training
+- [x] Troop training with garrison-based speed formula (DoA wiki accurate)
+- [x] Wall stationing mechanic (only stationed troops defend)
+- [x] PvP march system with travel time calculations
+- [x] Server-authoritative combat resolution
+- [x] Resource plundering (10% of unprotected resources)
+- [x] Battle reports sent to both attacker and defender
+- [x] March return with survivors and loot
+- [x] Test speed multiplier for local development (100x faster)
+
+**Phase 4: Research & Progression** 🚧 IN PROGRESS
+- [ ] Science Center building requirement
+- [ ] Research queue management (single queue)
+- [ ] Research prerequisite validation
+- [ ] Research bonuses applied to combat (Metallurgy, Medicine)
+- [ ] Resource production bonuses (Agriculture, Woodcraft, etc.)
+- [ ] Research completion via Durable Object alarms
+- [ ] Test suite for research system
+
+**Phase 5: Alliances** 📋 TODO
+- [ ] Alliance creation and management
+- [ ] Alliance member system
+- [ ] Alliance chat via WebSocket
+- [ ] Alliance wars and diplomacy
+- [ ] Reinforcement mechanics
+
+**Phase 6: Advanced Combat** 📋 TODO
+- [ ] Wilderness gathering marches
+- [ ] Scout marches
+- [ ] Multi-march coordination
+- [ ] Dragon system
 - [ ] NPC camp regeneration
 
-**Phase 4: World Map** 📋
-- [ ] Spatial indexing in D1
-- [ ] Viewport caching in KV
-- [ ] Wilderness conquest
-- [ ] Alliance territories
+**Phase 7: Economy & Trading** 📋 TODO
+- [ ] Resource trading between players
+- [ ] Market system
+- [ ] Storage vault protection from raids
+- [ ] Tax collection and gold economy
 
-**Phase 5: Polish** 📋
-- [ ] Rate limiting
-- [ ] Leaderboards
-- [ ] Battle reports UI
-- [ ] Admin tools
+**Phase 8: Polish & End Game** 📋 TODO
+- [ ] Leaderboards (power, kills, resources)
+- [ ] Achievement system
+- [ ] Timed server events
+- [ ] Admin tools and moderation
 
 ## Troubleshooting
 

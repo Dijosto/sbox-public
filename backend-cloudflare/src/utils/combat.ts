@@ -59,8 +59,10 @@ export function resolveCombat(
   // Calculate research bonuses
   const attackerAttackBonus = calculateAttackBonus(attacker.research) + (attacker.dragonBonus || 0);
   const attackerDefenseBonus = calculateDefenseBonus(attacker.research) + (attacker.dragonBonus || 0);
+  const attackerHealthBonus = calculateHealthBonus(attacker.research);
   const defenderAttackBonus = calculateAttackBonus(defender.research) + (defender.dragonBonus || 0);
   const defenderDefenseBonus = calculateDefenseBonus(defender.research) + (defender.dragonBonus || 0);
+  const defenderHealthBonus = calculateHealthBonus(defender.research);
 
   // Combat rounds
   for (let round = 1; round <= maxRounds; round++) {
@@ -74,8 +76,8 @@ export function resolveCombat(
     const defenderDamage = calculateTotalDamage(defenderTroops, defenderAttackBonus, 'defense');
 
     // Apply damage and calculate casualties
-    const defenderCasualties = applyDamage(defenderTroops, attackerDamage, defenderDefenseBonus);
-    const attackerCasualties = applyDamage(attackerTroops, defenderDamage, attackerDefenseBonus);
+    const defenderCasualties = applyDamage(defenderTroops, attackerDamage, defenderDefenseBonus, defenderHealthBonus);
+    const attackerCasualties = applyDamage(attackerTroops, defenderDamage, attackerDefenseBonus, attackerHealthBonus);
 
     rounds.push({
       round,
@@ -152,6 +154,21 @@ function calculateDefenseBonus(research: Record<string, number>): number {
 }
 
 /**
+ * Calculate health bonus from research
+ */
+function calculateHealthBonus(research: Record<string, number>): number {
+  let bonus = 0;
+
+  // Medicine: +5% per level (levels 1-10), +10% per level (11-20)
+  const medicine = research['medicine'] || 0;
+  if (medicine > 0) {
+    bonus += medicine <= 10 ? medicine * 5 : 50 + (medicine - 10) * 10;
+  }
+
+  return bonus;
+}
+
+/**
  * Calculate total damage output from a troop stack
  */
 function calculateTotalDamage(
@@ -183,7 +200,8 @@ function calculateTotalDamage(
 function applyDamage(
   troops: CombatTroop[],
   damage: number,
-  defenseBonus: number
+  defenseBonus: number,
+  healthBonus: number
 ): CombatTroop[] {
   const casualties: CombatTroop[] = [];
   let remainingDamage = damage;
@@ -201,8 +219,8 @@ function applyDamage(
     const config = getTroopConfig(troop.troopType);
     if (!config) continue;
 
-    // Calculate effective health with defense bonus
-    const effectiveHealth = config.stats.health * (1 + defenseBonus / 100);
+    // Calculate effective health with defense and health bonuses
+    const effectiveHealth = config.stats.health * (1 + defenseBonus / 100) * (1 + healthBonus / 100);
 
     // Calculate how many troops die
     const troopsKilled = Math.min(
