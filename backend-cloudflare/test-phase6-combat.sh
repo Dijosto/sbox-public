@@ -54,7 +54,7 @@ sleep 1
 
 # Step 3: Build garrison for troop training
 echo "[3/14] Building garrison..."
-BUILD_GARRISON_RESPONSE=$(curl -s -X POST "$BASE_URL/api/player/build" \
+BUILD_GARRISON_RESPONSE=$(curl -s -X POST "$BASE_URL/api/player/building/upgrade" \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
@@ -73,7 +73,7 @@ sleep 1
 
 # Step 4: Build Muster Point for march slots
 echo "[4/14] Building Muster Point..."
-BUILD_MUSTER_RESPONSE=$(curl -s -X POST "$BASE_URL/api/player/build" \
+BUILD_MUSTER_RESPONSE=$(curl -s -X POST "$BASE_URL/api/player/building/upgrade" \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
@@ -102,7 +102,7 @@ sleep 1
 
 # Step 6: Train some troops for testing
 echo "[6/14] Training troops for combat tests..."
-TRAIN_RESPONSE=$(curl -s -X POST "$BASE_URL/api/player/train" \
+TRAIN_RESPONSE=$(curl -s -X POST "$BASE_URL/api/player/troops/train" \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
@@ -159,7 +159,7 @@ if [ -n "$WILDERNESS_X" ]; then
   # Build march request based on Aerial Combat availability
   if [ "$AERIAL_COMBAT_LEVEL" -gt 0 ]; then
     echo "  Including dragon (Aerial Combat Level $AERIAL_COMBAT_LEVEL)"
-    MARCH_RESPONSE=$(curl -s -X POST "$BASE_URL/api/player/march" \
+    MARCH_RESPONSE=$(curl -s -X POST "$BASE_URL/api/player/march/send" \
       -H "Authorization: Bearer $TOKEN" \
       -H "Content-Type: application/json" \
       -d "{
@@ -179,7 +179,7 @@ if [ -n "$WILDERNESS_X" ]; then
       }")
   else
     echo "  Dragon excluded (requires Aerial Combat research)"
-    MARCH_RESPONSE=$(curl -s -X POST "$BASE_URL/api/player/march" \
+    MARCH_RESPONSE=$(curl -s -X POST "$BASE_URL/api/player/march/send" \
       -H "Authorization: Bearer $TOKEN" \
       -H "Content-Type: application/json" \
       -d "{
@@ -220,7 +220,7 @@ ACTIVE_MARCH_COUNT=$(echo "$STATE" | jq '.activeMarches | length')
 
 if [ "$ACTIVE_MARCH_COUNT" -ge "$EXPECTED_SLOTS" ]; then
   # Try to send another march, should fail
-  MARCH_RESPONSE2=$(curl -s -X POST "$BASE_URL/api/player/march" \
+  MARCH_RESPONSE2=$(curl -s -X POST "$BASE_URL/api/player/march/send" \
     -H "Authorization: Bearer $TOKEN" \
     -H "Content-Type: application/json" \
     -d "{
@@ -278,7 +278,7 @@ if [ -n "$NPC_X" ]; then
     sleep 5
   fi
 
-  SCOUT_RESPONSE=$(curl -s -X POST "$BASE_URL/api/player/march" \
+  SCOUT_RESPONSE=$(curl -s -X POST "$BASE_URL/api/player/march/send" \
     -H "Authorization: Bearer $TOKEN" \
     -H "Content-Type: application/json" \
     -d "{

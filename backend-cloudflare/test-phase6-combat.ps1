@@ -62,7 +62,7 @@ try {
         slotId = "garrison_1"
     } | ConvertTo-Json
 
-    $buildResult = Invoke-RestMethod -Uri "$BaseUrl/api/player/build" -Method Post -Body $buildGarrisonBody -Headers $headers -ContentType "application/json"
+    $buildResult = Invoke-RestMethod -Uri "$BaseUrl/api/player/building/upgrade" -Method Post -Body $buildGarrisonBody -Headers $headers -ContentType "application/json"
     Write-Host "[OK] Garrison construction started" -ForegroundColor Green
     Write-Host "  Waiting for garrison to complete..." -ForegroundColor Gray
     Start-Sleep -Seconds 5  # Wait for construction
@@ -85,7 +85,7 @@ try {
         slotId = "musterPoint_1"
     } | ConvertTo-Json
 
-    $buildResult = Invoke-RestMethod -Uri "$BaseUrl/api/player/build" -Method Post -Body $buildMusterBody -Headers $headers -ContentType "application/json"
+    $buildResult = Invoke-RestMethod -Uri "$BaseUrl/api/player/building/upgrade" -Method Post -Body $buildMusterBody -Headers $headers -ContentType "application/json"
     Write-Host "[OK] Muster Point construction started" -ForegroundColor Green
     Write-Host "  Waiting for Muster Point to complete..." -ForegroundColor Gray
     Start-Sleep -Seconds 5  # Wait for construction
@@ -129,7 +129,7 @@ try {
         quantity = 100
     } | ConvertTo-Json
 
-    $trainResult = Invoke-RestMethod -Uri "$BaseUrl/api/player/train" -Method Post -Body $trainBody -Headers $headers -ContentType "application/json"
+    $trainResult = Invoke-RestMethod -Uri "$BaseUrl/api/player/troops/train" -Method Post -Body $trainBody -Headers $headers -ContentType "application/json"
     Write-Host "[OK] Training 100 Militia queued" -ForegroundColor Green
     Write-Host "  Waiting for training to complete..." -ForegroundColor Gray
     Start-Sleep -Seconds 5  # Wait for training
@@ -215,7 +215,7 @@ if ($null -ne $wildernessX) {
 
         $marchBodyJson = $marchBody | ConvertTo-Json -Depth 10
 
-        $marchResult = Invoke-RestMethod -Uri "$BaseUrl/api/player/march" -Method Post -Body $marchBodyJson -Headers $headers -ContentType "application/json"
+        $marchResult = Invoke-RestMethod -Uri "$BaseUrl/api/player/march/send" -Method Post -Body $marchBodyJson -Headers $headers -ContentType "application/json"
         $gatherMarchId = $marchResult.marchId
         Write-Host "[OK] Gathering march sent: $gatherMarchId" -ForegroundColor Green
     } catch {
