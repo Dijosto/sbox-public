@@ -256,11 +256,15 @@ try {
     $playerX = $state.city.position.x
     $playerY = $state.city.position.y
 
-    # Search nearby for wilderness
-    $viewport = Invoke-RestMethod -Uri "$BaseUrl/api/world/viewport?minX=$($playerX-10)&maxX=$($playerX+10)&minY=$($playerY-10)&maxY=$($playerY+10)" -Method Get -Headers $headers
+    # Calculate region coordinates
+    $regionX = [Math]::Floor($playerX / 100)
+    $regionY = [Math]::Floor($playerY / 100)
+
+    # Query tiles in player's region
+    $tiles = Invoke-RestMethod -Uri "$BaseUrl/api/world/tiles?regionX=$regionX&regionY=$regionY" -Method Get
 
     $wildernessFound = $false
-    foreach ($tile in $viewport.tiles) {
+    foreach ($tile in $tiles.tiles) {
         if ($tile.tileType -eq "wilderness") {
             $wildernessX = $tile.x
             $wildernessY = $tile.y
@@ -272,7 +276,7 @@ try {
     }
 
     if (-not $wildernessFound) {
-        Write-Host "[WARNING] No wilderness found nearby, skipping wilderness test" -ForegroundColor Yellow
+        Write-Host "[WARNING] No wilderness found in region, skipping wilderness test" -ForegroundColor Yellow
         $wildernessX = $null
     }
 } catch {
@@ -387,7 +391,7 @@ Start-Sleep -Seconds 1
 Write-Host "[10/14] Finding NPC camp..." -ForegroundColor Yellow
 try {
     $npcFound = $false
-    foreach ($tile in $viewport.tiles) {
+    foreach ($tile in $tiles.tiles) {
         if ($tile.tileType -eq "npc") {
             $npcX = $tile.x
             $npcY = $tile.y
@@ -400,7 +404,7 @@ try {
     }
 
     if (-not $npcFound) {
-        Write-Host "[WARNING] No NPC camp found nearby, skipping NPC tests" -ForegroundColor Yellow
+        Write-Host "[WARNING] No NPC camp found in region, skipping NPC tests" -ForegroundColor Yellow
         $npcX = $null
     }
 } catch {

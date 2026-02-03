@@ -254,18 +254,16 @@ STATE=$(curl -s -X GET "$BASE_URL/api/player/state" \
 PLAYER_X=$(echo "$STATE" | jq -r '.city.position.x')
 PLAYER_Y=$(echo "$STATE" | jq -r '.city.position.y')
 
-MIN_X=$((PLAYER_X - 10))
-MAX_X=$((PLAYER_X + 10))
-MIN_Y=$((PLAYER_Y - 10))
-MAX_Y=$((PLAYER_Y + 10))
+# Calculate region coordinates
+REGION_X=$((PLAYER_X / 100))
+REGION_Y=$((PLAYER_Y / 100))
 
-VIEWPORT=$(curl -s -X GET "$BASE_URL/api/world/viewport?minX=$MIN_X&maxX=$MAX_X&minY=$MIN_Y&maxY=$MAX_Y" \
-  -H "Authorization: Bearer $TOKEN")
+TILES=$(curl -s -X GET "$BASE_URL/api/world/tiles?regionX=$REGION_X&regionY=$REGION_Y")
 
-WILDERNESS_TILE=$(echo "$VIEWPORT" | jq -r '.tiles[] | select(.tileType == "wilderness") | @json' | head -1)
+WILDERNESS_TILE=$(echo "$TILES" | jq -r '.tiles[] | select(.tileType == "wilderness") | @json' | head -1)
 
 if [ -z "$WILDERNESS_TILE" ]; then
-  echo "[WARNING] No wilderness found nearby, skipping wilderness test"
+  echo "[WARNING] No wilderness found in region, skipping wilderness test"
   WILDERNESS_X=""
 else
   WILDERNESS_X=$(echo "$WILDERNESS_TILE" | jq -r '.x')
@@ -385,10 +383,10 @@ sleep 1
 
 # Step 8: Find NPC camp
 echo "[10/14] Finding NPC camp..."
-NPC_TILE=$(echo "$VIEWPORT" | jq -r '.tiles[] | select(.tileType == "npc") | @json' | head -1)
+NPC_TILE=$(echo "$TILES" | jq -r '.tiles[] | select(.tileType == "npc") | @json' | head -1)
 
 if [ -z "$NPC_TILE" ]; then
-  echo "[WARNING] No NPC camp found nearby, skipping NPC tests"
+  echo "[WARNING] No NPC camp found in region, skipping NPC tests"
   NPC_X=""
 else
   NPC_X=$(echo "$NPC_TILE" | jq -r '.x')
