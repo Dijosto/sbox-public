@@ -158,6 +158,12 @@ export class PlayerDurableObject {
       case '/api/player/troops/cancel':
         return this.handleTrainCancel(request);
 
+      case '/api/player/troops/station':
+        return this.handleStationTroops(request);
+
+      case '/api/player/troops/unstation':
+        return this.handleUnstationTroops(request);
+
       // Research endpoints
       case '/api/player/research/start':
         return this.handleStartResearch(request);
@@ -900,6 +906,122 @@ export class PlayerDurableObject {
   }
 
   /**
+   * Station troops on the wall for defense
+   */
+  private async handleStationTroops(request: Request): Promise<Response> {
+    if (!this.playerState) {
+      return this.errorResponse('State not loaded', 500);
+    }
+
+    const body = await request.json() as {
+      troopType: string;
+      quantity: number;
+    };
+
+    // Update resources
+    this.updateResources();
+
+    // Find troops in city
+    const cityStack = this.playerState.troops.find(
+      t => t.troopType === body.troopType && t.location === 'city'
+    );
+
+    if (!cityStack || cityStack.quantity < body.quantity) {
+      return this.errorResponse(`Insufficient ${body.troopType} in city (need ${body.quantity}, have ${cityStack?.quantity || 0})`);
+    }
+
+    // Remove from city
+    cityStack.quantity -= body.quantity;
+    if (cityStack.quantity === 0) {
+      this.playerState.troops = this.playerState.troops.filter(t => t !== cityStack);
+    }
+
+    // Add to wall
+    const wallStack = this.playerState.troops.find(
+      t => t.troopType === body.troopType && t.location === 'wall'
+    );
+
+    if (wallStack) {
+      wallStack.quantity += body.quantity;
+    } else {
+      this.playerState.troops.push({
+        troopType: body.troopType,
+        quantity: body.quantity,
+        location: 'wall'
+      });
+    }
+
+    await this.saveState();
+
+    this.pushEvent('troops_stationed', {
+      troopType: body.troopType,
+      quantity: body.quantity
+    });
+
+    return new Response(JSON.stringify({ success: true }), {
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  /**
+   * Unstation troops from the wall back to city
+   */
+  private async handleUnstationTroops(request: Request): Promise<Response> {
+    if (!this.playerState) {
+      return this.errorResponse('State not loaded', 500);
+    }
+
+    const body = await request.json() as {
+      troopType: string;
+      quantity: number;
+    };
+
+    // Update resources
+    this.updateResources();
+
+    // Find troops on wall
+    const wallStack = this.playerState.troops.find(
+      t => t.troopType === body.troopType && t.location === 'wall'
+    );
+
+    if (!wallStack || wallStack.quantity < body.quantity) {
+      return this.errorResponse(`Insufficient ${body.troopType} on wall (need ${body.quantity}, have ${wallStack?.quantity || 0})`);
+    }
+
+    // Remove from wall
+    wallStack.quantity -= body.quantity;
+    if (wallStack.quantity === 0) {
+      this.playerState.troops = this.playerState.troops.filter(t => t !== wallStack);
+    }
+
+    // Add to city
+    const cityStack = this.playerState.troops.find(
+      t => t.troopType === body.troopType && t.location === 'city'
+    );
+
+    if (cityStack) {
+      cityStack.quantity += body.quantity;
+    } else {
+      this.playerState.troops.push({
+        troopType: body.troopType,
+        quantity: body.quantity,
+        location: 'city'
+      });
+    }
+
+    await this.saveState();
+
+    this.pushEvent('troops_unstationed', {
+      troopType: body.troopType,
+      quantity: body.quantity
+    });
+
+    return new Response(JSON.stringify({ success: true }), {
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  /**
    * Handle research start request
    */
   private async handleStartResearch(request: Request): Promise<Response> {
@@ -1361,9 +1483,9 @@ export class PlayerDurableObject {
         quantity: t.quantity
       }));
 
-      // Get defender's garrison troops (only troops at home)
+      // Get defender's wall troops (only troops stationed on wall defend)
       const defenderTroops: CombatTroop[] = (targetState.troops || [])
-        .filter((t: any) => t.location === 'home' || !t.location)
+        .filter((t: any) => t.location === 'wall')
         .map((t: any) => ({
           troopType: t.troopType,
           quantity: t.quantity
@@ -1682,13 +1804,15 @@ export class PlayerDurableObject {
       this.playerState.resources.gold = Math.max(0, this.playerState.resources.gold - (body.loot.gold || 0));
     }
 
-    // Deduct troop losses
+    // Deduct troop losses (only from wall - city troops are safe)
     for (const loss of body.losses) {
-      const troop = this.playerState.troops.find(t => t.troopType === loss.troopType);
-      if (troop) {
-        troop.quantity = Math.max(0, troop.quantity - loss.quantity);
-        if (troop.quantity === 0) {
-          this.playerState.troops = this.playerState.troops.filter(t => t.troopType !== loss.troopType);
+      const wallTroop = this.playerState.troops.find(
+        t => t.troopType === loss.troopType && t.location === 'wall'
+      );
+      if (wallTroop) {
+        wallTroop.quantity = Math.max(0, wallTroop.quantity - loss.quantity);
+        if (wallTroop.quantity === 0) {
+          this.playerState.troops = this.playerState.troops.filter(t => t !== wallTroop);
         }
       }
     }
