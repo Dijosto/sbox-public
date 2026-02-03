@@ -386,7 +386,19 @@ export class PlayerDurableObject {
       ? this.playerState.city.innerCity
       : this.playerState.city.outerFields;
 
-    const currentBuilding = buildings[body.buildingId];
+    // Find existing building by ID or by type
+    let currentBuilding = buildings[body.buildingId];
+
+    // If not found by ID, search by type (for unique buildings)
+    if (!currentBuilding) {
+      const existingKey = Object.keys(buildings).find(
+        key => buildings[key].buildingType === body.buildingType
+      );
+      if (existingKey) {
+        currentBuilding = buildings[existingKey];
+      }
+    }
+
     const currentLevel = currentBuilding?.level || 0;
     const targetLevel = currentLevel + 1;
 
@@ -514,14 +526,29 @@ export class PlayerDurableObject {
       ? this.playerState.city.innerCity
       : this.playerState.city.outerFields;
 
-    // Create or upgrade building
+    // Find existing building by ID or by type (for unique buildings like fortress)
+    let actualBuildingKey = item.buildingId;
+
+    // If buildingId doesn't exist, search for existing building of same type
     if (!buildings[item.buildingId]) {
-      buildings[item.buildingId] = {
+      // For unique buildings (fortress, science center, etc), find by type
+      const existingKey = Object.keys(buildings).find(
+        key => buildings[key].buildingType === item.buildingType
+      );
+
+      if (existingKey) {
+        actualBuildingKey = existingKey;
+      }
+    }
+
+    // Create or upgrade building
+    if (!buildings[actualBuildingKey]) {
+      buildings[actualBuildingKey] = {
         buildingType: item.buildingType,
         level: item.toLevel
       };
     } else {
-      buildings[item.buildingId].level = item.toLevel;
+      buildings[actualBuildingKey].level = item.toLevel;
     }
 
     // Remove from queue
@@ -539,7 +566,7 @@ export class PlayerDurableObject {
 
     // Notify client
     this.pushEvent('building_complete', {
-      buildingId: item.buildingId,
+      buildingId: actualBuildingKey,
       buildingType: item.buildingType,
       level: item.toLevel
     });
