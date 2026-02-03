@@ -17,6 +17,14 @@ import {
   deductResources,
   Resources
 } from '../utils/resources';
+import {
+  calculateDistance,
+  calculateMarchTime,
+  calculateMarchCapacity,
+  validateMarch,
+  MarchTroops
+} from '../utils/marches';
+import { resolveCombat, calculateLoot, CombatSide, CombatTroop } from '../utils/combat';
 
 interface PlayerState {
   playerId: string;
@@ -80,12 +88,25 @@ interface TroopStack {
 
 interface March {
   marchId: string;
+  playerId: string;
+  playerName: string;
   origin: { x: number; y: number };
   destination: { x: number; y: number };
-  army: TroopStack[];
-  startTime: number;
+  troops: MarchTroops[];
+  marchType: 'attack' | 'gather' | 'scout' | 'reinforce' | 'transport';
+  departureTime: number;
   arrivalTime: number;
-  marchType: string;
+  returnTime?: number;
+  resources?: {
+    food?: number;
+    wood?: number;
+    stone?: number;
+    metal?: number;
+    gold?: number;
+  };
+  status: 'outbound' | 'at_target' | 'returning' | 'completed';
+  targetType: 'player' | 'npc' | 'wilderness';
+  targetId?: string;
 }
 
 export class PlayerDurableObject {
@@ -144,6 +165,13 @@ export class PlayerDurableObject {
       case '/api/player/research/cancel':
         return this.handleResearchCancel(request);
 
+      // March endpoints
+      case '/api/player/march/send':
+        return this.handleSendMarch(request);
+
+      case '/api/player/march/recall':
+        return this.handleRecallMarch(request);
+
       // Internal completion handlers (called by alarms)
       case '/internal/complete':
         return this.handleCompletions(request);
@@ -199,6 +227,26 @@ export class PlayerDurableObject {
 
     for (const research of completedResearch) {
       await this.completeResearch(research);
+      hasCompletions = true;
+    }
+
+    // Process march arrivals
+    const arrivedMarches = this.playerState.activeMarches.filter(
+      march => march.status === 'outbound' && march.arrivalTime <= now
+    );
+
+    for (const march of arrivedMarches) {
+      await this.processMarchArrival(march);
+      hasCompletions = true;
+    }
+
+    // Process march returns
+    const returningMarches = this.playerState.activeMarches.filter(
+      march => march.status === 'returning' && march.returnTime && march.returnTime <= now
+    );
+
+    for (const march of returningMarches) {
+      await this.processMarchReturn(march);
       hasCompletions = true;
     }
 
@@ -642,6 +690,20 @@ export class PlayerDurableObject {
       }
     }
 
+    // Check marches (arrivals and returns)
+    for (const march of this.playerState.activeMarches) {
+      if (march.status === 'outbound' && march.arrivalTime > now) {
+        if (!nextCompletion || march.arrivalTime < nextCompletion) {
+          nextCompletion = march.arrivalTime;
+        }
+      }
+      if (march.status === 'returning' && march.returnTime && march.returnTime > now) {
+        if (!nextCompletion || march.returnTime < nextCompletion) {
+          nextCompletion = march.returnTime;
+        }
+      }
+    }
+
     if (nextCompletion) {
       await this.state.storage.setAlarm(nextCompletion);
       console.log(`[PlayerDO] Scheduled alarm for ${new Date(nextCompletion).toISOString()}`);
@@ -979,6 +1041,303 @@ export class PlayerDurableObject {
     });
 
     console.log(`[PlayerDO] Completed research: ${item.researchType} to level ${item.toLevel}`);
+  }
+
+  /**
+   * Send march (attack, gather, scout, etc.)
+   */
+  private async handleSendMarch(request: Request): Promise<Response> {
+    if (!this.playerState) {
+      return this.errorResponse('State not loaded', 500);
+    }
+
+    const body = await request.json() as {
+      destination: { x: number; y: number };
+      troops: MarchTroops[];
+      marchType: 'attack' | 'gather' | 'scout' | 'reinforce' | 'transport';
+      targetType: 'player' | 'npc' | 'wilderness';
+      targetId?: string;
+    };
+
+    // Update resources
+    this.updateResources();
+
+    // Validate march
+    const validation = validateMarch(
+      body.troops,
+      this.playerState.troops.map(t => ({ troopType: t.troopType, quantity: t.quantity })),
+      this.playerState.city.position,
+      body.destination
+    );
+
+    if (!validation.valid) {
+      return this.errorResponse(validation.error || 'Invalid march');
+    }
+
+    // Calculate distance and travel time
+    const distance = calculateDistance(this.playerState.city.position, body.destination);
+    const marchSpeed = this.playerState.research['logistics'] || 0; // Speed research bonus
+    const travelTime = calculateMarchTime(distance, body.troops, marchSpeed * 10);
+
+    // Deduct troops from player
+    for (const marchTroop of body.troops) {
+      const playerTroop = this.playerState.troops.find(t => t.troopType === marchTroop.troopType);
+      if (playerTroop) {
+        playerTroop.quantity -= marchTroop.quantity;
+        if (playerTroop.quantity <= 0) {
+          this.playerState.troops = this.playerState.troops.filter(t => t.troopType !== marchTroop.troopType);
+        }
+      }
+    }
+
+    // Create march
+    const now = Date.now();
+    const march: March = {
+      marchId: crypto.randomUUID(),
+      playerId: this.playerState.playerId,
+      playerName: this.playerState.playerName,
+      origin: this.playerState.city.position,
+      destination: body.destination,
+      troops: body.troops,
+      marchType: body.marchType,
+      departureTime: now,
+      arrivalTime: now + (travelTime * 1000),
+      status: 'outbound',
+      targetType: body.targetType,
+      targetId: body.targetId
+    };
+
+    this.playerState.activeMarches.push(march);
+
+    // Save and schedule alarm
+    await this.saveState();
+    await this.scheduleNextAlarm();
+
+    this.pushEvent('march_sent', {
+      marchId: march.marchId,
+      arrivalTime: march.arrivalTime,
+      duration: travelTime
+    });
+
+    return new Response(JSON.stringify({
+      success: true,
+      marchId: march.marchId,
+      arrivalTime: march.arrivalTime,
+      duration: travelTime,
+      distance
+    }), {
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  /**
+   * Recall a march (only works if outbound or at target)
+   */
+  private async handleRecallMarch(request: Request): Promise<Response> {
+    if (!this.playerState) {
+      return this.errorResponse('State not loaded', 500);
+    }
+
+    const body = await request.json() as { marchId: string };
+
+    const march = this.playerState.activeMarches.find(m => m.marchId === body.marchId);
+    if (!march) {
+      return this.errorResponse('March not found');
+    }
+
+    if (march.status === 'returning' || march.status === 'completed') {
+      return this.errorResponse('March cannot be recalled');
+    }
+
+    const now = Date.now();
+
+    // If march hasn't arrived yet, recall from current position
+    if (march.status === 'outbound' && now < march.arrivalTime) {
+      // Calculate current position (for simplicity, just reverse from destination)
+      const marchSpeed = this.playerState.research['logistics'] || 0;
+      const returnTime = calculateMarchTime(
+        calculateDistance(march.destination, march.origin),
+        march.troops,
+        marchSpeed * 10
+      );
+
+      march.status = 'returning';
+      march.returnTime = now + (returnTime * 1000);
+
+      await this.saveState();
+      await this.scheduleNextAlarm();
+
+      this.pushEvent('march_recalled', { marchId: march.marchId });
+
+      return new Response(JSON.stringify({
+        success: true,
+        returnTime: march.returnTime
+      }), {
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+
+    // If at target, start return journey
+    if (march.status === 'at_target') {
+      const marchSpeed = this.playerState.research['logistics'] || 0;
+      const returnTime = calculateMarchTime(
+        calculateDistance(march.destination, march.origin),
+        march.troops,
+        marchSpeed * 10
+      );
+
+      march.status = 'returning';
+      march.returnTime = now + (returnTime * 1000);
+
+      await this.saveState();
+      await this.scheduleNextAlarm();
+
+      this.pushEvent('march_returning', { marchId: march.marchId });
+
+      return new Response(JSON.stringify({
+        success: true,
+        returnTime: march.returnTime
+      }), {
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+
+    return this.errorResponse('March cannot be recalled');
+  }
+
+  /**
+   * Process march arrival at target
+   */
+  private async processMarchArrival(march: March): Promise<void> {
+    if (!this.playerState) return;
+
+    console.log(`[PlayerDO] March ${march.marchId} arrived at target`);
+
+    // Handle different march types
+    if (march.marchType === 'attack' && march.targetType === 'npc') {
+      // For now, simulate NPC combat with a simple loot calculation
+      // TODO: Implement actual NPC camp system
+      const capacity = calculateMarchCapacity(march.troops);
+
+      // Simulate NPC has some resources
+      const npcResources = {
+        food: 5000,
+        wood: 3000,
+        stone: 2000,
+        metal: 1000,
+        gold: 500
+      };
+
+      // Calculate loot (victory severity 0.7 for NPC)
+      const loot = calculateLoot(npcResources, capacity, 0.7);
+
+      march.resources = loot;
+      march.status = 'returning';
+
+      // Calculate return time
+      const marchSpeed = this.playerState.research['logistics'] || 0;
+      const returnTime = calculateMarchTime(
+        calculateDistance(march.destination, march.origin),
+        march.troops,
+        marchSpeed * 10
+      );
+
+      march.returnTime = Date.now() + (returnTime * 1000);
+
+      this.pushEvent('march_arrived', {
+        marchId: march.marchId,
+        loot,
+        returnTime: march.returnTime
+      });
+
+      console.log(`[PlayerDO] March ${march.marchId} returning with loot`);
+    } else if (march.marchType === 'gather') {
+      // Gathering from wilderness
+      const capacity = calculateMarchCapacity(march.troops);
+
+      // Simulate gathering (50% of capacity)
+      const gatherAmount = Math.floor(capacity * 0.5);
+      march.resources = {
+        food: Math.floor(gatherAmount * 0.4),
+        wood: Math.floor(gatherAmount * 0.3),
+        stone: Math.floor(gatherAmount * 0.2),
+        metal: Math.floor(gatherAmount * 0.1)
+      };
+
+      march.status = 'returning';
+
+      const marchSpeed = this.playerState.research['logistics'] || 0;
+      const returnTime = calculateMarchTime(
+        calculateDistance(march.destination, march.origin),
+        march.troops,
+        marchSpeed * 10
+      );
+
+      march.returnTime = Date.now() + (returnTime * 1000);
+
+      this.pushEvent('march_arrived', {
+        marchId: march.marchId,
+        resources: march.resources,
+        returnTime: march.returnTime
+      });
+    } else {
+      // Other march types (scout, reinforce, transport)
+      march.status = 'at_target';
+
+      this.pushEvent('march_arrived', {
+        marchId: march.marchId,
+        status: 'at_target'
+      });
+    }
+  }
+
+  /**
+   * Process march return to origin
+   */
+  private async processMarchReturn(march: March): Promise<void> {
+    if (!this.playerState) return;
+
+    console.log(`[PlayerDO] March ${march.marchId} returned home`);
+
+    // Return troops to player
+    for (const marchTroop of march.troops) {
+      const existingTroop = this.playerState.troops.find(t => t.troopType === marchTroop.troopType);
+      if (existingTroop) {
+        existingTroop.quantity += marchTroop.quantity;
+      } else {
+        this.playerState.troops.push({
+          troopType: marchTroop.troopType,
+          quantity: marchTroop.quantity,
+          location: 'home'
+        });
+      }
+    }
+
+    // Add resources if any
+    if (march.resources) {
+      this.playerState.resources.food += march.resources.food || 0;
+      this.playerState.resources.wood += march.resources.wood || 0;
+      this.playerState.resources.stone += march.resources.stone || 0;
+      this.playerState.resources.metal += march.resources.metal || 0;
+      this.playerState.resources.gold += march.resources.gold || 0;
+
+      this.pushEvent('march_returned', {
+        marchId: march.marchId,
+        troops: march.troops,
+        resources: march.resources
+      });
+    } else {
+      this.pushEvent('march_returned', {
+        marchId: march.marchId,
+        troops: march.troops
+      });
+    }
+
+    // Remove march from active marches
+    march.status = 'completed';
+    this.playerState.activeMarches = this.playerState.activeMarches.filter(
+      m => m.marchId !== march.marchId
+    );
   }
 
   /**
