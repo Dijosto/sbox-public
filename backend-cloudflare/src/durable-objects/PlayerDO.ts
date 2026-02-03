@@ -1247,6 +1247,20 @@ export class PlayerDurableObject {
       return this.errorResponse(validation.error || 'Invalid march');
     }
 
+    // Scout marches require Clairvoyance research and spy troops
+    if (body.marchType === 'scout') {
+      const clairvoyanceLevel = this.playerState.research['clairvoyance'] || 0;
+      if (clairvoyanceLevel === 0) {
+        return this.errorResponse('Scout missions require Clairvoyance research. Research Clairvoyance Level 1 to unlock scouting.');
+      }
+
+      // Check if march includes spy troops
+      const hasSpies = body.troops.some(t => t.troopType === 'spy');
+      if (!hasSpies) {
+        return this.errorResponse('Scout missions require spy troops. Train spies at the Training Grounds (requires Clairvoyance research).');
+      }
+    }
+
     // Check if dragon is requested and available
     let marchDragon: DragonInstance | undefined;
     if (body.dragonId) {
@@ -1847,11 +1861,12 @@ export class PlayerDurableObject {
       march.status = 'returning';
 
       const marchSpeed = this.playerState.research['logistics'] || 0;
-      const returnTime = calculateMarchTime(
+      const baseReturnTime = calculateMarchTime(
         calculateDistance(march.destination, march.origin),
         march.troops,
         marchSpeed * 10
       );
+      const returnTime = applySpeedMultiplier(baseReturnTime, this.env);
 
       march.returnTime = Date.now() + (returnTime * 1000);
 
@@ -2011,11 +2026,12 @@ export class PlayerDurableObject {
 
       march.status = 'returning';
       const marchSpeed = this.playerState.research['logistics'] || 0;
-      const returnTime = calculateMarchTime(
+      const baseReturnTime = calculateMarchTime(
         calculateDistance(march.destination, march.origin),
         march.troops,
         marchSpeed * 10
       );
+      const returnTime = applySpeedMultiplier(baseReturnTime, this.env);
       march.returnTime = Date.now() + (returnTime * 1000);
 
       this.pushEvent('scout_returned', {
