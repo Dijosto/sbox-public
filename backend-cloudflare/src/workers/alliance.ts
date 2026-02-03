@@ -521,7 +521,17 @@ export class AllianceHandler {
       allianceId: string;
     };
 
-    return this.forwardToAllianceDO(body.allianceId, request, env);
+    // Create new request with fresh body since we consumed the original
+    const newRequest = new Request(request.url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        playerId: body.targetPlayerId,
+        promotedBy: playerId
+      })
+    });
+
+    return this.forwardToAllianceDO(body.allianceId, newRequest, env);
   }
 
   /**
@@ -533,7 +543,17 @@ export class AllianceHandler {
       allianceId: string;
     };
 
-    return this.forwardToAllianceDO(body.allianceId, request, env);
+    // Create new request with fresh body since we consumed the original
+    const newRequest = new Request(request.url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        playerId: body.targetPlayerId,
+        demotedBy: playerId
+      })
+    });
+
+    return this.forwardToAllianceDO(body.allianceId, newRequest, env);
   }
 
   /**
