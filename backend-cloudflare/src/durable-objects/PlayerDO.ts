@@ -775,7 +775,7 @@ export class PlayerDurableObject {
     // Deduct resources
     this.playerState.resources = deductResources(this.playerState.resources, totalCost);
 
-    // Calculate training time
+    // Calculate training time - requires at least one garrison
     const garrisonLevels: number[] = [];
     let garrisonCount = 0;
 
@@ -784,6 +784,11 @@ export class PlayerDurableObject {
         garrisonLevels.push(building.level);
         garrisonCount++;
       }
+    }
+
+    // Cannot train troops without a garrison
+    if (garrisonCount === 0) {
+      return this.errorResponse('You must build a Garrison to train troops');
     }
 
     const trainingTime = calculateTrainingTime(
