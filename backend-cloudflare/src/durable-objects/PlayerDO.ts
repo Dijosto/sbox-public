@@ -1195,6 +1195,17 @@ export class PlayerDurableObject {
     // Update resources
     this.updateResources();
 
+    // Check march slot limits based on Muster Point level
+    const musterPointLevel = this.playerState.city.innerCity['musterPoint_1']?.level || 0;
+    const maxMarchSlots = 1 + Math.floor(musterPointLevel / 5); // 1 base + 1 per 5 levels
+    const activeMarchCount = this.playerState.activeMarches.length;
+
+    if (activeMarchCount >= maxMarchSlots) {
+      return this.errorResponse(
+        `March limit reached (${activeMarchCount}/${maxMarchSlots}). Upgrade Muster Point for more march slots.`
+      );
+    }
+
     // Validate march
     const validation = validateMarch(
       body.troops,
