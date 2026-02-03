@@ -3,6 +3,33 @@
  * Guardian dragons for combat, stats, and bonuses
  */
 
+/**
+ * Great Dragon health by level (from Dragons of Atlantis wiki)
+ * Levels 1-2 have 0 HP and cannot fight
+ */
+const GREAT_DRAGON_HEALTH_BY_LEVEL: Record<number, number> = {
+  1: 0,
+  2: 0,
+  3: 20000,
+  4: 45947,
+  5: 74743,
+  6: 105560,
+  7: 137972,
+  8: 171716,
+  9: 206608,
+  10: 242514,
+  11: 795656,
+  12: 855656,
+  13: 930656,
+  14: 1090735,
+  15: 1270700,
+  16: 1500000,
+  17: 1500000, // Estimated (wiki missing)
+  18: 1500000, // Estimated (wiki missing)
+  19: 2250000,
+  20: 2500000
+};
+
 export interface DragonStats {
   dragonType: string;
   speed: number;
@@ -140,26 +167,44 @@ export function getDragonConfig(dragonType: string): DragonStats | null {
 
 /**
  * Calculate dragon health based on level
- * Health scales significantly with level
+ * Uses actual Dragons of Atlantis wiki data for Great Dragon
+ * Other dragons use estimated scaling formula
  */
 export function calculateDragonHealth(dragonType: string, level: number): number {
-  // Base health at level 1
+  // Great Dragon uses actual wiki data
+  if (dragonType === 'greatDragon') {
+    return GREAT_DRAGON_HEALTH_BY_LEVEL[level] || GREAT_DRAGON_HEALTH_BY_LEVEL[20];
+  }
+
+  // Other dragons use estimated formula based on specialization
+  // Base health at level 3 (levels 1-2 have 0 HP)
   const baseHealthMap: Record<string, number> = {
-    greatDragon: 50000,
-    stoneDragon: 60000, // Higher due to defense specialization
-    fireDragon: 45000,
-    waterDragon: 50000,
-    frostDragon: 48000,
-    windDragon: 47000,
+    stoneDragon: 24000, // 20% higher (defense specialist)
+    fireDragon: 18000, // 10% lower (offense specialist)
+    waterDragon: 22000, // 10% higher (healing specialist)
+    frostDragon: 20000, // Same as Great Dragon
+    windDragon: 19000, // 5% lower (speed specialist)
     battleDragon: 1500,
     swiftStrikeDragon: 1200
   };
 
-  const baseHealth = baseHealthMap[dragonType] || 50000;
+  const baseHealth = baseHealthMap[dragonType] || 20000;
 
-  // Health scales exponentially with level
-  // Level 11 Great Dragon should have very high health for late game
-  return Math.floor(baseHealth * Math.pow(1.4, level - 1));
+  if (level <= 2) return 0; // Levels 1-2 have 0 HP
+  if (level === 3) return baseHealth;
+
+  // Scale health similarly to Great Dragon pattern
+  // Level 11 is roughly 3.98x level 10 for Great Dragon (795656 / 242514)
+  if (level <= 10) {
+    // Linear scaling up to level 10
+    const growthPerLevel = baseHealth * 0.35;
+    return Math.floor(baseHealth + (growthPerLevel * (level - 3)));
+  } else {
+    // Exponential scaling for levels 11+
+    const level10Health = baseHealth + (baseHealth * 0.35 * 7);
+    const multiplier = level === 11 ? 3.98 : Math.pow(1.08, level - 11) * 3.98;
+    return Math.floor(level10Health * multiplier);
+  }
 }
 
 /**

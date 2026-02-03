@@ -406,9 +406,9 @@ export class PlayerDurableObject {
         {
           dragonId: crypto.randomUUID(),
           dragonType: 'greatDragon',
-          level: 1,
-          currentHealth: 50000, // Base health at level 1
-          maxHealth: 50000,
+          level: 3, // Players start with level 3 (levels 1-2 have 0 HP and cannot fight)
+          currentHealth: 20000, // Level 3 Great Dragon health
+          maxHealth: 20000,
           experience: 0
         }
       ],
