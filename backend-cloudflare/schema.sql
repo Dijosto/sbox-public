@@ -107,15 +107,15 @@ CREATE INDEX IF NOT EXISTS idx_commands_timestamp ON command_log(timestamp DESC)
 CREATE TABLE IF NOT EXISTS battle_reports (
   battle_id TEXT PRIMARY KEY,
   attacker_id TEXT NOT NULL,
-  defender_id TEXT NOT NULL,
+  defender_id TEXT NOT NULL, -- Can be player_id or 'npc_<camp_id>' for NPC battles
   timestamp INTEGER NOT NULL,
   winner TEXT NOT NULL, -- 'attacker' or 'defender'
   attacker_losses TEXT, -- JSON
   defender_losses TEXT, -- JSON
   loot TEXT, -- JSON
   combat_log TEXT, -- JSON
-  FOREIGN KEY (attacker_id) REFERENCES players(player_id),
-  FOREIGN KEY (defender_id) REFERENCES players(player_id)
+  FOREIGN KEY (attacker_id) REFERENCES players(player_id)
+  -- No FK on defender_id to allow NPC battles
 );
 
 CREATE INDEX IF NOT EXISTS idx_battles_attacker ON battle_reports(attacker_id, timestamp DESC);
