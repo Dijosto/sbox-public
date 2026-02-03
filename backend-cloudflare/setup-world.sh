@@ -15,17 +15,13 @@ echo -e "${BLUE}World Map Setup${NC}"
 echo -e "${BLUE}========================================${NC}"
 echo ""
 
-# Step 1: Generate world map SQL
+# Step 1: Generate world map SQL files
 echo -e "${YELLOW}[1/4] Generating world map data...${NC}"
 echo -e "${BLUE}This will create ~20,000 Anthropus camps and 100,000 wilderness tiles${NC}"
+echo -e "${BLUE}Splitting into 5 files for reliable loading${NC}"
 
-npx tsx scripts/generate-world.ts > generated-world.sql
+npx tsx scripts/generate-world.ts
 
-# Check file size
-FILE_SIZE=$(wc -c < generated-world.sql)
-LINES=$(wc -l < generated-world.sql)
-
-echo -e "${GREEN}Generated SQL file: $(($FILE_SIZE / 1024 / 1024))MB, $LINES lines${NC}"
 echo ""
 
 # Step 2: Initialize base schema
@@ -33,9 +29,28 @@ echo -e "${YELLOW}[2/4] Initializing database schema...${NC}"
 wrangler d1 execute atlantis-strategy-db --local --file=./schema.sql
 echo ""
 
-# Step 3: Load world data
-echo -e "${YELLOW}[3/4] Loading world map into database (this may take a minute)...${NC}"
-wrangler d1 execute atlantis-strategy-db --local --file=./generated-world.sql
+# Step 3: Load world data in batches
+echo -e "${YELLOW}[3/4] Loading world map into database (this may take a few minutes)...${NC}"
+
+echo -e "${BLUE}Loading NPC camps...${NC}"
+wrangler d1 execute atlantis-strategy-db --local --file=./generated-world-camps.sql
+sleep 2
+
+echo -e "${BLUE}Loading wilderness tiles (1/4)...${NC}"
+wrangler d1 execute atlantis-strategy-db --local --file=./generated-world-tiles-1.sql
+sleep 2
+
+echo -e "${BLUE}Loading wilderness tiles (2/4)...${NC}"
+wrangler d1 execute atlantis-strategy-db --local --file=./generated-world-tiles-2.sql
+sleep 2
+
+echo -e "${BLUE}Loading wilderness tiles (3/4)...${NC}"
+wrangler d1 execute atlantis-strategy-db --local --file=./generated-world-tiles-3.sql
+sleep 2
+
+echo -e "${BLUE}Loading wilderness tiles (4/4)...${NC}"
+wrangler d1 execute atlantis-strategy-db --local --file=./generated-world-tiles-4.sql
+
 echo ""
 
 # Step 4: Verify data

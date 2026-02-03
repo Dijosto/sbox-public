@@ -1,33 +1,76 @@
 /**
- * Script to generate world map SQL data
- * Run with: npx tsx scripts/generate-world.ts > generated-world.sql
+ * Script to generate world map SQL data in multiple files
+ * Run with: npx tsx scripts/generate-world.ts
+ *
+ * Generates separate files to avoid wrangler memory issues:
+ * - generated-world-camps.sql (all NPC camps)
+ * - generated-world-tiles-1.sql through 4.sql (wilderness tiles split)
  */
 
+import { writeFileSync } from 'fs';
 import { generateWorldMapSQL } from '../src/utils/worldgen';
 
 const WORLD_SEED = 42069; // Fixed seed for consistent world generation
 const WILDERNESS_COUNT = 100000; // Number of wilderness tiles to generate
 
-console.log('-- Generated World Map for Dragons of Atlantis Clone');
-console.log('-- Seed:', WORLD_SEED);
-console.log('-- Generated at:', new Date().toISOString());
+console.log('========================================');
+console.log('World Map Generation');
+console.log('========================================');
+console.log('Seed:', WORLD_SEED);
+console.log('Generated at:', new Date().toISOString());
 console.log('');
 
+// Generate world data
 const { campInserts, tileInserts, campCount, wildernessCount } = generateWorldMapSQL(WORLD_SEED, WILDERNESS_COUNT);
 
-console.log('-- Statistics:');
-console.log(`--   Anthropus Camps: ${campCount}`);
-console.log(`--   Wilderness Tiles: ${wildernessCount}`);
-console.log(`--   Total Tiles: ${campCount + wildernessCount}`);
+console.log('Statistics:');
+console.log(`  Anthropus Camps: ${campCount}`);
+console.log(`  Wilderness Tiles: ${wildernessCount}`);
+console.log(`  Total Tiles: ${campCount + wildernessCount}`);
 console.log('');
 
-console.log('-- ==========================================');
-console.log('-- NPC Camps');
-console.log('-- ==========================================');
-console.log(campInserts);
-console.log('');
+// Write camps file
+console.log('[1/5] Writing NPC camps...');
+const campsFile = `-- NPC Camps
+-- Generated at: ${new Date().toISOString()}
+-- Count: ${campCount}
 
-console.log('-- ==========================================');
-console.log('-- World Tiles');
-console.log('-- ==========================================');
-console.log(tileInserts);
+${campInserts}
+`;
+writeFileSync('generated-world-camps.sql', campsFile);
+console.log(`  ✓ generated-world-camps.sql (${Math.round(campsFile.length / 1024)}KB)`);
+
+// Split tiles into 4 files for manageable loading
+const tileStatements = tileInserts.split('\n\n').filter(s => s.trim());
+const statementsPerFile = Math.ceil(tileStatements.length / 4);
+
+for (let fileNum = 0; fileNum < 4; fileNum++) {
+  const start = fileNum * statementsPerFile;
+  const end = Math.min(start + statementsPerFile, tileStatements.length);
+  const fileStatements = tileStatements.slice(start, end);
+
+  const tilesFile = `-- World Tiles (Part ${fileNum + 1}/4)
+-- Generated at: ${new Date().toISOString()}
+
+${fileStatements.join('\n\n')}
+`;
+
+  const filename = `generated-world-tiles-${fileNum + 1}.sql`;
+  writeFileSync(filename, tilesFile);
+  console.log(`[${fileNum + 2}/5] Writing wilderness tiles part ${fileNum + 1}...`);
+  console.log(`  ✓ ${filename} (${Math.round(tilesFile.length / 1024)}KB)`);
+}
+
+console.log('');
+console.log('========================================');
+console.log('Generation Complete!');
+console.log('========================================');
+console.log('');
+console.log('Files created:');
+console.log('  - generated-world-camps.sql');
+console.log('  - generated-world-tiles-1.sql');
+console.log('  - generated-world-tiles-2.sql');
+console.log('  - generated-world-tiles-3.sql');
+console.log('  - generated-world-tiles-4.sql');
+console.log('');
+console.log('Next: Run ./setup-world.sh to load into database');
