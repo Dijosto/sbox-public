@@ -559,8 +559,27 @@ export function checkResearchPrerequisites(
 ): { valid: boolean; reason?: string } {
   for (const prereq of research.prerequisites) {
     if (prereq.type === 'building') {
-      const building = playerState.city.innerCity[prereq.id] || playerState.city.outerFields[prereq.id];
-      if (!building || building.level < prereq.level) {
+      // Search for building by type (e.g., "scienceCenter" matches "science_center_1")
+      let foundBuilding = null;
+      let maxLevel = 0;
+
+      // Check inner city
+      for (const [buildingId, building] of Object.entries(playerState.city.innerCity)) {
+        if (building.buildingType === prereq.id) {
+          maxLevel = Math.max(maxLevel, building.level);
+          foundBuilding = building;
+        }
+      }
+
+      // Check outer fields
+      for (const [buildingId, building] of Object.entries(playerState.city.outerFields)) {
+        if (building.buildingType === prereq.id) {
+          maxLevel = Math.max(maxLevel, building.level);
+          foundBuilding = building;
+        }
+      }
+
+      if (!foundBuilding || maxLevel < prereq.level) {
         return {
           valid: false,
           reason: `Requires ${prereq.id} level ${prereq.level}`
