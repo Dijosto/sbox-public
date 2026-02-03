@@ -1730,8 +1730,171 @@ export class PlayerDurableObject {
         resources: march.resources,
         returnTime: march.returnTime
       });
+    } else if (march.marchType === 'scout') {
+      // Scout/Spy march - gather intelligence
+
+      // Check if player has Clairvoyance research
+      const clairvoyanceLevel = this.playerState.research['clairvoyance'] || 0;
+      if (clairvoyanceLevel === 0) {
+        // No Clairvoyance research, scout fails
+        march.status = 'returning';
+        march.returnTime = Date.now() + (applySpeedMultiplier(10, this.env) * 1000);
+
+        this.pushEvent('scout_failed', {
+          marchId: march.marchId,
+          reason: 'Clairvoyance research required'
+        });
+        return;
+      }
+
+      let scoutReport: any = {
+        location: march.destination,
+        scoutedAt: Date.now()
+      };
+
+      if (march.targetType === 'player') {
+        // Scout player city
+        const targetTile = await this.env.DB.prepare(
+          'SELECT owner_id FROM world_tiles WHERE x = ? AND y = ? AND tile_type = ?'
+        ).bind(march.destination.x, march.destination.y, 'city').first();
+
+        if (targetTile && targetTile.owner_id) {
+          const targetPlayerId = targetTile.owner_id as string;
+
+          // Get target player's Durable Object
+          const targetPlayerDO = this.env.PLAYER_DO.get(this.env.PLAYER_DO.idFromName(targetPlayerId));
+          const targetStateResponse = await targetPlayerDO.fetch(new Request('https://fake/api/player/state'));
+          const targetState = await targetStateResponse.json() as any;
+
+          if (targetState) {
+            // Calculate scout success based on Clairvoyance vs Sentinel
+            const sentinelLevel = targetState.city?.innerCity?.sentinel_1?.level || 0;
+            const successChance = Math.min(95, 50 + (clairvoyanceLevel * 5) - (sentinelLevel * 3));
+            const scoutSucceeded = Math.random() * 100 < successChance;
+
+            if (scoutSucceeded) {
+              scoutReport.success = true;
+              scoutReport.targetPlayer = targetState.playerName;
+              scoutReport.targetAlliance = targetState.allianceId || null;
+
+              // Full intelligence if Clairvoyance is high enough
+              if (clairvoyanceLevel >= sentinelLevel) {
+                scoutReport.troops = targetState.troops?.filter((t: any) => t.location === 'wall') || [];
+                scoutReport.resources = {
+                  food: Math.floor(targetState.resources?.food || 0),
+                  wood: Math.floor(targetState.resources?.wood || 0),
+                  stone: Math.floor(targetState.resources?.stone || 0),
+                  metal: Math.floor(targetState.resources?.metal || 0)
+                };
+                scoutReport.wallLevel = targetState.city?.innerCity?.wall_1?.level || 0;
+              } else {
+                // Partial intelligence
+                scoutReport.approximate = true;
+                const totalTroops = targetState.troops?.reduce((sum: number, t: any) => sum + (t.location === 'wall' ? t.quantity : 0), 0) || 0;
+                scoutReport.approximateTroops = Math.floor(totalTroops / 1000) * 1000; // Round to nearest thousand
+              }
+            } else {
+              scoutReport.success = false;
+              scoutReport.detected = true;
+              scoutReport.reason = 'Scout detected by Sentinel';
+
+              // Notify defender
+              await this.sendMessage({
+                recipient_id: targetPlayerId,
+                sender_id: null,
+                sender_name: 'Intelligence Report',
+                message_type: 'scout_report',
+                subject: 'Enemy Scout Detected',
+                body: `An enemy scout from ${this.playerState.playerName} was detected approaching your city.`,
+                metadata: JSON.stringify({
+                  scouterId: this.playerState.playerId,
+                  location: march.destination
+                })
+              });
+            }
+          }
+        } else {
+          scoutReport.success = false;
+          scoutReport.reason = 'No city found at target location';
+        }
+      } else if (march.targetType === 'npc') {
+        // Scout NPC camp - always successful
+        const npcCamp = await this.env.DB.prepare(
+          'SELECT * FROM npc_camps WHERE x = ? AND y = ?'
+        ).bind(march.destination.x, march.destination.y).first();
+
+        if (npcCamp) {
+          const currentStrength = calculateNPCStrength(
+            npcCamp.last_defeated as number | null,
+            npcCamp.current_strength_percent as number
+          );
+
+          scoutReport.success = true;
+          scoutReport.targetType = 'npc_camp';
+          scoutReport.campType = npcCamp.camp_type;
+          scoutReport.level = npcCamp.level;
+          scoutReport.currentStrength = currentStrength;
+
+          if (clairvoyanceLevel >= 3) {
+            // Show garrison details at higher Clairvoyance levels
+            const fullGarrison = JSON.parse(npcCamp.garrison as string);
+            const currentGarrison = scaleNPCGarrison(fullGarrison, currentStrength);
+            scoutReport.garrison = currentGarrison;
+          }
+        } else {
+          scoutReport.success = false;
+          scoutReport.reason = 'No NPC camp found';
+        }
+      } else if (march.targetType === 'wilderness') {
+        // Scout wilderness - always successful
+        const wildernessTile = await this.env.DB.prepare(
+          'SELECT * FROM world_tiles WHERE x = ? AND y = ? AND tile_type = ?'
+        ).bind(march.destination.x, march.destination.y, 'wilderness').first();
+
+        if (wildernessTile) {
+          scoutReport.success = true;
+          scoutReport.targetType = 'wilderness';
+          scoutReport.resourceType = wildernessTile.resource_type;
+          scoutReport.level = wildernessTile.level;
+          scoutReport.resourceBonus = wildernessTile.resource_bonus;
+        } else {
+          scoutReport.success = false;
+          scoutReport.reason = 'No wilderness found';
+        }
+      }
+
+      // Send scout report message
+      await this.sendMessage({
+        recipient_id: this.playerState.playerId,
+        sender_id: null,
+        sender_name: 'Intelligence',
+        message_type: 'scout_report',
+        subject: `Scout Report: (${march.destination.x}, ${march.destination.y})`,
+        body: scoutReport.success ?
+          `Your scout successfully gathered intelligence.` :
+          `Scout mission failed: ${scoutReport.reason}`,
+        metadata: JSON.stringify({
+          marchId: march.marchId,
+          report: scoutReport
+        })
+      });
+
+      march.status = 'returning';
+      const marchSpeed = this.playerState.research['logistics'] || 0;
+      const returnTime = calculateMarchTime(
+        calculateDistance(march.destination, march.origin),
+        march.troops,
+        marchSpeed * 10
+      );
+      march.returnTime = Date.now() + (returnTime * 1000);
+
+      this.pushEvent('scout_returned', {
+        marchId: march.marchId,
+        report: scoutReport,
+        returnTime: march.returnTime
+      });
     } else {
-      // Other march types (scout, reinforce, transport)
+      // Other march types (reinforce, transport)
       march.status = 'at_target';
 
       this.pushEvent('march_arrived', {
