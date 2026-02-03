@@ -314,10 +314,10 @@ Write-Host "March ID: $marchId" -ForegroundColor Green
 Write-Host ""
 Start-Sleep -Milliseconds 200
 
-# Wait for march
-$travelTime = if ($march.travelTime) { $march.travelTime } else { 10 }
-Write-Host "Waiting ${travelTime}s for march to arrive..." -ForegroundColor Blue
-Start-Sleep -Seconds ($travelTime + 2)
+# Wait for march to arrive
+$travelTime = if ($march.duration) { $march.duration } else { 10 }
+Write-Host "Waiting ${travelTime}s for march to arrive and battle to resolve..." -ForegroundColor Blue
+Start-Sleep -Seconds ([Math]::Max($travelTime + 5, 15))
 
 # Step 14: Check results
 Write-Host "[14/14] Checking battle results..." -ForegroundColor Yellow
