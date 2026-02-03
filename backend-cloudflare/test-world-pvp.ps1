@@ -137,7 +137,7 @@ Write-Host ""
 # Calculate exact wait time based on completion timestamps
 $now = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
 $maxCompletionTime = [Math]::Max($garrison1CompletionTime, $garrison2CompletionTime)
-$waitMs = $maxCompletionTime - $now + 1000  # +1 second buffer for alarm processing
+$waitMs = $maxCompletionTime - $now + 2000  # +2 second buffer for alarm processing
 $waitSeconds = [Math]::Max(0, [Math]::Ceiling($waitMs / 1000))
 
 Write-Host "Waiting $waitSeconds seconds for garrison construction to complete..." -ForegroundColor Blue
@@ -217,7 +217,7 @@ Write-Host ""
 # Calculate exact wait time based on completion timestamps
 $now = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
 $maxTrainingTime = [Math]::Max($train1CompletionTime, $train2CompletionTime)
-$waitMs = $maxTrainingTime - $now + 1000  # +1 second buffer for alarm processing
+$waitMs = $maxTrainingTime - $now + 2000  # +2 second buffer for alarm processing
 $waitSeconds = [Math]::Max(0, [Math]::Ceiling($waitMs / 1000))
 
 Write-Host "Waiting $waitSeconds seconds for troop training to complete..." -ForegroundColor Blue
