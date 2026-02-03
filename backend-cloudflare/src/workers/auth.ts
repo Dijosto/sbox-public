@@ -1,4 +1,5 @@
 import { Env } from './index';
+import { findRandomSpawnLocation } from '../utils/worldgen';
 
 export class AuthHandler {
   static async handle(request: Request, env: Env): Promise<Response> {
@@ -49,11 +50,14 @@ export class AuthHandler {
           .bind(playerId, steamId, playerName, Date.now())
           .run();
 
-        // Initialize player state in Durable Object
+        // Claim spawn location on map
+        const { x, y } = await this.claimSpawnLocation(playerId, env);
+
+        // Initialize player state in Durable Object with spawn coordinates
         const playerDO = env.PLAYER_DO.get(env.PLAYER_DO.idFromName(playerId));
         await playerDO.fetch(new Request('https://fake/initialize', {
           method: 'POST',
-          body: JSON.stringify({ playerId, playerName, steamId }),
+          body: JSON.stringify({ playerId, playerName, steamId, cityX: x, cityY: y }),
         }));
       } else {
         playerId = player.player_id as string;
@@ -116,11 +120,14 @@ export class AuthHandler {
           .bind(playerId, steamId, playerName, Date.now())
           .run();
 
-        // Initialize player state in Durable Object
+        // Claim spawn location on map
+        const { x, y } = await this.claimSpawnLocation(playerId, env);
+
+        // Initialize player state in Durable Object with spawn coordinates
         const playerDO = env.PLAYER_DO.get(env.PLAYER_DO.idFromName(playerId));
         await playerDO.fetch(new Request('https://fake/initialize', {
           method: 'POST',
-          body: JSON.stringify({ playerId, playerName, steamId }),
+          body: JSON.stringify({ playerId, playerName, steamId, cityX: x, cityY: y }),
         }));
       } else {
         playerId = player.player_id as string;
@@ -145,6 +152,36 @@ export class AuthHandler {
         headers: { 'Content-Type': 'application/json' },
       });
     }
+  }
+
+  /**
+   * Find and claim a spawn location for a new player
+   */
+  private static async claimSpawnLocation(playerId: string, env: Env): Promise<{ x: number; y: number }> {
+    // Get all occupied tiles to avoid spawning on top of existing cities/camps
+    const occupiedTiles = await env.DB.prepare(
+      'SELECT x, y FROM world_tiles WHERE tile_type IN (?, ?, ?)'
+    )
+      .bind('city', 'npc_camp', 'outpost')
+      .all();
+
+    const excludedCoordinates = new Set<string>();
+    occupiedTiles.results.forEach((tile: any) => {
+      excludedCoordinates.add(`${tile.x},${tile.y}`);
+    });
+
+    // Find random spawn location
+    const seed = Date.now() + playerId.charCodeAt(0); // Semi-random seed based on time and player
+    const { x, y } = findRandomSpawnLocation(seed, excludedCoordinates);
+
+    // Claim the tile in the database
+    await env.DB.prepare(
+      'INSERT OR REPLACE INTO world_tiles (x, y, tile_type, owner_id, level, resource_type, resource_bonus) VALUES (?, ?, ?, ?, ?, ?, ?)'
+    )
+      .bind(x, y, 'city', playerId, 1, null, 0)
+      .run();
+
+    return { x, y };
   }
 
   private static async generateJWT(playerId: string, env: Env): Promise<string> {

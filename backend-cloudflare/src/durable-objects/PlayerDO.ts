@@ -183,6 +183,9 @@ export class PlayerDurableObject {
       case '/internal/complete':
         return this.handleCompletions(request);
 
+      case '/internal/plunder':
+        return this.handlePlunder(request);
+
       default:
         return new Response('Not Found', { status: 404 });
     }
@@ -348,7 +351,7 @@ export class PlayerDurableObject {
       playerId: body.playerId,
       playerName: body.playerName,
       city: {
-        position: { x: 500, y: 500 },
+        position: { x: body.cityX || 500, y: body.cityY || 500 }, // Use spawn coordinates from auth
         innerCity: {
           fortress_1: { buildingType: 'fortress', level: 1 },
           home_1: { buildingType: 'home', level: 1 },
@@ -1330,6 +1333,157 @@ export class PlayerDurableObject {
       });
 
       console.log(`[PlayerDO] March ${march.marchId} ${combatResult.winner === 'attacker' ? 'won' : 'lost'} battle, returning`);
+    } else if (march.marchType === 'attack' && march.targetType === 'player') {
+      // PvP Combat
+      // Query target player's city tile
+      const targetTile = await this.env.DB.prepare(
+        'SELECT owner_id FROM world_tiles WHERE x = ? AND y = ? AND tile_type = ?'
+      ).bind(march.destination.x, march.destination.y, 'city').first();
+
+      if (!targetTile || !targetTile.owner_id) {
+        console.error(`[PlayerDO] No player city found at ${march.destination.x},${march.destination.y}`);
+        march.status = 'returning';
+        march.returnTime = Date.now() + 10000;
+        return;
+      }
+
+      const targetPlayerId = targetTile.owner_id as string;
+
+      // Get target player's Durable Object
+      const targetPlayerDO = this.env.PLAYER_DO.get(this.env.PLAYER_DO.idFromName(targetPlayerId));
+      const targetStateResponse = await targetPlayerDO.fetch(new Request('https://fake/api/player/state'));
+      const targetState = await targetStateResponse.json() as any;
+
+      if (!targetState) {
+        console.error(`[PlayerDO] Could not load target player state for ${targetPlayerId}`);
+        march.status = 'returning';
+        march.returnTime = Date.now() + 10000;
+        return;
+      }
+
+      // Convert march troops to combat format
+      const attackerTroops: CombatTroop[] = march.troops.map(t => ({
+        troopType: t.troopType,
+        quantity: t.quantity
+      }));
+
+      // Get defender's garrison troops (only troops at home)
+      const defenderTroops: CombatTroop[] = (targetState.troops || [])
+        .filter((t: any) => t.location === 'home' || !t.location)
+        .map((t: any) => ({
+          troopType: t.troopType,
+          quantity: t.quantity
+        }));
+
+      // Prepare combat sides
+      const attacker: CombatSide = {
+        playerId: this.playerState.playerId,
+        playerName: this.playerState.playerName,
+        troops: attackerTroops,
+        research: this.playerState.research,
+        dragonBonus: 0 // TODO: Add dragon bonuses
+      };
+
+      const defender: CombatSide = {
+        playerId: targetPlayerId,
+        playerName: targetState.playerName || 'Unknown Player',
+        troops: defenderTroops,
+        research: targetState.research || {},
+        dragonBonus: 0 // TODO: Add dragon bonuses
+      };
+
+      // Resolve combat
+      const combatResult = resolveCombat(attacker, defender);
+
+      // Calculate plunder if attacker won
+      let loot = null;
+      if (combatResult.winner === 'attacker') {
+        const capacity = calculateMarchCapacity(march.troops);
+        const defenderResources = {
+          food: Math.floor((targetState.resources?.food || 0) * 0.1), // Can plunder 10% of unprotected resources
+          wood: Math.floor((targetState.resources?.wood || 0) * 0.1),
+          stone: Math.floor((targetState.resources?.stone || 0) * 0.1),
+          metal: Math.floor((targetState.resources?.metal || 0) * 0.1),
+          gold: Math.floor((targetState.resources?.gold || 0) * 0.1)
+        };
+
+        const victorySeverity = combatResult.defenderSurvivors.reduce((sum, t) => sum + t.quantity, 0) === 0 ? 1.0 : 0.7;
+        loot = calculateLoot(defenderResources, capacity, victorySeverity);
+        march.resources = loot;
+
+        // Deduct resources from defender (notify via their DO)
+        await targetPlayerDO.fetch(new Request('https://fake/internal/plunder', {
+          method: 'POST',
+          body: JSON.stringify({
+            loot,
+            attackerId: this.playerState.playerId,
+            losses: combatResult.defenderLosses
+          })
+        }));
+      }
+
+      // Update march with survivors
+      march.troops = combatResult.attackerSurvivors;
+
+      // Save battle report to database
+      const battleId = crypto.randomUUID();
+      await this.env.DB.prepare(`
+        INSERT INTO battle_reports (battle_id, attacker_id, defender_id, timestamp, winner, attacker_losses, defender_losses, loot, combat_log)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).bind(
+        battleId,
+        this.playerState.playerId,
+        targetPlayerId,
+        Date.now(),
+        combatResult.winner,
+        JSON.stringify(combatResult.attackerLosses),
+        JSON.stringify(combatResult.defenderLosses),
+        loot ? JSON.stringify(loot) : null,
+        JSON.stringify(combatResult.rounds)
+      ).run();
+
+      // Send battle report to attacker
+      await this.sendMessage({
+        recipient_id: this.playerState.playerId,
+        sender_id: null,
+        sender_name: 'Battle System',
+        message_type: 'battle_report',
+        subject: `Battle Report: Attack on ${targetState.playerName}`,
+        body: `Your forces ${combatResult.winner === 'attacker' ? 'defeated' : 'were defeated by'} ${targetState.playerName}.`,
+        metadata: JSON.stringify({ battleId, marchId: march.marchId, isAttacker: true })
+      });
+
+      // Send battle report to defender
+      await this.sendMessage({
+        recipient_id: targetPlayerId,
+        sender_id: null,
+        sender_name: 'Battle System',
+        message_type: 'battle_report',
+        subject: `Battle Report: Defended against ${this.playerState.playerName}`,
+        body: `${this.playerState.playerName} attacked your city. ${combatResult.winner === 'defender' ? 'Your defenses held!' : 'Your city was plundered!'}`,
+        metadata: JSON.stringify({ battleId, isAttacker: false })
+      });
+
+      march.status = 'returning';
+
+      // Calculate return time
+      const marchSpeed = this.playerState.research['logistics'] || 0;
+      const returnTime = calculateMarchTime(
+        calculateDistance(march.destination, march.origin),
+        march.troops,
+        marchSpeed * 10
+      );
+
+      march.returnTime = Date.now() + (returnTime * 1000);
+
+      this.pushEvent('march_arrived', {
+        marchId: march.marchId,
+        combatResult: combatResult.winner,
+        loot,
+        returnTime: march.returnTime
+      });
+
+      console.log(`[PlayerDO] PvP March ${march.marchId} ${combatResult.winner === 'attacker' ? 'won' : 'lost'} battle against ${targetState.playerName}, returning`);
     } else if (march.marchType === 'gather') {
       // Gathering from wilderness
       const capacity = calculateMarchCapacity(march.troops);
@@ -1508,6 +1662,54 @@ export class PlayerDurableObject {
       messageId,
       messageType: message.message_type,
       subject: message.subject
+    });
+  }
+
+  /**
+   * Handle plundering from PvP combat (called by attacker's DO)
+   */
+  private async handlePlunder(request: Request): Promise<Response> {
+    if (!this.playerState) {
+      return this.errorResponse('State not loaded', 500);
+    }
+
+    const body = await request.json() as {
+      loot: { food?: number; wood?: number; stone?: number; metal?: number; gold?: number };
+      attackerId: string;
+      losses: Array<{ troopType: string; quantity: number }>;
+    };
+
+    // Deduct resources
+    if (body.loot) {
+      this.playerState.resources.food = Math.max(0, this.playerState.resources.food - (body.loot.food || 0));
+      this.playerState.resources.wood = Math.max(0, this.playerState.resources.wood - (body.loot.wood || 0));
+      this.playerState.resources.stone = Math.max(0, this.playerState.resources.stone - (body.loot.stone || 0));
+      this.playerState.resources.metal = Math.max(0, this.playerState.resources.metal - (body.loot.metal || 0));
+      this.playerState.resources.gold = Math.max(0, this.playerState.resources.gold - (body.loot.gold || 0));
+    }
+
+    // Deduct troop losses
+    for (const loss of body.losses) {
+      const troop = this.playerState.troops.find(t => t.troopType === loss.troopType);
+      if (troop) {
+        troop.quantity = Math.max(0, troop.quantity - loss.quantity);
+        if (troop.quantity === 0) {
+          this.playerState.troops = this.playerState.troops.filter(t => t.troopType !== loss.troopType);
+        }
+      }
+    }
+
+    await this.saveState();
+
+    // Notify player via WebSocket
+    this.pushEvent('plundered', {
+      attackerId: body.attackerId,
+      loot: body.loot,
+      losses: body.losses
+    });
+
+    return new Response(JSON.stringify({ success: true }), {
+      headers: { 'Content-Type': 'application/json' }
     });
   }
 
