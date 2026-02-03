@@ -120,6 +120,9 @@ export class PlayerDurableObject {
       case '/api/player/state':
         return this.handleGetState(request);
 
+      case '/api/player/buildings':
+        return this.handleGetBuildings(request);
+
       // Building endpoints
       case '/api/player/building/upgrade':
         return this.handleBuildingUpgrade(request);
@@ -292,7 +295,7 @@ export class PlayerDurableObject {
       city: {
         position: { x: 500, y: 500 },
         innerCity: {
-          fortress: { buildingType: 'fortress', level: 1 },
+          fortress_1: { buildingType: 'fortress', level: 1 },
           home_1: { buildingType: 'home', level: 1 },
         },
         outerFields: {
@@ -354,6 +357,37 @@ export class PlayerDurableObject {
     await this.saveState();
 
     return new Response(JSON.stringify(this.playerState), {
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  /**
+   * Get all buildings with their exact IDs for client UI
+   */
+  private async handleGetBuildings(request: Request): Promise<Response> {
+    if (!this.playerState) {
+      return this.errorResponse('State not loaded', 500);
+    }
+
+    this.updateResources();
+
+    // Return all building slots with their IDs, types, and levels
+    const buildingsList = {
+      innerCity: Object.entries(this.playerState.city.innerCity).map(([id, building]) => ({
+        id,
+        buildingType: building.buildingType,
+        level: building.level,
+        zone: 'inner' as const
+      })),
+      outerFields: Object.entries(this.playerState.city.outerFields).map(([id, building]) => ({
+        id,
+        buildingType: building.buildingType,
+        level: building.level,
+        zone: 'outer' as const
+      }))
+    };
+
+    return new Response(JSON.stringify(buildingsList), {
       headers: { 'Content-Type': 'application/json' },
     });
   }
