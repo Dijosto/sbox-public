@@ -64,10 +64,50 @@ BUILD_GARRISON_RESPONSE=$(curl -s -X POST "$BASE_URL/api/player/building/upgrade
 
 if echo "$BUILD_GARRISON_RESPONSE" | grep -q "already occupied"; then
   echo "[OK] Garrison already exists"
+  GARRISON_COMPLETION_TIME=0
 else
-  echo "[OK] Garrison construction started"
-  echo "  Waiting for garrison to complete..."
-  sleep 5
+  GARRISON_COMPLETION_TIME=$(echo "$BUILD_GARRISON_RESPONSE" | jq -r '.completionTime')
+  GARRISON_DURATION=$(echo "$BUILD_GARRISON_RESPONSE" | jq -r '.duration')
+  echo "[OK] Garrison construction started, duration: ${GARRISON_DURATION}s"
+
+  # Calculate exact wait time based on completion timestamp
+  if [ "$GARRISON_COMPLETION_TIME" != "null" ] && [ "$GARRISON_COMPLETION_TIME" -gt 0 ]; then
+    NOW=$(date +%s%3N)
+    WAIT_MS=$((GARRISON_COMPLETION_TIME - NOW + 2000))  # +2 second buffer for alarm processing
+    WAIT_SECONDS=$((WAIT_MS / 1000))
+    if [ $WAIT_SECONDS -lt 0 ]; then
+      WAIT_SECONDS=0
+    fi
+
+    echo "  Waiting $WAIT_SECONDS seconds for garrison to complete..."
+    sleep $WAIT_SECONDS
+
+    # Verify garrison is built (with retries for alarm processing)
+    echo "  Verifying garrison is ready..."
+    GARRISON_READY=false
+    for i in {1..3}; do
+      STATE=$(curl -s -X GET "$BASE_URL/api/player/state" \
+        -H "Authorization: Bearer $TOKEN")
+
+      GARRISON_LEVEL=$(echo "$STATE" | jq -r '.city.innerCity.garrison_1.level // 0')
+
+      if [ "$GARRISON_LEVEL" -ge 1 ]; then
+        echo "[OK] Garrison completed at level $GARRISON_LEVEL"
+        GARRISON_READY=true
+        break
+      else
+        if [ $i -lt 3 ]; then
+          echo "  [WAIT] Garrison not ready yet, retrying ($i/3)..."
+          sleep 1
+        fi
+      fi
+    done
+
+    if [ "$GARRISON_READY" = false ]; then
+      echo "[ERROR] Garrison not ready after waiting for completion time"
+      exit 1
+    fi
+  fi
 fi
 sleep 1
 
@@ -83,10 +123,50 @@ BUILD_MUSTER_RESPONSE=$(curl -s -X POST "$BASE_URL/api/player/building/upgrade" 
 
 if echo "$BUILD_MUSTER_RESPONSE" | grep -q "already occupied"; then
   echo "[OK] Muster Point already exists"
+  MUSTER_COMPLETION_TIME=0
 else
-  echo "[OK] Muster Point construction started"
-  echo "  Waiting for Muster Point to complete..."
-  sleep 5
+  MUSTER_COMPLETION_TIME=$(echo "$BUILD_MUSTER_RESPONSE" | jq -r '.completionTime')
+  MUSTER_DURATION=$(echo "$BUILD_MUSTER_RESPONSE" | jq -r '.duration')
+  echo "[OK] Muster Point construction started, duration: ${MUSTER_DURATION}s"
+
+  # Calculate exact wait time based on completion timestamp
+  if [ "$MUSTER_COMPLETION_TIME" != "null" ] && [ "$MUSTER_COMPLETION_TIME" -gt 0 ]; then
+    NOW=$(date +%s%3N)
+    WAIT_MS=$((MUSTER_COMPLETION_TIME - NOW + 2000))  # +2 second buffer for alarm processing
+    WAIT_SECONDS=$((WAIT_MS / 1000))
+    if [ $WAIT_SECONDS -lt 0 ]; then
+      WAIT_SECONDS=0
+    fi
+
+    echo "  Waiting $WAIT_SECONDS seconds for Muster Point to complete..."
+    sleep $WAIT_SECONDS
+
+    # Verify Muster Point is built (with retries for alarm processing)
+    echo "  Verifying Muster Point is ready..."
+    MUSTER_READY=false
+    for i in {1..3}; do
+      STATE=$(curl -s -X GET "$BASE_URL/api/player/state" \
+        -H "Authorization: Bearer $TOKEN")
+
+      MUSTER_LEVEL=$(echo "$STATE" | jq -r '.city.innerCity.musterPoint_1.level // 0')
+
+      if [ "$MUSTER_LEVEL" -ge 1 ]; then
+        echo "[OK] Muster Point completed at level $MUSTER_LEVEL"
+        MUSTER_READY=true
+        break
+      else
+        if [ $i -lt 3 ]; then
+          echo "  [WAIT] Muster Point not ready yet, retrying ($i/3)..."
+          sleep 1
+        fi
+      fi
+    done
+
+    if [ "$MUSTER_READY" = false ]; then
+      echo "[ERROR] Muster Point not ready after waiting for completion time"
+      exit 1
+    fi
+  fi
 fi
 sleep 1
 
@@ -110,9 +190,54 @@ TRAIN_RESPONSE=$(curl -s -X POST "$BASE_URL/api/player/troops/train" \
     "quantity": 100
   }')
 
-echo "[OK] Training 100 Militia queued"
-echo "  Waiting for training to complete..."
-sleep 5
+TRAIN_COMPLETION_TIME=$(echo "$TRAIN_RESPONSE" | jq -r '.completionTime')
+TRAIN_DURATION=$(echo "$TRAIN_RESPONSE" | jq -r '.duration')
+
+if [ "$TRAIN_COMPLETION_TIME" == "null" ]; then
+  echo "[ERROR] Failed to train troops"
+  echo "  Response: $TRAIN_RESPONSE"
+  exit 1
+fi
+
+echo "[OK] Training 100 conscripts queued, duration: ${TRAIN_DURATION}s"
+
+# Calculate exact wait time based on completion timestamp
+NOW=$(date +%s%3N)
+WAIT_MS=$((TRAIN_COMPLETION_TIME - NOW + 2000))  # +2 second buffer for alarm processing
+WAIT_SECONDS=$((WAIT_MS / 1000))
+if [ $WAIT_SECONDS -lt 0 ]; then
+  WAIT_SECONDS=0
+fi
+
+echo "  Waiting $WAIT_SECONDS seconds for training to complete..."
+sleep $WAIT_SECONDS
+
+# Verify troops are ready (with retries for alarm processing)
+echo "  Verifying troops are ready..."
+TROOPS_READY=false
+for i in {1..3}; do
+  STATE=$(curl -s -X GET "$BASE_URL/api/player/state" \
+    -H "Authorization: Bearer $TOKEN")
+
+  CONSCRIPT_COUNT=$(echo "$STATE" | jq -r '.troops[] | select(.troopType == "conscript") | .quantity // 0')
+
+  if [ "$CONSCRIPT_COUNT" -ge 100 ]; then
+    echo "[OK] Troops verified: $CONSCRIPT_COUNT conscripts available"
+    TROOPS_READY=true
+    break
+  else
+    if [ $i -lt 3 ]; then
+      echo "  [WAIT] Troops not ready yet, retrying ($i/3)..."
+      sleep 1
+    fi
+  fi
+done
+
+if [ "$TROOPS_READY" = false ]; then
+  echo "[ERROR] Troops not ready after waiting for completion time"
+  exit 1
+fi
+
 sleep 1
 
 # Step 5: Query world map for wilderness tile

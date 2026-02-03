@@ -56,22 +56,57 @@ Start-Sleep -Seconds 1
 
 # Step 3: Build garrison for troop training
 Write-Host "[3/14] Building garrison..." -ForegroundColor Yellow
-try {
-    $buildGarrisonBody = @{
-        buildingType = "garrison"
-        slotId = "garrison_1"
-    } | ConvertTo-Json
+$buildGarrisonBody = @{
+    buildingType = "garrison"
+    slotId = "garrison_1"
+} | ConvertTo-Json
 
+$garrisonCompletionTime = 0
+try {
     $buildResult = Invoke-RestMethod -Uri "$BaseUrl/api/player/building/upgrade" -Method Post -Body $buildGarrisonBody -Headers $headers -ContentType "application/json"
-    Write-Host "[OK] Garrison construction started" -ForegroundColor Green
-    Write-Host "  Waiting for garrison to complete..." -ForegroundColor Gray
-    Start-Sleep -Seconds 5  # Wait for construction
+    $garrisonCompletionTime = $buildResult.completionTime
+    Write-Host "[OK] Garrison construction started, duration: $($buildResult.duration)s" -ForegroundColor Green
 } catch {
-    # Garrison might already exist
     if ($_.Exception.Message -match "already occupied" -or $_.ErrorDetails.Message -match "already occupied") {
         Write-Host "[OK] Garrison already exists" -ForegroundColor Green
     } else {
-        Write-Host "[WARNING] Garrison build issue: $($_.Exception.Message)" -ForegroundColor Yellow
+        Write-Host "[ERROR] Failed to build garrison: $($_.Exception.Message)" -ForegroundColor Red
+        exit 1
+    }
+}
+
+# Calculate wait time if garrison is being built
+if ($garrisonCompletionTime -gt 0) {
+    $now = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+    $waitMs = $garrisonCompletionTime - $now + 2000  # +2 second buffer for alarm processing
+    $waitSeconds = [Math]::Max(0, [Math]::Ceiling($waitMs / 1000))
+
+    Write-Host "  Waiting $waitSeconds seconds for garrison to complete..." -ForegroundColor Gray
+    Start-Sleep -Seconds $waitSeconds
+
+    # Verify garrison is built (with retries for alarm processing)
+    Write-Host "  Verifying garrison is ready..." -ForegroundColor Gray
+    $garrisonReady = $false
+
+    for ($i = 0; $i -lt 3; $i++) {
+        $verifyState = Invoke-RestMethod -Uri "$BaseUrl/api/player/state" -Method Get -Headers $headers
+        $garrisonCheck = $verifyState.city.innerCity.garrison_1
+
+        if ($garrisonCheck -and $garrisonCheck.level -ge 1) {
+            Write-Host "[OK] Garrison completed at level $($garrisonCheck.level)" -ForegroundColor Green
+            $garrisonReady = $true
+            break
+        } else {
+            if ($i -lt 2) {
+                Write-Host "  [WAIT] Garrison not ready yet, retrying ($($i+1)/3)..." -ForegroundColor Yellow
+                Start-Sleep -Seconds 1
+            }
+        }
+    }
+
+    if (-not $garrisonReady) {
+        Write-Host "[ERROR] Garrison not ready after waiting for completion time" -ForegroundColor Red
+        exit 1
     }
 }
 
@@ -79,22 +114,57 @@ Start-Sleep -Seconds 1
 
 # Step 4: Build Muster Point for march slots
 Write-Host "[4/14] Building Muster Point..." -ForegroundColor Yellow
-try {
-    $buildMusterBody = @{
-        buildingType = "musterPoint"
-        slotId = "musterPoint_1"
-    } | ConvertTo-Json
+$buildMusterBody = @{
+    buildingType = "musterPoint"
+    slotId = "musterPoint_1"
+} | ConvertTo-Json
 
+$musterCompletionTime = 0
+try {
     $buildResult = Invoke-RestMethod -Uri "$BaseUrl/api/player/building/upgrade" -Method Post -Body $buildMusterBody -Headers $headers -ContentType "application/json"
-    Write-Host "[OK] Muster Point construction started" -ForegroundColor Green
-    Write-Host "  Waiting for Muster Point to complete..." -ForegroundColor Gray
-    Start-Sleep -Seconds 5  # Wait for construction
+    $musterCompletionTime = $buildResult.completionTime
+    Write-Host "[OK] Muster Point construction started, duration: $($buildResult.duration)s" -ForegroundColor Green
 } catch {
-    # Muster Point might already exist
     if ($_.Exception.Message -match "already occupied" -or $_.ErrorDetails.Message -match "already occupied") {
         Write-Host "[OK] Muster Point already exists" -ForegroundColor Green
     } else {
-        Write-Host "[WARNING] Muster Point build issue: $($_.Exception.Message)" -ForegroundColor Yellow
+        Write-Host "[ERROR] Failed to build Muster Point: $($_.Exception.Message)" -ForegroundColor Red
+        exit 1
+    }
+}
+
+# Calculate wait time if Muster Point is being built
+if ($musterCompletionTime -gt 0) {
+    $now = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+    $waitMs = $musterCompletionTime - $now + 2000  # +2 second buffer for alarm processing
+    $waitSeconds = [Math]::Max(0, [Math]::Ceiling($waitMs / 1000))
+
+    Write-Host "  Waiting $waitSeconds seconds for Muster Point to complete..." -ForegroundColor Gray
+    Start-Sleep -Seconds $waitSeconds
+
+    # Verify Muster Point is built (with retries for alarm processing)
+    Write-Host "  Verifying Muster Point is ready..." -ForegroundColor Gray
+    $musterReady = $false
+
+    for ($i = 0; $i -lt 3; $i++) {
+        $verifyState = Invoke-RestMethod -Uri "$BaseUrl/api/player/state" -Method Get -Headers $headers
+        $musterCheck = $verifyState.city.innerCity.musterPoint_1
+
+        if ($musterCheck -and $musterCheck.level -ge 1) {
+            Write-Host "[OK] Muster Point completed at level $($musterCheck.level)" -ForegroundColor Green
+            $musterReady = $true
+            break
+        } else {
+            if ($i -lt 2) {
+                Write-Host "  [WAIT] Muster Point not ready yet, retrying ($($i+1)/3)..." -ForegroundColor Yellow
+                Start-Sleep -Seconds 1
+            }
+        }
+    }
+
+    if (-not $musterReady) {
+        Write-Host "[ERROR] Muster Point not ready after waiting for completion time" -ForegroundColor Red
+        exit 1
     }
 }
 
@@ -123,19 +193,51 @@ Start-Sleep -Seconds 1
 
 # Step 6: Train some troops for testing
 Write-Host "[6/14] Training troops for combat tests..." -ForegroundColor Yellow
-try {
-    $trainBody = @{
-        troopType = "conscript"
-        quantity = 100
-    } | ConvertTo-Json
+$trainBody = @{
+    troopType = "conscript"
+    quantity = 100
+} | ConvertTo-Json
 
+try {
     $trainResult = Invoke-RestMethod -Uri "$BaseUrl/api/player/troops/train" -Method Post -Body $trainBody -Headers $headers -ContentType "application/json"
-    Write-Host "[OK] Training 100 Militia queued" -ForegroundColor Green
-    Write-Host "  Waiting for training to complete..." -ForegroundColor Gray
-    Start-Sleep -Seconds 5  # Wait for training
+    $trainCompletionTime = $trainResult.completionTime
+    Write-Host "[OK] Training 100 conscripts queued, duration: $($trainResult.duration)s" -ForegroundColor Green
 } catch {
     Write-Host "[ERROR] Failed to train troops: $($_.Exception.Message)" -ForegroundColor Red
     Write-Host "  Response: $($_.ErrorDetails.Message)" -ForegroundColor Red
+    exit 1
+}
+
+# Calculate exact wait time based on completion timestamp
+$now = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+$waitMs = $trainCompletionTime - $now + 2000  # +2 second buffer for alarm processing
+$waitSeconds = [Math]::Max(0, [Math]::Ceiling($waitMs / 1000))
+
+Write-Host "  Waiting $waitSeconds seconds for training to complete..." -ForegroundColor Gray
+Start-Sleep -Seconds $waitSeconds
+
+# Verify troops are ready (with retries for alarm processing)
+Write-Host "  Verifying troops are ready..." -ForegroundColor Gray
+$troopsReady = $false
+
+for ($i = 0; $i -lt 3; $i++) {
+    $verifyState = Invoke-RestMethod -Uri "$BaseUrl/api/player/state" -Method Get -Headers $headers
+    $conscripts = ($verifyState.troops | Where-Object { $_.troopType -eq 'conscript' } | Select-Object -First 1)
+
+    if ($conscripts -and $conscripts.quantity -ge 100) {
+        Write-Host "[OK] Troops verified: $($conscripts.quantity) conscripts available" -ForegroundColor Green
+        $troopsReady = $true
+        break
+    } else {
+        if ($i -lt 2) {
+            Write-Host "  [WAIT] Troops not ready yet, retrying ($($i+1)/3)..." -ForegroundColor Yellow
+            Start-Sleep -Seconds 1
+        }
+    }
+}
+
+if (-not $troopsReady) {
+    Write-Host "[ERROR] Troops not ready after waiting for completion time" -ForegroundColor Red
     exit 1
 }
 
