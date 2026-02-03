@@ -16,15 +16,20 @@ bindings = [
 ]
 
 # D1 Database
+# For local dev: wrangler will create a local SQLite DB automatically
+# For production: run `wrangler d1 create atlantis-strategy-db` and replace the database_id
 [[d1_databases]]
 binding = "DB"
 database_name = "atlantis-strategy-db"
-database_id = "YOUR_DATABASE_ID" # Replace with: wrangler d1 create atlantis-strategy-db
+database_id = "local-db"  # Placeholder for local development
 
 # KV Namespace for game config
+# For local dev: wrangler will simulate KV automatically
+# For production: run `wrangler kv:namespace create GAME_CONFIG` and replace the id
 [[kv_namespaces]]
 binding = "GAME_CONFIG"
-id = "YOUR_KV_ID" # Replace with: wrangler kv:namespace create GAME_CONFIG
+id = "local-kv"  # Placeholder for local development
+preview_id = "local-kv-preview"
 
 # Queue for async tasks
 [[queues.producers]]
