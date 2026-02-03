@@ -366,7 +366,7 @@ try {
         } | ConvertTo-Json -Depth 10
 
         try {
-            $marchResult2 = Invoke-RestMethod -Uri "$BaseUrl/api/player/march" -Method Post -Body $marchBody2 -Headers $headers -ContentType "application/json"
+            $marchResult2 = Invoke-RestMethod -Uri "$BaseUrl/api/player/march/send" -Method Post -Body $marchBody2 -Headers $headers -ContentType "application/json"
             Write-Host "[ERROR] March should have been blocked by slot limit!" -ForegroundColor Red
             exit 1
         } catch {
@@ -444,7 +444,7 @@ if ($null -ne $npcX) {
             targetType = "npc"
         } | ConvertTo-Json -Depth 10
 
-        $scoutResult = Invoke-RestMethod -Uri "$BaseUrl/api/player/march" -Method Post -Body $scoutBody -Headers $headers -ContentType "application/json"
+        $scoutResult = Invoke-RestMethod -Uri "$BaseUrl/api/player/march/send" -Method Post -Body $scoutBody -Headers $headers -ContentType "application/json"
         $scoutMarchId = $scoutResult.marchId
         Write-Host "[OK] Scout march sent: $scoutMarchId" -ForegroundColor Green
     } catch {
