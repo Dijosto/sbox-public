@@ -6,7 +6,7 @@
 export interface TroopConfig {
   id: string;
   name: string;
-  category: 'transport' | 'melee' | 'ranged' | 'speed' | 'elite';
+  category: 'transport' | 'melee' | 'ranged' | 'speed' | 'elite' | 'npc';
   stats: TroopStats;
   cost: TroopCost;
   trainingTime: number; // Base time in seconds
@@ -295,6 +295,185 @@ export const TROOPS: Record<string, TroopConfig> = {
       { type: 'research', id: 'advancedMilitary', level: 5 }
     ],
     power: 8
+  },
+
+  // ========================================
+  // NPC Troops - Anthropus (Dragons of Atlantis)
+  // ========================================
+
+  // Basic Anthropus Infantry
+  brat: {
+    id: 'brat',
+    name: 'Anthropus Brat',
+    category: 'npc',
+    stats: {
+      meleeAttack: 8,
+      rangedAttack: 0,
+      defense: 8,
+      health: 60,
+      speed: 180,
+      range: 0,
+      loadCapacity: 0
+    },
+    cost: { food: 0 }, // NPCs don't cost resources
+    trainingTime: 0,
+    prerequisites: [],
+    power: 0.8
+  },
+
+  cannibal: {
+    id: 'cannibal',
+    name: 'Anthropus Cannibal',
+    category: 'npc',
+    stats: {
+      meleeAttack: 12,
+      rangedAttack: 0,
+      defense: 12,
+      health: 80,
+      speed: 200,
+      range: 0,
+      loadCapacity: 0
+    },
+    cost: { food: 0 },
+    trainingTime: 0,
+    prerequisites: [],
+    power: 1.2
+  },
+
+  stench: {
+    id: 'stench',
+    name: 'Anthropus Stench',
+    category: 'npc',
+    stats: {
+      meleeAttack: 5,
+      rangedAttack: 30,
+      defense: 15,
+      health: 70,
+      speed: 220,
+      range: 800,
+      loadCapacity: 0
+    },
+    cost: { food: 0 },
+    trainingTime: 0,
+    prerequisites: [],
+    power: 1.5
+  },
+
+  // Medium Anthropus Troops
+  she_devil: {
+    id: 'she_devil',
+    name: 'Anthropus She-Devil',
+    category: 'npc',
+    stats: {
+      meleeAttack: 25,
+      rangedAttack: 0,
+      defense: 25,
+      health: 120,
+      speed: 280,
+      range: 0,
+      loadCapacity: 0
+    },
+    cost: { food: 0 },
+    trainingTime: 0,
+    prerequisites: [],
+    power: 2.5
+  },
+
+  clubber: {
+    id: 'clubber',
+    name: 'Anthropus Clubber',
+    category: 'npc',
+    stats: {
+      meleeAttack: 35,
+      rangedAttack: 0,
+      defense: 30,
+      health: 140,
+      speed: 250,
+      range: 0,
+      loadCapacity: 0
+    },
+    cost: { food: 0 },
+    trainingTime: 0,
+    prerequisites: [],
+    power: 3
+  },
+
+  hurler: {
+    id: 'hurler',
+    name: 'Anthropus Hurler',
+    category: 'npc',
+    stats: {
+      meleeAttack: 8,
+      rangedAttack: 60,
+      defense: 25,
+      health: 90,
+      speed: 240,
+      range: 1000,
+      loadCapacity: 0
+    },
+    cost: { food: 0 },
+    trainingTime: 0,
+    prerequisites: [],
+    power: 3.5
+  },
+
+  // Heavy Anthropus Troops
+  shredder: {
+    id: 'shredder',
+    name: 'Anthropus Shredder',
+    category: 'npc',
+    stats: {
+      meleeAttack: 80,
+      rangedAttack: 0,
+      defense: 60,
+      health: 250,
+      speed: 220,
+      range: 0,
+      loadCapacity: 0
+    },
+    cost: { food: 0 },
+    trainingTime: 0,
+    prerequisites: [],
+    power: 6
+  },
+
+  launcher: {
+    id: 'launcher',
+    name: 'Anthropus Launcher',
+    category: 'npc',
+    stats: {
+      meleeAttack: 10,
+      rangedAttack: 150,
+      defense: 50,
+      health: 180,
+      speed: 200,
+      range: 1400,
+      loadCapacity: 0
+    },
+    cost: { food: 0 },
+    trainingTime: 0,
+    prerequisites: [],
+    power: 7
+  },
+
+  // Elite Anthropus Troops
+  gnasher: {
+    id: 'gnasher',
+    name: 'Anthropus Gnasher',
+    category: 'npc',
+    stats: {
+      meleeAttack: 120,
+      rangedAttack: 0,
+      defense: 90,
+      health: 400,
+      speed: 320,
+      range: 0,
+      loadCapacity: 0
+    },
+    cost: { food: 0 },
+    trainingTime: 0,
+    prerequisites: [],
+    power: 10
   }
 };
 
