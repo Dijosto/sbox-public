@@ -6,13 +6,14 @@
 import { generateWorldMapSQL } from '../src/utils/worldgen';
 
 const WORLD_SEED = 42069; // Fixed seed for consistent world generation
+const WILDERNESS_COUNT = 100000; // Number of wilderness tiles to generate
 
 console.log('-- Generated World Map for Dragons of Atlantis Clone');
 console.log('-- Seed:', WORLD_SEED);
 console.log('-- Generated at:', new Date().toISOString());
 console.log('');
 
-const { campInserts, tileInserts, campCount, wildernessCount } = generateWorldMapSQL(WORLD_SEED);
+const { campInserts, tileInserts, campCount, wildernessCount } = generateWorldMapSQL(WORLD_SEED, WILDERNESS_COUNT);
 
 console.log('-- Statistics:');
 console.log(`--   Anthropus Camps: ${campCount}`);

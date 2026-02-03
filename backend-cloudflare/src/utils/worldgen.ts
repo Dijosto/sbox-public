@@ -259,7 +259,7 @@ export function generateAnthropusCamps(seed: number = 12345): AnthropusCamp[] {
 
 /**
  * Generate wilderness tiles with resource types and levels
- * Default 10,000 for faster testing (use 50,000 for full production map)
+ * Default 10,000 for minimal testing (use 100,000+ for production map)
  */
 export function generateWildernessTiles(
   seed: number,
@@ -311,7 +311,7 @@ export function generateWildernessTiles(
 /**
  * Generate SQL INSERT statements for world map (batched for SQLite limits)
  */
-export function generateWorldMapSQL(seed: number = 12345): {
+export function generateWorldMapSQL(seed: number = 12345, wildernessCount: number = 10000): {
   campInserts: string;
   tileInserts: string;
   campCount: number;
@@ -324,7 +324,7 @@ export function generateWorldMapSQL(seed: number = 12345): {
   camps.forEach(camp => usedCoordinates.add(`${camp.x},${camp.y}`));
 
   // Generate wilderness tiles
-  const wildernessTiles = generateWildernessTiles(seed, usedCoordinates);
+  const wildernessTiles = generateWildernessTiles(seed, usedCoordinates, wildernessCount);
 
   // Generate SQL for camps (batch in groups of 100 to avoid SQLITE_TOOBIG)
   const campInsertStatements: string[] = [];

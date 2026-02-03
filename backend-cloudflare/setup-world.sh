@@ -17,7 +17,7 @@ echo ""
 
 # Step 1: Generate world map SQL
 echo -e "${YELLOW}[1/4] Generating world map data...${NC}"
-echo -e "${BLUE}This will create 715 Anthropus camps and 50,000 wilderness tiles${NC}"
+echo -e "${BLUE}This will create 715 Anthropus camps and 100,000 wilderness tiles${NC}"
 
 npx tsx scripts/generate-world.ts > generated-world.sql
 
