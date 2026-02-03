@@ -422,31 +422,43 @@ if [ -n "$NPC_X" ]; then
   if [ -n "$GATHER_MARCH_ID" ]; then
     echo "  Waiting for gathering march to complete (full round trip)..."
 
-    for i in {1..60}; do
-      STATE=$(curl -s -X GET "$BASE_URL/api/player/state" \
-        -H "Authorization: Bearer $TOKEN")
+    # Get the march to check its return time
+    STATE=$(curl -s -X GET "$BASE_URL/api/player/state" \
+      -H "Authorization: Bearer $TOKEN")
 
-      MARCH_FOUND=$(echo "$STATE" | jq -r ".activeMarches[] | select(.marchId == \"$GATHER_MARCH_ID\") | .marchId")
+    RETURN_TIME=$(echo "$STATE" | jq -r ".activeMarches[] | select(.marchId == \"$GATHER_MARCH_ID\") | .returnTime")
+    MARCH_STATUS=$(echo "$STATE" | jq -r ".activeMarches[] | select(.marchId == \"$GATHER_MARCH_ID\") | .status")
 
-      if [ -z "$MARCH_FOUND" ]; then
-        echo "  Gathering march fully completed and returned home"
-        break
+    if [ -n "$RETURN_TIME" ] && [ "$RETURN_TIME" != "null" ]; then
+      CURRENT_TIME=$(date +%s)000  # Convert to milliseconds
+      WAIT_TIME=$((RETURN_TIME - CURRENT_TIME))
+      WAIT_SECONDS=$(((WAIT_TIME + 999) / 1000))  # Ceiling division
+
+      if [ $WAIT_SECONDS -lt 0 ]; then
+        WAIT_SECONDS=0
       fi
 
-      # Log progress every 10 checks
-      if [ $((i % 10)) -eq 0 ] && [ $i -gt 0 ]; then
-        MARCH_STATUS=$(echo "$STATE" | jq -r ".activeMarches[] | select(.marchId == \"$GATHER_MARCH_ID\") | .status")
-        echo "  Still waiting... ($i checks, march status: $MARCH_STATUS)"
-      fi
+      echo "  March will return in ~$WAIT_SECONDS seconds (status: $MARCH_STATUS)"
 
-      if [ $i -lt 60 ]; then
-        sleep 2
+      if [ $WAIT_SECONDS -gt 0 ]; then
+        sleep $((WAIT_SECONDS + 2))  # Add 2 second buffer
       fi
-    done
+    else
+      echo "  March already completed or no return time set"
+    fi
 
-    # Final check - verify we have march slots available
+    # Verify march is gone
     FINAL_STATE=$(curl -s -X GET "$BASE_URL/api/player/state" \
       -H "Authorization: Bearer $TOKEN")
+    FINAL_MARCH=$(echo "$FINAL_STATE" | jq -r ".activeMarches[] | select(.marchId == \"$GATHER_MARCH_ID\") | .marchId")
+
+    if [ -z "$FINAL_MARCH" ]; then
+      echo "  Gathering march fully completed and returned home"
+    else
+      FINAL_STATUS=$(echo "$FINAL_STATE" | jq -r ".activeMarches[] | select(.marchId == \"$GATHER_MARCH_ID\") | .status")
+      echo "  Warning: March still active (status: $FINAL_STATUS)"
+    fi
+
     ACTIVE_MARCH_COUNT=$(echo "$FINAL_STATE" | jq '.activeMarches | length')
     echo "  Active marches: $ACTIVE_MARCH_COUNT"
   fi

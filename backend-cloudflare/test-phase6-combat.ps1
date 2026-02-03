@@ -435,29 +435,35 @@ if ($null -ne $npcX) {
         if ($null -ne $gatherMarchId) {
             Write-Host "  Waiting for gathering march to complete (full round trip)..." -ForegroundColor Gray
 
-            for ($i = 0; $i -lt 60; $i++) {
-                $state = Invoke-RestMethod -Uri "$BaseUrl/api/player/state" -Method Get -Headers $headers
-                $gatherMarch = $state.activeMarches | Where-Object { $_.marchId -eq $gatherMarchId }
+            # Get the march to check its return time
+            $state = Invoke-RestMethod -Uri "$BaseUrl/api/player/state" -Method Get -Headers $headers
+            $gatherMarch = $state.activeMarches | Where-Object { $_.marchId -eq $gatherMarchId }
 
-                if ($null -eq $gatherMarch) {
-                    Write-Host "  Gathering march fully completed and returned home" -ForegroundColor Gray
-                    break
-                }
+            if ($null -ne $gatherMarch -and $null -ne $gatherMarch.returnTime) {
+                $currentTime = [int64](([datetime]::UtcNow - [datetime]'1970-01-01').TotalMilliseconds)
+                $waitTime = [math]::Max(0, $gatherMarch.returnTime - $currentTime)
+                $waitSeconds = [math]::Ceiling($waitTime / 1000)
 
-                # Log progress every 10 checks
-                if (($i % 10) -eq 0 -and $i -gt 0) {
-                    Write-Host "  Still waiting... (${i} checks, march status: $($gatherMarch.status))" -ForegroundColor DarkGray
-                }
+                Write-Host "  March will return in ~$waitSeconds seconds (status: $($gatherMarch.status))" -ForegroundColor Gray
 
-                if ($i -lt 59) {
-                    Start-Sleep -Seconds 2
+                if ($waitSeconds -gt 0) {
+                    Start-Sleep -Seconds ($waitSeconds + 2)  # Add 2 second buffer
                 }
+            } else {
+                Write-Host "  March already completed or no return time set" -ForegroundColor Gray
             }
 
-            # Final check - verify we have march slots available
+            # Verify march is gone
             $finalState = Invoke-RestMethod -Uri "$BaseUrl/api/player/state" -Method Get -Headers $headers
-            $activeMarchCount = $finalState.activeMarches.Count
-            Write-Host "  Active marches: $activeMarchCount" -ForegroundColor Gray
+            $finalMarch = $finalState.activeMarches | Where-Object { $_.marchId -eq $gatherMarchId }
+
+            if ($null -eq $finalMarch) {
+                Write-Host "  Gathering march fully completed and returned home" -ForegroundColor Gray
+            } else {
+                Write-Host "  Warning: March still active (status: $($finalMarch.status))" -ForegroundColor Yellow
+            }
+
+            Write-Host "  Active marches: $($finalState.activeMarches.Count)" -ForegroundColor Gray
         }
 
         $scoutBody = @{
