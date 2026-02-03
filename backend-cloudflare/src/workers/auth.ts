@@ -8,7 +8,76 @@ export class AuthHandler {
       return await this.authenticateSteam(request, env);
     }
 
+    if (url.pathname === '/api/auth/login' && request.method === 'POST') {
+      return await this.login(request, env);
+    }
+
     return new Response('Not Found', { status: 404 });
+  }
+
+  private static async login(request: Request, env: Env): Promise<Response> {
+    try {
+      const body = await request.json() as any;
+      const steamId = body.steamId;
+      const username = body.username || `Player_${steamId.substring(0, 8)}`;
+
+      if (!steamId) {
+        return new Response(JSON.stringify({ success: false, error: 'Missing Steam ID' }), {
+          status: 400,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+
+      // Check if player exists in database
+      const player = await env.DB.prepare(
+        'SELECT player_id, name FROM players WHERE steam_id = ?'
+      )
+        .bind(steamId)
+        .first();
+
+      let playerId: string;
+      let playerName: string;
+
+      if (!player) {
+        // Create new player
+        playerId = crypto.randomUUID();
+        playerName = username;
+
+        await env.DB.prepare(
+          'INSERT INTO players (player_id, steam_id, name, created_at) VALUES (?, ?, ?, ?)'
+        )
+          .bind(playerId, steamId, playerName, Date.now())
+          .run();
+
+        // Initialize player state in Durable Object
+        const playerDO = env.PLAYER_DO.get(env.PLAYER_DO.idFromName(playerId));
+        await playerDO.fetch(new Request('https://fake/initialize', {
+          method: 'POST',
+          body: JSON.stringify({ playerId, playerName, steamId }),
+        }));
+      } else {
+        playerId = player.player_id as string;
+        playerName = player.name as string;
+      }
+
+      // Generate JWT token
+      const token = await this.generateJWT(playerId, env);
+
+      return new Response(JSON.stringify({
+        success: true,
+        token,
+        playerId,
+        playerName,
+      }), {
+        headers: { 'Content-Type': 'application/json' },
+      });
+    } catch (error) {
+      console.error('Login error:', error);
+      return new Response(JSON.stringify({ success: false, error: 'Login failed' }), {
+        status: 500,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
   }
 
   private static async authenticateSteam(request: Request, env: Env): Promise<Response> {

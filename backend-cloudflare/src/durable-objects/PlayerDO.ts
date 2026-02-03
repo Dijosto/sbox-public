@@ -121,24 +121,24 @@ export class PlayerDurableObject {
         return this.handleGetState(request);
 
       // Building endpoints
-      case '/api/building/upgrade':
+      case '/api/player/building/upgrade':
         return this.handleBuildingUpgrade(request);
 
-      case '/api/building/cancel':
+      case '/api/player/building/cancel':
         return this.handleBuildingCancel(request);
 
       // Training endpoints
-      case '/api/troops/train':
+      case '/api/player/troops/train':
         return this.handleTrainTroops(request);
 
-      case '/api/troops/cancel':
+      case '/api/player/troops/cancel':
         return this.handleTrainCancel(request);
 
       // Research endpoints
-      case '/api/research/start':
+      case '/api/player/research/start':
         return this.handleStartResearch(request);
 
-      case '/api/research/cancel':
+      case '/api/player/research/cancel':
         return this.handleResearchCancel(request);
 
       // Internal completion handlers (called by alarms)
