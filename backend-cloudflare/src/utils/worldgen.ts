@@ -198,18 +198,19 @@ const ANTHROPUS_CAMP_DATA: Record<number, {
 
 /**
  * Camp distribution by level (approximate counts for 750x750 map)
+ * Scaled to ~20,000 total camps to match wilderness density
  */
 const CAMP_DISTRIBUTION = {
-  1: 200,   // Very common
-  2: 150,   // Common
-  3: 120,   // Common
-  4: 80,    // Uncommon
-  5: 60,    // Uncommon
-  6: 40,    // Rare
-  7: 30,    // Rare
-  8: 20,    // Very rare
-  9: 10,    // Very rare
-  10: 5     // Extremely rare
+  1: 5000,   // Very common - starter camps
+  2: 4000,   // Common
+  3: 3500,   // Common
+  4: 2500,   // Uncommon
+  5: 2000,   // Uncommon
+  6: 1500,   // Rare
+  7: 1000,   // Rare
+  8: 400,    // Very rare
+  9: 80,     // Very rare
+  10: 20     // Extremely rare - legendary camps
 };
 
 /**
