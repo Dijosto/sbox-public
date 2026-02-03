@@ -125,7 +125,7 @@ Start-Sleep -Seconds 1
 Write-Host "[6/14] Training troops for combat tests..." -ForegroundColor Yellow
 try {
     $trainBody = @{
-        troopType = "militia"
+        troopType = "conscript"
         quantity = 100
     } | ConvertTo-Json
 
@@ -198,7 +198,7 @@ if ($null -ne $wildernessX) {
             }
             troops = @(
                 @{
-                    troopType = "militia"
+                    troopType = "conscript"
                     quantity = 50
                 }
             )
@@ -245,7 +245,7 @@ try {
             }
             troops = @(
                 @{
-                    troopType = "militia"
+                    troopType = "conscript"
                     quantity = 10
                 }
             )
@@ -324,7 +324,7 @@ if ($null -ne $npcX) {
             }
             troops = @(
                 @{
-                    troopType = "militia"
+                    troopType = "conscript"
                     quantity = 10
                 }
             )

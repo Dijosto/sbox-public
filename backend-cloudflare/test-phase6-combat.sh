@@ -106,7 +106,7 @@ TRAIN_RESPONSE=$(curl -s -X POST "$BASE_URL/api/player/troops/train" \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
-    "troopType": "militia",
+    "troopType": "conscript",
     "quantity": 100
   }')
 
