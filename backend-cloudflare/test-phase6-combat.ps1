@@ -391,20 +391,33 @@ Start-Sleep -Seconds 1
 Write-Host "[10/14] Finding NPC camp..." -ForegroundColor Yellow
 try {
     $npcFound = $false
-    foreach ($tile in $tiles.tiles) {
-        if ($tile.tileType -eq "npc") {
-            $npcX = $tile.x
-            $npcY = $tile.y
-            $npcLevel = $tile.level
-            $npcType = $tile.campType
-            $npcFound = $true
-            Write-Host "[OK] Found NPC camp at ($npcX, $npcY) - $npcType Level $npcLevel" -ForegroundColor Green
-            break
+
+    # Search multiple regions around player if needed (up to 3x3 grid)
+    for ($offsetY = 0; $offsetY -lt 3 -and -not $npcFound; $offsetY++) {
+        for ($offsetX = 0; $offsetX -lt 3 -and -not $npcFound; $offsetX++) {
+            $searchRegionX = $regionX + $offsetX
+            $searchRegionY = $regionY + $offsetY
+
+            Write-Host "  Searching region ($searchRegionX, $searchRegionY)..." -ForegroundColor Gray
+
+            $searchTiles = Invoke-RestMethod -Uri "$BaseUrl/api/world/tiles?regionX=$searchRegionX&regionY=$searchRegionY" -Method Get
+
+            foreach ($tile in $searchTiles.tiles) {
+                if ($tile.tileType -eq "npc") {
+                    $npcX = $tile.x
+                    $npcY = $tile.y
+                    $npcLevel = $tile.level
+                    $npcType = $tile.campType
+                    $npcFound = $true
+                    Write-Host "[OK] Found NPC camp at ($npcX, $npcY) - $npcType Level $npcLevel" -ForegroundColor Green
+                    break
+                }
+            }
         }
     }
 
     if (-not $npcFound) {
-        Write-Host "[WARNING] No NPC camp found in region, skipping NPC tests" -ForegroundColor Yellow
+        Write-Host "[WARNING] No NPC camp found in nearby regions, skipping NPC tests" -ForegroundColor Yellow
         $npcX = $null
     }
 } catch {

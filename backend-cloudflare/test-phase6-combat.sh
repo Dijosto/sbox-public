@@ -383,17 +383,34 @@ sleep 1
 
 # Step 8: Find NPC camp
 echo "[10/14] Finding NPC camp..."
-NPC_TILE=$(echo "$TILES" | jq -r '.tiles[] | select(.tileType == "npc") | @json' | head -1)
+NPC_TILE=""
+
+# Search multiple regions around player if needed (up to 3x3 grid)
+for OFFSET_Y in 0 1 2; do
+  for OFFSET_X in 0 1 2; do
+    SEARCH_REGION_X=$((REGION_X + OFFSET_X))
+    SEARCH_REGION_Y=$((REGION_Y + OFFSET_Y))
+
+    echo "  Searching region ($SEARCH_REGION_X, $SEARCH_REGION_Y)..."
+
+    SEARCH_TILES=$(curl -s -X GET "$BASE_URL/api/world/tiles?regionX=$SEARCH_REGION_X&regionY=$SEARCH_REGION_Y")
+
+    NPC_TILE=$(echo "$SEARCH_TILES" | jq -r '.tiles[] | select(.tileType == "npc") | @json' | head -1)
+
+    if [ -n "$NPC_TILE" ]; then
+      NPC_X=$(echo "$NPC_TILE" | jq -r '.x')
+      NPC_Y=$(echo "$NPC_TILE" | jq -r '.y')
+      NPC_LEVEL=$(echo "$NPC_TILE" | jq -r '.level')
+      NPC_TYPE=$(echo "$NPC_TILE" | jq -r '.campType')
+      echo "[OK] Found NPC camp at ($NPC_X, $NPC_Y) - $NPC_TYPE Level $NPC_LEVEL"
+      break 2
+    fi
+  done
+done
 
 if [ -z "$NPC_TILE" ]; then
-  echo "[WARNING] No NPC camp found in region, skipping NPC tests"
+  echo "[WARNING] No NPC camp found in nearby regions, skipping NPC tests"
   NPC_X=""
-else
-  NPC_X=$(echo "$NPC_TILE" | jq -r '.x')
-  NPC_Y=$(echo "$NPC_TILE" | jq -r '.y')
-  NPC_LEVEL=$(echo "$NPC_TILE" | jq -r '.level')
-  NPC_TYPE=$(echo "$NPC_TILE" | jq -r '.campType')
-  echo "[OK] Found NPC camp at ($NPC_X, $NPC_Y) - $NPC_TYPE Level $NPC_LEVEL"
 fi
 sleep 1
 
