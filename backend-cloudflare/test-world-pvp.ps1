@@ -114,7 +114,7 @@ Write-Host "Building garrison for Player 2 (Defender)..." -ForegroundColor Blue
 $garrisonBody2 = @{
     buildingId = "garrison_1"
     buildingType = "garrison"
-    zone = "innerCity"
+    zone = "inner"
 } | ConvertTo-Json
 
 $garrison2 = Invoke-RestMethod -Uri "$BaseUrl/api/player/building/upgrade" -Method Post -Body $garrisonBody2 -ContentType "application/json" -Headers $headers2
@@ -126,7 +126,7 @@ Write-Host "Building garrison for Player 1 (Attacker)..." -ForegroundColor Blue
 $garrisonBody1 = @{
     buildingId = "garrison_1"
     buildingType = "garrison"
-    zone = "innerCity"
+    zone = "inner"
 } | ConvertTo-Json
 
 $garrison1 = Invoke-RestMethod -Uri "$BaseUrl/api/player/building/upgrade" -Method Post -Body $garrisonBody1 -ContentType "application/json" -Headers $headers1
