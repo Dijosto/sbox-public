@@ -102,3 +102,4 @@ engine/TestResults/
 /game/aftermath_dumps
 /game/gamecache
 /backend-cloudflare/node_modules
+/stratgame/.sbox/cloud

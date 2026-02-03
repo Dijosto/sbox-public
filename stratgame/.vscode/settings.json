@@ -1,0 +1,19 @@
+{
+  "files.associations": {
+    "*.shader": "slang",
+    "*.hlsl": "slang"
+  },
+  "slang.additionalSearchPaths": [
+    "E:\\steamlibrary\\steamapps\\common\\sbox\\core\\shaders",
+    "E:\\SteamLibrary\\steamapps\\common\\sbox\\addons\\base\\Assets\\shaders",
+    "E:\\SteamLibrary\\steamapps\\common\\sbox\\addons\\menu\\Assets\\shaders",
+    "E:\\SteamLibrary\\steamapps\\common\\sbox\\addons\\tools\\Assets\\shaders",
+    "E:\\SteamLibrary\\steamapps\\common\\sbox\\editor\\ShaderGraph\\Assets\\shaders",
+    "E:\\SteamLibrary\\steamapps\\common\\sbox\\editor\\ActionGraph\\Assets\\shaders",
+    "E:\\SteamLibrary\\steamapps\\common\\sbox\\editor\\MovieMaker\\Assets\\shaders",
+    "E:\\SteamLibrary\\steamapps\\common\\sbox\\editor\\Hammer\\Assets\\shaders",
+    "C:\\Users\\danie\\source\\repos\\sbox-public\\stratgame\\Assets\\shaders"
+  ],
+  "slang.predefinedMacros": [],
+  "slang.workspaceFlavor": "vfx"
+}

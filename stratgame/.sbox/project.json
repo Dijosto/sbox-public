@@ -1,0 +1,42 @@
+{
+  "LocalAssetBrowser.History": {
+    "Value": "[\u0022C:\\\\Users\\\\danie\\\\source\\\\repos\\\\sbox-public\\\\stratgame\\\\Assets\u0022,\u0022C:\\\\Users\\\\danie\\\\source\\\\repos\\\\sbox-public\\\\stratgame\\\\Assets\\\\scenes\u0022,\u0022E:\\\\steamlibrary\\\\steamapps\\\\common\\\\sbox\\\\core\u0022,\u0022E:\\\\steamlibrary\\\\steamapps\\\\common\\\\sbox\\\\core\\\\materials\u0022]",
+    "Timeout": 1772717449,
+    "DeleteAt": 0
+  },
+  "LocalAssetBrowser.HistoryIdx": {
+    "Value": "3",
+    "Timeout": 1772717449,
+    "DeleteAt": 0
+  },
+  "Window.SboxSceneEditor.Dock": {
+    "Value": "{\u0022floatingWindows\u0022:[],\u0022mainWrapper\u0022:{\u0022geometry\u0022:\u0022AdnQywADAAAAAAAAAAAAAAAADWcAAAVbAAAAAAAAAAAAAA1nAAAFWwAAAAAAAAAADXAAAAAAAAAAAAAADWcAAAVb\u0022,\u0022splitter\u0022:{\u0022items\u0022:[{\u0022currentIndex\u0022:0,\u0022objects\u0022:[{\u0022data\u0022:null,\u0022managedType\u0022:\u0022SceneTreeWidget\u0022,\u0022name\u0022:\u0022Hierarchy\u0022},{\u0022data\u0022:null,\u0022managedType\u0022:\u0022PanelInspectorWidget\u0022,\u0022name\u0022:\u0022UI Panels\u0022}],\u0022type\u0022:\u0022area\u0022},{\u0022items\u0022:[{\u0022items\u0022:[{\u0022currentIndex\u0022:0,\u0022objects\u0022:[{\u0022data\u0022:null,\u0022managedType\u0022:\u0022SceneDock\u0022,\u0022name\u0022:\u0022SceneDock:untitled\u0022}],\u0022type\u0022:\u0022area\u0022},{\u0022currentIndex\u0022:0,\u0022objects\u0022:[{\u0022data\u0022:null,\u0022managedType\u0022:\u0022MainAssetBrowser\u0022,\u0022name\u0022:\u0022Asset Browser\u0022},{\u0022data\u0022:null,\u0022managedType\u0022:\u0022ConsoleWidget\u0022,\u0022name\u0022:\u0022Console\u0022},{\u0022data\u0022:null,\u0022managedType\u0022:\u0022MixerDock\u0022,\u0022name\u0022:\u0022Mixer\u0022},{\u0022data\u0022:null,\u0022managedType\u0022:\u0022LibraryManagerDock\u0022,\u0022name\u0022:\u0022Library Manager\u0022}],\u0022type\u0022:\u0022area\u0022}],\u0022state\u0022:\u0022AAAA/wAAAAEAAAACAAADpQAAAh0A/////wEAAAACAA==\u0022,\u0022type\u0022:\u0022splitter\u0022},{\u0022items\u0022:[{\u0022currentIndex\u0022:0,\u0022objects\u0022:[{\u0022data\u0022:null,\u0022managedType\u0022:\u0022Inspector\u0022,\u0022name\u0022:\u0022Inspector\u0022}],\u0022type\u0022:\u0022area\u0022},{\u0022currentIndex\u0022:0,\u0022objects\u0022:[{\u0022data\u0022:null,\u0022managedType\u0022:\u0022PerformanceDock\u0022,\u0022name\u0022:\u0022Performance\u0022}],\u0022type\u0022:\u0022area\u0022}],\u0022state\u0022:\u0022AAAA/wAAAAEAAAACAAAEuQAAAVEA/////wEAAAACAA==\u0022,\u0022type\u0022:\u0022splitter\u0022}],\u0022state\u0022:\u0022AAAA/wAAAAEAAAACAAAGuwAAAdsA/////wEAAAABAA==\u0022,\u0022type\u0022:\u0022splitter\u0022}],\u0022state\u0022:\u0022AAAA/wAAAAEAAAACAAABmwAACjQA/////wEAAAABAA==\u0022,\u0022type\u0022:\u0022splitter\u0022}},\u0022toolWindowManagerStateFormat\u0022:1}",
+    "Timeout": 1772716936,
+    "DeleteAt": 0
+  },
+  "SceneView.Viewport0.Settings": {
+    "Value": "{\u0022CameraPosition\u0022:\u0022-300,0,100\u0022,\u0022CameraRotation\u0022:\u00220,0,0,1\u0022,\u0022View\u0022:0,\u0022RenderMode\u0022:0,\u0022WireframeMode\u0022:false,\u0022EnablePostProcessing\u0022:true,\u0022EnablePrefabLighting\u0022:true,\u0022ShowSkyIn2D\u0022:true,\u0022ShowGrid\u0022:true,\u0022GridOpacity\u0022:0.2,\u0022GridAxis\u0022:0,\u0022CameraOrthoHeight\u0022:1000}",
+    "Timeout": 1772717786,
+    "DeleteAt": 0
+  },
+  "scenes/main.scene.Viewport0": {
+    "Value": "{\u0022CameraPosition\u0022:\u0022448.9951,665.0282,5027.076\u0022,\u0022CameraRotation\u0022:\u0022-0.1137935,0.2979794,0.33812,0.8854006\u0022,\u0022CameraOrthoHeight\u0022:1000}",
+    "Timeout": 1772717786,
+    "DeleteAt": 0
+  },
+  ".Viewport0": {
+    "Value": "{\u0022CameraPosition\u0022:\u0022-739.6718,1647.041,1213.58\u0022,\u0022CameraRotation\u0022:\u00220.05390001,0.1102668,-0.4358358,0.8916183\u0022,\u0022CameraOrthoHeight\u0022:1000}",
+    "Timeout": 1772716953,
+    "DeleteAt": 0
+  },
+  "LocalAssetBrowser.Terrain Material.History": {
+    "Value": "[\u0022C:\\\\Users\\\\danie\\\\source\\\\repos\\\\sbox-public\\\\stratgame\\\\Assets\u0022]",
+    "Timeout": 1772717391,
+    "DeleteAt": 0
+  },
+  "LocalAssetBrowser.Terrain Material.HistoryIdx": {
+    "Value": "0",
+    "Timeout": 1772717391,
+    "DeleteAt": 0
+  }
+}
