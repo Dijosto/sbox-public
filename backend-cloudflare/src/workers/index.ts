@@ -7,6 +7,7 @@ import { AuthHandler } from './auth';
 import { PlayerHandler } from './player';
 import { BuildingHandler } from './building';
 import { WorldHandler } from './world';
+import { AllianceHandler } from './alliance';
 
 export interface Env {
   // Durable Objects
@@ -63,6 +64,8 @@ export default {
         response = await BuildingHandler.handle(request, env);
       } else if (url.pathname.startsWith('/api/world')) {
         response = await WorldHandler.handle(request, env);
+      } else if (url.pathname.startsWith('/api/alliance')) {
+        response = await AllianceHandler.handle(request, env);
       } else if (url.pathname === '/ws') {
         // WebSocket upgrade
         return await handleWebSocketUpgrade(request, env);

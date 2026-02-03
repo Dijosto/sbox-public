@@ -29,6 +29,41 @@ CREATE TABLE IF NOT EXISTS alliances (
 CREATE INDEX IF NOT EXISTS idx_alliances_name ON alliances(LOWER(name));
 CREATE INDEX IF NOT EXISTS idx_alliances_tag ON alliances(LOWER(tag));
 
+-- Alliance invitations and applications
+CREATE TABLE IF NOT EXISTS alliance_invitations (
+  invitation_id TEXT PRIMARY KEY,
+  alliance_id TEXT NOT NULL,
+  player_id TEXT NOT NULL,
+  invited_by TEXT NOT NULL,
+  type TEXT NOT NULL, -- 'invite' or 'application'
+  status TEXT NOT NULL DEFAULT 'pending', -- 'pending', 'accepted', 'declined', 'expired'
+  created_at INTEGER NOT NULL,
+  expires_at INTEGER,
+  FOREIGN KEY (alliance_id) REFERENCES alliances(alliance_id),
+  FOREIGN KEY (player_id) REFERENCES players(player_id),
+  FOREIGN KEY (invited_by) REFERENCES players(player_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_invitations_alliance ON alliance_invitations(alliance_id, status);
+CREATE INDEX IF NOT EXISTS idx_invitations_player ON alliance_invitations(player_id, status);
+
+-- Alliance diplomacy relationships
+CREATE TABLE IF NOT EXISTS alliance_diplomacy (
+  relationship_id TEXT PRIMARY KEY,
+  alliance_id TEXT NOT NULL,
+  target_alliance_id TEXT NOT NULL,
+  relationship_type TEXT NOT NULL, -- 'ally', 'war', 'nap'
+  established_at INTEGER NOT NULL,
+  established_by TEXT NOT NULL, -- player_id who set the relationship
+  FOREIGN KEY (alliance_id) REFERENCES alliances(alliance_id),
+  FOREIGN KEY (target_alliance_id) REFERENCES alliances(alliance_id),
+  FOREIGN KEY (established_by) REFERENCES players(player_id),
+  UNIQUE(alliance_id, target_alliance_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_diplomacy_alliance ON alliance_diplomacy(alliance_id);
+CREATE INDEX IF NOT EXISTS idx_diplomacy_type ON alliance_diplomacy(relationship_type);
+
 -- World tiles table
 -- World Map (750x750 grid that wraps around)
 -- Wilderness types: 'forest' (lumber), 'savanna' (food), 'hills' (stone), 'mountains' (metal), 'plains' (outposts)

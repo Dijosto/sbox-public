@@ -399,12 +399,15 @@ See `schema.sql` for complete schema.
 - [x] 50% refund on research cancellation
 - [x] Test speed multiplier applied to research times
 
-**Phase 5: Alliances** 📋 TODO
-- [ ] Alliance creation and management
-- [ ] Alliance member system
-- [ ] Alliance chat via WebSocket
-- [ ] Alliance wars and diplomacy
-- [ ] Reinforcement mechanics
+**Phase 5: Alliances** ✅ COMPLETE
+- [x] Alliance creation and management (create, disband, info, list)
+- [x] Alliance member system (invite, join, leave, kick, promote, demote)
+- [x] Alliance chat via WebSocket (real-time messaging)
+- [x] Alliance diplomacy system (ally, war, NAP relationships)
+- [x] Alliance Durable Object with persistent state
+- [x] Database schema for alliances, invitations, and diplomacy
+- [x] Test suite for alliance system (test-alliance-system.ps1/.sh)
+- [ ] Reinforcement mechanics (troops sent to alliance members) - Future phase
 
 **Phase 6: Advanced Combat** 📋 TODO
 - [ ] Wilderness gathering marches
