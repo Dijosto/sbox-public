@@ -70,11 +70,16 @@ export default {
       }
 
       // Add CORS headers to response
+      const newHeaders = new Headers(response.headers);
       Object.entries(corsHeaders).forEach(([key, value]) => {
-        response.headers.set(key, value);
+        newHeaders.set(key, value);
       });
 
-      return response;
+      return new Response(response.body, {
+        status: response.status,
+        statusText: response.statusText,
+        headers: newHeaders,
+      });
     } catch (error) {
       console.error('Worker error:', error);
       return new Response(JSON.stringify({ error: 'Internal Server Error' }), {
