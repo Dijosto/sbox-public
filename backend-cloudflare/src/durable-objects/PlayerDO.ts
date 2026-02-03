@@ -172,6 +172,13 @@ export class PlayerDurableObject {
       case '/api/player/march/recall':
         return this.handleRecallMarch(request);
 
+      // Message endpoints
+      case '/api/player/messages':
+        return this.handleGetMessages(request);
+
+      case '/api/player/messages/read':
+        return this.handleMarkMessageRead(request);
+
       // Internal completion handlers (called by alarms)
       case '/internal/complete':
         return this.handleCompletions(request);
@@ -1215,23 +1222,94 @@ export class PlayerDurableObject {
 
     // Handle different march types
     if (march.marchType === 'attack' && march.targetType === 'npc') {
-      // For now, simulate NPC combat with a simple loot calculation
-      // TODO: Implement actual NPC camp system
-      const capacity = calculateMarchCapacity(march.troops);
+      // Query NPC camp from database
+      const npcCamp = await this.env.DB.prepare(
+        'SELECT * FROM npc_camps WHERE x = ? AND y = ?'
+      ).bind(march.destination.x, march.destination.y).first();
 
-      // Simulate NPC has some resources
-      const npcResources = {
-        food: 5000,
-        wood: 3000,
-        stone: 2000,
-        metal: 1000,
-        gold: 500
+      if (!npcCamp) {
+        console.error(`[PlayerDO] NPC camp not found at ${march.destination.x},${march.destination.y}`);
+        march.status = 'returning';
+        march.returnTime = Date.now() + 10000; // Return in 10s
+        return;
+      }
+
+      // Parse NPC garrison and resources
+      const npcGarrison = JSON.parse(npcCamp.garrison as string);
+      const npcResources = JSON.parse(npcCamp.resources as string);
+
+      // Convert march troops to combat format
+      const attackerTroops: CombatTroop[] = march.troops.map(t => ({
+        troopType: t.troopType,
+        quantity: t.quantity
+      }));
+
+      // Convert NPC garrison to combat format
+      const defenderTroops: CombatTroop[] = Object.entries(npcGarrison).map(([type, data]: [string, any]) => ({
+        troopType: type,
+        quantity: data.quantity
+      }));
+
+      // Prepare combat sides
+      const attacker: CombatSide = {
+        playerId: this.playerState.playerId,
+        playerName: this.playerState.playerName,
+        troops: attackerTroops,
+        research: this.playerState.research,
+        dragonBonus: 0 // TODO: Add dragon bonuses
       };
 
-      // Calculate loot (victory severity 0.7 for NPC)
-      const loot = calculateLoot(npcResources, capacity, 0.7);
+      const defender: CombatSide = {
+        playerId: 'npc_' + npcCamp.camp_id,
+        playerName: `${npcCamp.camp_type} Camp Lv.${npcCamp.level}`,
+        troops: defenderTroops,
+        research: {}, // NPCs don't have research
+        dragonBonus: 0
+      };
 
-      march.resources = loot;
+      // Resolve combat
+      const combatResult = resolveCombat(attacker, defender);
+
+      // Calculate loot if attacker won
+      let loot = null;
+      if (combatResult.winner === 'attacker') {
+        const capacity = calculateMarchCapacity(march.troops);
+        const victorySeverity = combatResult.defenderSurvivors.reduce((sum, t) => sum + t.quantity, 0) === 0 ? 1.0 : 0.7;
+        loot = calculateLoot(npcResources, capacity, victorySeverity);
+        march.resources = loot;
+      }
+
+      // Update march with survivors
+      march.troops = combatResult.attackerSurvivors;
+
+      // Save battle report to database
+      const battleId = crypto.randomUUID();
+      await this.env.DB.prepare(`
+        INSERT INTO battle_reports (battle_id, attacker_id, defender_id, timestamp, winner, attacker_losses, defender_losses, loot, combat_log)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).bind(
+        battleId,
+        this.playerState.playerId,
+        'npc_' + npcCamp.camp_id,
+        Date.now(),
+        combatResult.winner,
+        JSON.stringify(combatResult.attackerLosses),
+        JSON.stringify(combatResult.defenderLosses),
+        loot ? JSON.stringify(loot) : null,
+        JSON.stringify(combatResult.rounds)
+      ).run();
+
+      // Send battle report message to player
+      await this.sendMessage({
+        recipient_id: this.playerState.playerId,
+        sender_id: null,
+        sender_name: 'Battle System',
+        message_type: 'battle_report',
+        subject: `Battle Report: ${npcCamp.camp_type} Camp Lv.${npcCamp.level}`,
+        body: `Your forces ${combatResult.winner === 'attacker' ? 'defeated' : 'were defeated by'} the ${npcCamp.camp_type} camp.`,
+        metadata: JSON.stringify({ battleId, marchId: march.marchId })
+      });
+
       march.status = 'returning';
 
       // Calculate return time
@@ -1246,11 +1324,12 @@ export class PlayerDurableObject {
 
       this.pushEvent('march_arrived', {
         marchId: march.marchId,
+        combatResult: combatResult.winner,
         loot,
         returnTime: march.returnTime
       });
 
-      console.log(`[PlayerDO] March ${march.marchId} returning with loot`);
+      console.log(`[PlayerDO] March ${march.marchId} ${combatResult.winner === 'attacker' ? 'won' : 'lost'} battle, returning`);
     } else if (march.marchType === 'gather') {
       // Gathering from wilderness
       const capacity = calculateMarchCapacity(march.troops);
@@ -1338,6 +1417,98 @@ export class PlayerDurableObject {
     this.playerState.activeMarches = this.playerState.activeMarches.filter(
       m => m.marchId !== march.marchId
     );
+  }
+
+  /**
+   * Get player messages (inbox)
+   */
+  private async handleGetMessages(request: Request): Promise<Response> {
+    if (!this.playerState) {
+      return this.errorResponse('State not loaded', 500);
+    }
+
+    const url = new URL(request.url);
+    const limit = parseInt(url.searchParams.get('limit') || '20');
+    const offset = parseInt(url.searchParams.get('offset') || '0');
+    const unreadOnly = url.searchParams.get('unreadOnly') === 'true';
+
+    let query = 'SELECT * FROM messages WHERE recipient_id = ?';
+    const params: any[] = [this.playerState.playerId];
+
+    if (unreadOnly) {
+      query += ' AND is_read = 0';
+    }
+
+    query += ' ORDER BY timestamp DESC LIMIT ? OFFSET ?';
+    params.push(limit, offset);
+
+    const result = await this.env.DB.prepare(query)
+      .bind(...params)
+      .all();
+
+    return new Response(JSON.stringify({
+      messages: result.results,
+      total: result.results?.length || 0
+    }), {
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  /**
+   * Mark message as read
+   */
+  private async handleMarkMessageRead(request: Request): Promise<Response> {
+    if (!this.playerState) {
+      return this.errorResponse('State not loaded', 500);
+    }
+
+    const body = await request.json() as { messageId: string };
+
+    await this.env.DB.prepare(
+      'UPDATE messages SET is_read = 1 WHERE message_id = ? AND recipient_id = ?'
+    ).bind(body.messageId, this.playerState.playerId).run();
+
+    return new Response(JSON.stringify({ success: true }), {
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  /**
+   * Send message to player (battle reports, system messages, etc.)
+   */
+  private async sendMessage(message: {
+    recipient_id: string;
+    sender_id: string | null;
+    sender_name: string;
+    message_type: string;
+    subject: string;
+    body: string;
+    metadata: string;
+  }): Promise<void> {
+    const messageId = crypto.randomUUID();
+    const timestamp = Date.now();
+
+    await this.env.DB.prepare(`
+      INSERT INTO messages (message_id, recipient_id, sender_id, sender_name, message_type, subject, body, metadata, timestamp)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).bind(
+      messageId,
+      message.recipient_id,
+      message.sender_id,
+      message.sender_name,
+      message.message_type,
+      message.subject,
+      message.body,
+      message.metadata,
+      timestamp
+    ).run();
+
+    // Notify player via WebSocket
+    this.pushEvent('new_message', {
+      messageId,
+      messageType: message.message_type,
+      subject: message.subject
+    });
   }
 
   /**
