@@ -412,7 +412,7 @@ See `schema.sql` for complete schema.
 **Phase 6: Advanced Combat** 🚧 IN PROGRESS
 - [x] Wilderness gathering (collect specific resources by wilderness type: 70% primary, 10% secondary each)
 - [x] NPC camp regeneration (10% per 5 min after 15 min delay, 65 min full respawn)
-- [ ] Scout/spy marches (reconnaissance, requires Clairvoyance research)
+- [x] Scout/spy marches (Clairvoyance required, success vs Sentinel, intelligence reports)
 - [ ] Guardian Dragon system (dragons join marches for combat bonuses)
 - [ ] March slot limits (based on Muster Point building level)
 
