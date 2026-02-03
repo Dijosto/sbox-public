@@ -486,6 +486,8 @@ export function getTroopConfig(troopId: string): TroopConfig | null {
 
 /**
  * Calculate adjusted training time based on garrison levels
+ * Based on Dragons of Atlantis wiki: each garrison provides 5% base + 5% per level
+ * Level 1 = 10% boost (1.10x), Level 10 = 55% boost (1.55x), Level 20 = 105% boost (2.05x)
  */
 export function calculateTrainingTime(
   baseTroopTime: number,
@@ -493,11 +495,12 @@ export function calculateTrainingTime(
   garrisonLevels: number[],
   garrisonCount: number
 ): number {
-  // Base formula: time = (base_time * quantity) / training_speed_multiplier
-  // Training speed scales with garrison count and average level
+  // Sum all garrison levels (not average)
+  const totalLevels = garrisonLevels.reduce((a, b) => a + b, 0);
 
-  const avgGarrisonLevel = garrisonLevels.reduce((a, b) => a + b, 0) / garrisonLevels.length;
-  const speedMultiplier = 1 + (garrisonCount * 0.1) + (avgGarrisonLevel * 0.05);
+  // Training speed: 1 + 5% per garrison + 5% per total garrison level
+  // Example: 2 garrisons at level 10 = 1 + 0.05 * (2 + 20) = 2.10x speed
+  const speedMultiplier = 1 + 0.05 * (garrisonCount + totalLevels);
 
   const totalTime = (baseTroopTime * quantity) / speedMultiplier;
 
