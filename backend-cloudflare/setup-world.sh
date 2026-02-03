@@ -17,8 +17,8 @@ echo ""
 
 # Step 1: Generate world map SQL files
 echo -e "${YELLOW}[1/4] Generating world map data...${NC}"
-echo -e "${BLUE}This will create ~20,000 Anthropus camps and 100,000 wilderness tiles${NC}"
-echo -e "${BLUE}Splitting into 5 files for reliable loading${NC}"
+echo -e "${BLUE}Test-friendly world: ~2,000 Anthropus camps and 10,000 wilderness tiles${NC}"
+echo -e "${BLUE}Splitting into 4 files for reliable loading${NC}"
 
 npx tsx scripts/generate-world.ts
 
@@ -30,26 +30,22 @@ wrangler d1 execute atlantis-strategy-db --local --file=./schema.sql
 echo ""
 
 # Step 3: Load world data in batches
-echo -e "${YELLOW}[3/4] Loading world map into database (this may take a few minutes)...${NC}"
+echo -e "${YELLOW}[3/4] Loading world map into database (this should take 2-3 minutes)...${NC}"
 
-echo -e "${BLUE}Loading NPC camps...${NC}"
-wrangler d1 execute atlantis-strategy-db --local --file=./generated-world-camps.sql
+echo -e "${BLUE}Loading NPC camps (1/2)...${NC}"
+wrangler d1 execute atlantis-strategy-db --local --file=./generated-world-camps-1.sql
 sleep 2
 
-echo -e "${BLUE}Loading wilderness tiles (1/4)...${NC}"
+echo -e "${BLUE}Loading NPC camps (2/2)...${NC}"
+wrangler d1 execute atlantis-strategy-db --local --file=./generated-world-camps-2.sql
+sleep 2
+
+echo -e "${BLUE}Loading wilderness tiles (1/2)...${NC}"
 wrangler d1 execute atlantis-strategy-db --local --file=./generated-world-tiles-1.sql
 sleep 2
 
-echo -e "${BLUE}Loading wilderness tiles (2/4)...${NC}"
+echo -e "${BLUE}Loading wilderness tiles (2/2)...${NC}"
 wrangler d1 execute atlantis-strategy-db --local --file=./generated-world-tiles-2.sql
-sleep 2
-
-echo -e "${BLUE}Loading wilderness tiles (3/4)...${NC}"
-wrangler d1 execute atlantis-strategy-db --local --file=./generated-world-tiles-3.sql
-sleep 2
-
-echo -e "${BLUE}Loading wilderness tiles (4/4)...${NC}"
-wrangler d1 execute atlantis-strategy-db --local --file=./generated-world-tiles-4.sql
 
 echo ""
 

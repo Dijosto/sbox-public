@@ -197,20 +197,20 @@ const ANTHROPUS_CAMP_DATA: Record<number, {
 };
 
 /**
- * Camp distribution by level (approximate counts for 750x750 map)
- * Scaled to ~20,000 total camps to match wilderness density
+ * Camp distribution by level (test-friendly counts for development)
+ * Total: ~2,000 camps for fast loading and testing
  */
 const CAMP_DISTRIBUTION = {
-  1: 5000,   // Very common - starter camps
-  2: 4000,   // Common
-  3: 3500,   // Common
-  4: 2500,   // Uncommon
-  5: 2000,   // Uncommon
-  6: 1500,   // Rare
-  7: 1000,   // Rare
-  8: 400,    // Very rare
-  9: 80,     // Very rare
-  10: 20     // Extremely rare - legendary camps
+  1: 500,    // Very common - starter camps
+  2: 400,    // Common
+  3: 350,    // Common
+  4: 250,    // Uncommon
+  5: 200,    // Uncommon
+  6: 150,    // Rare
+  7: 100,    // Rare
+  8: 40,     // Very rare
+  9: 8,      // Very rare
+  10: 2      // Extremely rare - legendary camps
 };
 
 /**
@@ -327,9 +327,9 @@ export function generateWorldMapSQL(seed: number = 12345, wildernessCount: numbe
   // Generate wilderness tiles
   const wildernessTiles = generateWildernessTiles(seed, usedCoordinates, wildernessCount);
 
-  // Generate SQL for camps (batch in groups of 10 for wrangler stability)
+  // Generate SQL for camps (batch in groups of 5 for wrangler stability)
   const campInsertStatements: string[] = [];
-  const BATCH_SIZE = 10;
+  const BATCH_SIZE = 5;
 
   for (let i = 0; i < camps.length; i += BATCH_SIZE) {
     const batch = camps.slice(i, i + BATCH_SIZE);
@@ -359,8 +359,8 @@ export function generateWorldMapSQL(seed: number = 12345, wildernessCount: numbe
     allTiles.push(`  (${tile.x}, ${tile.y}, 'wilderness', ${tile.level}, '${tile.resource_type}', ${tile.resource_bonus})`);
   });
 
-  // Batch tiles into multiple INSERT statements (small batches for wrangler)
-  const TILE_BATCH_SIZE = 50;
+  // Batch tiles into multiple INSERT statements (very small batches for wrangler)
+  const TILE_BATCH_SIZE = 20;
   for (let i = 0; i < allTiles.length; i += TILE_BATCH_SIZE) {
     const batch = allTiles.slice(i, i + TILE_BATCH_SIZE);
     tileInsertStatements.push(
