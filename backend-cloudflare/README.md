@@ -388,14 +388,16 @@ See `schema.sql` for complete schema.
 - [x] March return with survivors and loot
 - [x] Test speed multiplier for local development (100x faster)
 
-**Phase 4: Research & Progression** 🚧 IN PROGRESS
-- [ ] Science Center building requirement
-- [ ] Research queue management (single queue)
-- [ ] Research prerequisite validation
-- [ ] Research bonuses applied to combat (Metallurgy, Medicine)
-- [ ] Resource production bonuses (Agriculture, Woodcraft, etc.)
-- [ ] Research completion via Durable Object alarms
-- [ ] Test suite for research system
+**Phase 4: Research & Progression** ✅ COMPLETE
+- [x] Science Center building requirement
+- [x] Research queue management (single queue)
+- [x] Research prerequisite validation
+- [x] Research bonuses applied to combat (Metallurgy, Medicine)
+- [x] Resource production bonuses (Agriculture, Woodcraft, etc.)
+- [x] Research completion via Durable Object alarms
+- [x] Test suite for research system (test-research-system.ps1/.sh)
+- [x] 50% refund on research cancellation
+- [x] Test speed multiplier applied to research times
 
 **Phase 5: Alliances** 📋 TODO
 - [ ] Alliance creation and management
