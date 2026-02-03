@@ -4,32 +4,7 @@ export class PlayerHandler {
   static async handle(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
 
-    // Initialize endpoint doesn't require authentication
-    if (url.pathname === '/api/player/initialize') {
-      // Extract playerId from request body
-      const body = await request.json() as { playerId: string };
-      const playerId = body.playerId;
-
-      if (!playerId) {
-        return new Response(JSON.stringify({ error: 'playerId required' }), {
-          status: 400,
-          headers: { 'Content-Type': 'application/json' },
-        });
-      }
-
-      // Get Player Durable Object
-      const id = env.PLAYER_DO.idFromName(playerId);
-      const stub = env.PLAYER_DO.get(id);
-
-      // Forward request to Durable Object (recreate request with body)
-      return stub.fetch(new Request(request.url, {
-        method: request.method,
-        headers: request.headers,
-        body: JSON.stringify(body),
-      }));
-    }
-
-    // All other endpoints require authentication
+    // Extract JWT token
     const authHeader = request.headers.get('Authorization');
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
       return new Response(JSON.stringify({ error: 'Unauthorized' }), {
