@@ -27,6 +27,7 @@ import {
 import { resolveCombat, calculateLoot, CombatSide, CombatTroop } from '../utils/combat';
 import { applySpeedMultiplier } from '../utils/timing';
 import { calculateNPCStrength, scaleNPCGarrison, scaleNPCResources, calculatePostBattleStrength } from '../utils/npcCamps';
+import { DragonInstance, getDragonConfig, calculateDragonBonus, canDragonFight, calculateHealthFightingMinimum } from '../utils/dragons';
 
 interface PlayerState {
   playerId: string;
@@ -35,6 +36,7 @@ interface PlayerState {
   resources: Resources;
   research: Record<string, number>;
   troops: TroopStack[];
+  dragons: DragonInstance[]; // Player's dragons
   activeMarches: March[];
   taxRate: number;
   wilderness: Record<string, number>; // Conquered wilderness by type
@@ -95,6 +97,7 @@ interface March {
   origin: { x: number; y: number };
   destination: { x: number; y: number };
   troops: MarchTroops[];
+  dragon?: DragonInstance; // Optional dragon accompanying the march
   marchType: 'attack' | 'gather' | 'scout' | 'reinforce' | 'transport';
   departureTime: number;
   arrivalTime: number;
@@ -384,6 +387,16 @@ export class PlayerDurableObject {
       },
       research: {},
       troops: [],
+      dragons: [
+        {
+          dragonId: crypto.randomUUID(),
+          dragonType: 'greatDragon',
+          level: 1,
+          currentHealth: 50000, // Base health at level 1
+          maxHealth: 50000,
+          experience: 0
+        }
+      ],
       activeMarches: [],
       taxRate: 25, // Default 25% tax
       wilderness: {},
@@ -1187,6 +1200,7 @@ export class PlayerDurableObject {
     const body = await request.json() as {
       destination: { x: number; y: number };
       troops: MarchTroops[];
+      dragonId?: string; // Optional dragon to accompany the march
       marchType: 'attack' | 'gather' | 'scout' | 'reinforce' | 'transport';
       targetType: 'player' | 'npc' | 'wilderness';
       targetId?: string;
@@ -1218,6 +1232,34 @@ export class PlayerDurableObject {
       return this.errorResponse(validation.error || 'Invalid march');
     }
 
+    // Check if dragon is requested and available
+    let marchDragon: DragonInstance | undefined;
+    if (body.dragonId) {
+      const dragon = this.playerState.dragons.find(d => d.dragonId === body.dragonId);
+      if (!dragon) {
+        return this.errorResponse('Dragon not found');
+      }
+
+      // Check if dragon is already on a march
+      const dragonOnMarch = this.playerState.activeMarches.some(m => m.dragon?.dragonId === body.dragonId);
+      if (dragonOnMarch) {
+        return this.errorResponse('Dragon is already on a march');
+      }
+
+      // Check if dragon can fight (based on health and Aerial Combat research)
+      const aerialCombatLevel = this.playerState.research['aerialCombat'] || 0;
+      const healthPercent = (dragon.currentHealth / dragon.maxHealth) * 100;
+
+      if (!canDragonFight(healthPercent, aerialCombatLevel)) {
+        const minHealth = calculateHealthFightingMinimum(aerialCombatLevel);
+        return this.errorResponse(
+          `Dragon health too low (${healthPercent.toFixed(1)}%). Minimum: ${minHealth}%. ${aerialCombatLevel === 0 ? 'Research Aerial Combat to allow dragons to fight.' : 'Wait for dragon to heal.'}`
+        );
+      }
+
+      marchDragon = { ...dragon }; // Clone dragon for march
+    }
+
     // Calculate distance and travel time
     const distance = calculateDistance(this.playerState.city.position, body.destination);
     const marchSpeed = this.playerState.research['logistics'] || 0; // Speed research bonus
@@ -1244,6 +1286,7 @@ export class PlayerDurableObject {
       origin: this.playerState.city.position,
       destination: body.destination,
       troops: body.troops,
+      dragon: marchDragon, // Attach dragon if provided
       marchType: body.marchType,
       departureTime: now,
       arrivalTime: now + (travelTime * 1000),
@@ -1400,13 +1443,22 @@ export class PlayerDurableObject {
         quantity: data.quantity
       }));
 
+      // Calculate dragon bonus if present
+      let attackerDragonBonus = 0;
+      if (march.dragon) {
+        const bonus = calculateDragonBonus(march.dragon.dragonType, march.dragon.level);
+        // Average attack and defense multipliers, convert to percentage bonus
+        const avgMultiplier = (bonus.attackMultiplier + bonus.defenseMultiplier) / 2;
+        attackerDragonBonus = (avgMultiplier - 1) * 100; // Convert to percentage (e.g., 1.55 -> 55%)
+      }
+
       // Prepare combat sides
       const attacker: CombatSide = {
         playerId: this.playerState.playerId,
         playerName: this.playerState.playerName,
         troops: attackerTroops,
         research: this.playerState.research,
-        dragonBonus: 0 // TODO: Add dragon bonuses
+        dragonBonus: attackerDragonBonus
       };
 
       const defender: CombatSide = {
@@ -1453,6 +1505,22 @@ export class PlayerDurableObject {
 
       // Update march with survivors
       march.troops = combatResult.attackerSurvivors;
+
+      // Handle dragon damage if dragon was present
+      if (march.dragon) {
+        // Calculate dragon damage based on combat intensity
+        // Dragon takes damage proportional to troop losses
+        const totalAttackerTroops = attackerTroops.reduce((sum, t) => sum + t.quantity, 0);
+        const totalLosses = combatResult.attackerLosses.reduce((sum, t) => sum + t.quantity, 0);
+        const lossRate = totalAttackerTroops > 0 ? totalLosses / totalAttackerTroops : 0;
+
+        // Dragon takes 5-20% damage based on loss rate
+        const dragonDamagePercent = Math.min(20, 5 + (lossRate * 15));
+        const dragonDamage = Math.floor(march.dragon.maxHealth * (dragonDamagePercent / 100));
+        march.dragon.currentHealth = Math.max(0, march.dragon.currentHealth - dragonDamage);
+
+        console.log(`[PlayerDO] Dragon ${march.dragon.dragonType} took ${dragonDamage} damage (${dragonDamagePercent.toFixed(1)}%), health: ${march.dragon.currentHealth}/${march.dragon.maxHealth}`);
+      }
 
       // Save battle report to database
       const battleId = crypto.randomUUID();
@@ -1545,13 +1613,26 @@ export class PlayerDurableObject {
           quantity: t.quantity
         }));
 
+      // Calculate attacker dragon bonus if present
+      let attackerDragonBonus = 0;
+      if (march.dragon) {
+        const bonus = calculateDragonBonus(march.dragon.dragonType, march.dragon.level);
+        const avgMultiplier = (bonus.attackMultiplier + bonus.defenseMultiplier) / 2;
+        attackerDragonBonus = (avgMultiplier - 1) * 100;
+      }
+
+      // Calculate defender dragon bonus (check if defender has a dragon stationed at city)
+      let defenderDragonBonus = 0;
+      // TODO: In future, defenders could have dragons defending their city
+      // For now, dragons only provide bonuses when on marches
+
       // Prepare combat sides
       const attacker: CombatSide = {
         playerId: this.playerState.playerId,
         playerName: this.playerState.playerName,
         troops: attackerTroops,
         research: this.playerState.research,
-        dragonBonus: 0 // TODO: Add dragon bonuses
+        dragonBonus: attackerDragonBonus
       };
 
       const defender: CombatSide = {
@@ -1559,7 +1640,7 @@ export class PlayerDurableObject {
         playerName: targetState.playerName || 'Unknown Player',
         troops: defenderTroops,
         research: targetState.research || {},
-        dragonBonus: 0 // TODO: Add dragon bonuses
+        dragonBonus: defenderDragonBonus
       };
 
       // Resolve combat
@@ -1594,6 +1675,21 @@ export class PlayerDurableObject {
 
       // Update march with survivors
       march.troops = combatResult.attackerSurvivors;
+
+      // Handle dragon damage if dragon was present
+      if (march.dragon) {
+        // Calculate dragon damage based on combat intensity
+        const totalAttackerTroops = attackerTroops.reduce((sum, t) => sum + t.quantity, 0);
+        const totalLosses = combatResult.attackerLosses.reduce((sum, t) => sum + t.quantity, 0);
+        const lossRate = totalAttackerTroops > 0 ? totalLosses / totalAttackerTroops : 0;
+
+        // Dragon takes 5-20% damage based on loss rate
+        const dragonDamagePercent = Math.min(20, 5 + (lossRate * 15));
+        const dragonDamage = Math.floor(march.dragon.maxHealth * (dragonDamagePercent / 100));
+        march.dragon.currentHealth = Math.max(0, march.dragon.currentHealth - dragonDamage);
+
+        console.log(`[PlayerDO] Dragon ${march.dragon.dragonType} took ${dragonDamage} damage (${dragonDamagePercent.toFixed(1)}%), health: ${march.dragon.currentHealth}/${march.dragon.maxHealth}`);
+      }
 
       // Save battle report to database
       const battleId = crypto.randomUUID();
@@ -1934,6 +2030,16 @@ export class PlayerDurableObject {
           quantity: marchTroop.quantity,
           location: 'home'
         });
+      }
+    }
+
+    // Return dragon to player if present
+    if (march.dragon) {
+      const playerDragon = this.playerState.dragons.find(d => d.dragonId === march.dragon!.dragonId);
+      if (playerDragon) {
+        // Update dragon health from march
+        playerDragon.currentHealth = march.dragon.currentHealth;
+        console.log(`[PlayerDO] Dragon ${playerDragon.dragonType} returned with ${playerDragon.currentHealth}/${playerDragon.maxHealth} health`);
       }
     }
 
