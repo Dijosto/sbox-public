@@ -174,9 +174,9 @@ try {
 
 Start-Sleep -Seconds 1
 
-# Step 6: Test gathering march to wilderness (with dragon)
+# Step 8: Test gathering march to wilderness (without dragon - no Aerial Combat research)
 if ($null -ne $wildernessX) {
-    Write-Host "[8/14] Sending gathering march with dragon..." -ForegroundColor Yellow
+    Write-Host "[8/14] Sending gathering march (without dragon)..." -ForegroundColor Yellow
     try {
         # Wait for troops to finish training
         Write-Host "  Waiting for troops to finish training..." -ForegroundColor Gray
@@ -184,6 +184,13 @@ if ($null -ne $wildernessX) {
 
         $state = Invoke-RestMethod -Uri "$BaseUrl/api/player/state" -Method Get -Headers $headers
 
+        # Check if player has Aerial Combat research
+        $aerialCombatLevel = 0
+        if ($state.research.PSObject.Properties['aerialCombat']) {
+            $aerialCombatLevel = $state.research.aerialCombat
+        }
+
+        # Only include dragon if Aerial Combat research is available
         $marchBody = @{
             destination = @{
                 x = $wildernessX
@@ -195,14 +202,22 @@ if ($null -ne $wildernessX) {
                     quantity = 50
                 }
             )
-            dragonId = $dragonId
             marchType = "gather"
             targetType = "wilderness"
-        } | ConvertTo-Json -Depth 10
+        }
 
-        $marchResult = Invoke-RestMethod -Uri "$BaseUrl/api/player/march" -Method Post -Body $marchBody -Headers $headers -ContentType "application/json"
+        if ($aerialCombatLevel -gt 0) {
+            $marchBody.dragonId = $dragonId
+            Write-Host "  Including dragon (Aerial Combat Level $aerialCombatLevel)" -ForegroundColor Gray
+        } else {
+            Write-Host "  Dragon excluded (requires Aerial Combat research)" -ForegroundColor Gray
+        }
+
+        $marchBodyJson = $marchBody | ConvertTo-Json -Depth 10
+
+        $marchResult = Invoke-RestMethod -Uri "$BaseUrl/api/player/march" -Method Post -Body $marchBodyJson -Headers $headers -ContentType "application/json"
         $gatherMarchId = $marchResult.marchId
-        Write-Host "[OK] Gathering march sent with dragon: $gatherMarchId" -ForegroundColor Green
+        Write-Host "[OK] Gathering march sent: $gatherMarchId" -ForegroundColor Green
     } catch {
         Write-Host "[ERROR] Failed to send gathering march: $($_.Exception.Message)" -ForegroundColor Red
         Write-Host "  Response: $($_.ErrorDetails.Message)" -ForegroundColor Red

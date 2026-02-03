@@ -1261,14 +1261,22 @@ export class PlayerDurableObject {
         return this.errorResponse('Dragon is already on a march');
       }
 
-      // Check if dragon can fight (based on health and Aerial Combat research)
+      // Check if dragon can fight (requires Aerial Combat research)
       const aerialCombatLevel = this.playerState.research['aerialCombat'] || 0;
-      const healthPercent = (dragon.currentHealth / dragon.maxHealth) * 100;
+
+      // Aerial Combat research is required to use dragons in combat
+      if (aerialCombatLevel === 0) {
+        return this.errorResponse(
+          'Aerial Combat research is required to use dragons in combat. Research Aerial Combat Level 1 to unlock dragon combat.'
+        );
+      }
+
+      const healthPercent = dragon.maxHealth > 0 ? (dragon.currentHealth / dragon.maxHealth) * 100 : 0;
 
       if (!canDragonFight(healthPercent, aerialCombatLevel)) {
         const minHealth = calculateHealthFightingMinimum(aerialCombatLevel);
         return this.errorResponse(
-          `Dragon health too low (${healthPercent.toFixed(1)}%). Minimum: ${minHealth}%. ${aerialCombatLevel === 0 ? 'Research Aerial Combat to allow dragons to fight.' : 'Wait for dragon to heal.'}`
+          `Dragon health too low (${healthPercent.toFixed(1)}%). Minimum: ${minHealth}% required (Aerial Combat Level ${aerialCombatLevel}). Wait for dragon to heal.`
         );
       }
 

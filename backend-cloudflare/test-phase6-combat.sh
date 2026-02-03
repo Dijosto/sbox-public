@@ -144,33 +144,59 @@ else
 fi
 sleep 1
 
-# Step 6: Test gathering march to wilderness (with dragon)
+# Step 8: Test gathering march to wilderness (without dragon - no Aerial Combat research)
 if [ -n "$WILDERNESS_X" ]; then
-  echo "[8/14] Sending gathering march with dragon..."
+  echo "[8/14] Sending gathering march (without dragon)..."
   echo "  Waiting for troops to finish training..."
   sleep 3
 
   STATE=$(curl -s -X GET "$BASE_URL/api/player/state" \
     -H "Authorization: Bearer $TOKEN")
 
-  MARCH_RESPONSE=$(curl -s -X POST "$BASE_URL/api/player/march" \
-    -H "Authorization: Bearer $TOKEN" \
-    -H "Content-Type: application/json" \
-    -d "{
-      \"destination\": {
-        \"x\": $WILDERNESS_X,
-        \"y\": $WILDERNESS_Y
-      },
-      \"troops\": [
-        {
-          \"troopType\": \"militia\",
-          \"quantity\": 50
-        }
-      ],
-      \"dragonId\": \"$DRAGON_ID\",
-      \"marchType\": \"gather\",
-      \"targetType\": \"wilderness\"
-    }")
+  # Check if player has Aerial Combat research
+  AERIAL_COMBAT_LEVEL=$(echo "$STATE" | jq -r '.research.aerialCombat // 0')
+
+  # Build march request based on Aerial Combat availability
+  if [ "$AERIAL_COMBAT_LEVEL" -gt 0 ]; then
+    echo "  Including dragon (Aerial Combat Level $AERIAL_COMBAT_LEVEL)"
+    MARCH_RESPONSE=$(curl -s -X POST "$BASE_URL/api/player/march" \
+      -H "Authorization: Bearer $TOKEN" \
+      -H "Content-Type: application/json" \
+      -d "{
+        \"destination\": {
+          \"x\": $WILDERNESS_X,
+          \"y\": $WILDERNESS_Y
+        },
+        \"troops\": [
+          {
+            \"troopType\": \"militia\",
+            \"quantity\": 50
+          }
+        ],
+        \"dragonId\": \"$DRAGON_ID\",
+        \"marchType\": \"gather\",
+        \"targetType\": \"wilderness\"
+      }")
+  else
+    echo "  Dragon excluded (requires Aerial Combat research)"
+    MARCH_RESPONSE=$(curl -s -X POST "$BASE_URL/api/player/march" \
+      -H "Authorization: Bearer $TOKEN" \
+      -H "Content-Type: application/json" \
+      -d "{
+        \"destination\": {
+          \"x\": $WILDERNESS_X,
+          \"y\": $WILDERNESS_Y
+        },
+        \"troops\": [
+          {
+            \"troopType\": \"militia\",
+            \"quantity\": 50
+          }
+        ],
+        \"marchType\": \"gather\",
+        \"targetType\": \"wilderness\"
+      }")
+  fi
 
   GATHER_MARCH_ID=$(echo "$MARCH_RESPONSE" | jq -r '.marchId')
   if [ "$GATHER_MARCH_ID" == "null" ]; then
@@ -178,7 +204,7 @@ if [ -n "$WILDERNESS_X" ]; then
     echo "  Response: $MARCH_RESPONSE"
     exit 1
   fi
-  echo "[OK] Gathering march sent with dragon: $GATHER_MARCH_ID"
+  echo "[OK] Gathering march sent: $GATHER_MARCH_ID"
 else
   echo "[8/14] Skipping wilderness gathering test (no wilderness found)"
   GATHER_MARCH_ID=""
