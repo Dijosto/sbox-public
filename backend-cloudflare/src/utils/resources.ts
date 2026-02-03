@@ -160,6 +160,7 @@ export function calculateHomeCapacity(buildings: Record<string, { level: number 
 
 /**
  * Calculate resource storage caps
+ * Note: DoA did not have hard caps, but this calculates vault protection capacity for future use
  */
 export function calculateStorageCaps(buildings: Record<string, { level: number }>): ResourceCaps {
   // Base storage from resource buildings
@@ -204,6 +205,7 @@ export function calculateStorageCaps(buildings: Record<string, { level: number }
 
 /**
  * Calculate accumulated resources over time
+ * Note: Dragons of Atlantis did not have hard resource storage caps
  */
 export function calculateAccumulatedResources(
   currentResources: Resources,
@@ -212,11 +214,11 @@ export function calculateAccumulatedResources(
   elapsedHours: number
 ): Resources {
   return {
-    food: Math.min(caps.foodCap, Math.floor(currentResources.food + productionRates.foodRate * elapsedHours)),
-    wood: Math.min(caps.woodCap, Math.floor(currentResources.wood + productionRates.woodRate * elapsedHours)),
-    stone: Math.min(caps.stoneCap, Math.floor(currentResources.stone + productionRates.stoneRate * elapsedHours)),
-    metal: Math.min(caps.metalCap, Math.floor(currentResources.metal + productionRates.metalRate * elapsedHours)),
-    gold: Math.min(caps.goldCap, Math.floor(currentResources.gold + productionRates.goldRate * elapsedHours)),
+    food: Math.floor(currentResources.food + productionRates.foodRate * elapsedHours),
+    wood: Math.floor(currentResources.wood + productionRates.woodRate * elapsedHours),
+    stone: Math.floor(currentResources.stone + productionRates.stoneRate * elapsedHours),
+    metal: Math.floor(currentResources.metal + productionRates.metalRate * elapsedHours),
+    gold: Math.floor(currentResources.gold + productionRates.goldRate * elapsedHours),
     premiumCurrency: currentResources.premiumCurrency // Never auto-generated
   };
 }

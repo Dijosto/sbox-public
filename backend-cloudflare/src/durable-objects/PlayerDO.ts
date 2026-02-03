@@ -327,18 +327,12 @@ export class PlayerDurableObject {
       elapsed
     );
 
-    // Update rates and caps in state
+    // Update production rates in state
     this.playerState.resources.foodRate = rates.foodRate;
     this.playerState.resources.woodRate = rates.woodRate;
     this.playerState.resources.stoneRate = rates.stoneRate;
     this.playerState.resources.metalRate = rates.metalRate;
     this.playerState.resources.goldRate = rates.goldRate;
-
-    this.playerState.resources.foodCap = caps.foodCap;
-    this.playerState.resources.woodCap = caps.woodCap;
-    this.playerState.resources.stoneCap = caps.stoneCap;
-    this.playerState.resources.metalCap = caps.metalCap;
-    this.playerState.resources.goldCap = caps.goldCap;
   }
 
   /**
@@ -379,11 +373,6 @@ export class PlayerDurableObject {
         stoneRate: 50,
         metalRate: 25,
         goldRate: 10,
-        foodCap: 10000,
-        woodCap: 10000,
-        stoneCap: 5000,
-        metalCap: 2500,
-        goldCap: 1000,
       },
       research: {},
       troops: [],
