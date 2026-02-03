@@ -259,11 +259,12 @@ export function generateAnthropusCamps(seed: number = 12345): AnthropusCamp[] {
 
 /**
  * Generate wilderness tiles with resource types and levels
+ * Default 10,000 for faster testing (use 50,000 for full production map)
  */
 export function generateWildernessTiles(
   seed: number,
   excludedCoordinates: Set<string>,
-  count: number = 50000
+  count: number = 10000
 ): WorldTile[] {
   const rng = new SeededRandom(seed + 1000);
   const tiles: WorldTile[] = [];
@@ -308,7 +309,7 @@ export function generateWildernessTiles(
 }
 
 /**
- * Generate SQL INSERT statements for world map
+ * Generate SQL INSERT statements for world map (batched for SQLite limits)
  */
 export function generateWorldMapSQL(seed: number = 12345): {
   campInserts: string;
@@ -325,29 +326,48 @@ export function generateWorldMapSQL(seed: number = 12345): {
   // Generate wilderness tiles
   const wildernessTiles = generateWildernessTiles(seed, usedCoordinates);
 
-  // Generate SQL for camps
-  const campValues = camps.map(camp => {
-    const escapedGarrison = camp.garrison.replace(/'/g, "''");
-    const escapedResources = camp.resources.replace(/'/g, "''");
-    return `  ('${camp.camp_id}', ${camp.x}, ${camp.y}, '${camp.camp_type}', ${camp.level}, '${escapedGarrison}', '${escapedResources}', ${camp.max_attacks_per_day})`;
-  });
+  // Generate SQL for camps (batch in groups of 100 to avoid SQLITE_TOOBIG)
+  const campInsertStatements: string[] = [];
+  const BATCH_SIZE = 100;
 
-  const campInserts = `INSERT OR IGNORE INTO npc_camps (camp_id, x, y, camp_type, level, garrison, resources, max_attacks_per_day) VALUES\n${campValues.join(',\n')};`;
+  for (let i = 0; i < camps.length; i += BATCH_SIZE) {
+    const batch = camps.slice(i, i + BATCH_SIZE);
+    const campValues = batch.map(camp => {
+      const escapedGarrison = camp.garrison.replace(/'/g, "''");
+      const escapedResources = camp.resources.replace(/'/g, "''");
+      return `  ('${camp.camp_id}', ${camp.x}, ${camp.y}, '${camp.camp_type}', ${camp.level}, '${escapedGarrison}', '${escapedResources}', ${camp.max_attacks_per_day})`;
+    });
+    campInsertStatements.push(
+      `INSERT OR IGNORE INTO npc_camps (camp_id, x, y, camp_type, level, garrison, resources, max_attacks_per_day) VALUES\n${campValues.join(',\n')};`
+    );
+  }
 
-  // Generate SQL for tiles
-  const tileValues: string[] = [];
+  const campInserts = campInsertStatements.join('\n\n');
+
+  // Generate SQL for tiles (batch in groups of 500)
+  const tileInsertStatements: string[] = [];
+  const allTiles: string[] = [];
 
   // Add camp tiles
   camps.forEach(camp => {
-    tileValues.push(`  (${camp.x}, ${camp.y}, 'npc_camp', ${camp.level}, NULL, 0)`);
+    allTiles.push(`  (${camp.x}, ${camp.y}, 'npc_camp', ${camp.level}, NULL, 0)`);
   });
 
   // Add wilderness tiles
   wildernessTiles.forEach(tile => {
-    tileValues.push(`  (${tile.x}, ${tile.y}, 'wilderness', ${tile.level}, '${tile.resource_type}', ${tile.resource_bonus})`);
+    allTiles.push(`  (${tile.x}, ${tile.y}, 'wilderness', ${tile.level}, '${tile.resource_type}', ${tile.resource_bonus})`);
   });
 
-  const tileInserts = `INSERT OR IGNORE INTO world_tiles (x, y, tile_type, level, resource_type, resource_bonus) VALUES\n${tileValues.join(',\n')};`;
+  // Batch tiles into multiple INSERT statements
+  const TILE_BATCH_SIZE = 500;
+  for (let i = 0; i < allTiles.length; i += TILE_BATCH_SIZE) {
+    const batch = allTiles.slice(i, i + TILE_BATCH_SIZE);
+    tileInsertStatements.push(
+      `INSERT OR IGNORE INTO world_tiles (x, y, tile_type, level, resource_type, resource_bonus) VALUES\n${batch.join(',\n')};`
+    );
+  }
+
+  const tileInserts = tileInsertStatements.join('\n\n');
 
   return {
     campInserts,
