@@ -27,7 +27,7 @@ import {
 import { resolveCombat, calculateLoot, CombatSide, CombatTroop } from '../utils/combat';
 import { applySpeedMultiplier } from '../utils/timing';
 import { calculateNPCStrength, scaleNPCGarrison, scaleNPCResources, calculatePostBattleStrength } from '../utils/npcCamps';
-import { DragonInstance, getDragonConfig, calculateDragonBonus, canDragonFight, calculateHealthFightingMinimum } from '../utils/dragons';
+import { DragonInstance, getDragonConfig, calculateDragonBonus, canDragonFight, calculateHealthFightingMinimum, applyDragonHealing } from '../utils/dragons';
 
 interface PlayerState {
   playerId: string;
@@ -344,6 +344,21 @@ export class PlayerDurableObject {
     this.playerState.resources.stoneRate = rates.stoneRate;
     this.playerState.resources.metalRate = rates.metalRate;
     this.playerState.resources.goldRate = rates.goldRate;
+
+    // Apply dragon healing over time
+    // Only heal dragons not currently on marches
+    const dragonsOnMarches = new Set(
+      this.playerState.activeMarches
+        .filter(m => m.dragon)
+        .map(m => m.dragon!.dragonId)
+    );
+
+    for (let i = 0; i < this.playerState.dragons.length; i++) {
+      const dragon = this.playerState.dragons[i];
+      if (!dragonsOnMarches.has(dragon.dragonId)) {
+        this.playerState.dragons[i] = applyDragonHealing(dragon, elapsed);
+      }
+    }
   }
 
   /**
