@@ -1,12 +1,12 @@
 {
   "LocalAssetBrowser.History": {
-    "Value": "[\u0022C:\\\\Users\\\\danie\\\\source\\\\repos\\\\sbox-public\\\\stratgame\\\\Assets\u0022,\u0022C:\\\\Users\\\\danie\\\\source\\\\repos\\\\sbox-public\\\\stratgame\\\\Assets\\\\scenes\u0022,\u0022E:\\\\steamlibrary\\\\steamapps\\\\common\\\\sbox\\\\core\u0022,\u0022E:\\\\steamlibrary\\\\steamapps\\\\common\\\\sbox\\\\core\\\\materials\u0022]",
-    "Timeout": 1772717449,
+    "Value": "[\u0022C:\\\\Users\\\\danie\\\\source\\\\repos\\\\sbox-public\\\\stratgame\\\\Assets\u0022,\u0022C:\\\\Users\\\\danie\\\\source\\\\repos\\\\sbox-public\\\\stratgame\\\\Assets\\\\scenes\u0022,\u0022E:\\\\steamlibrary\\\\steamapps\\\\common\\\\sbox\\\\core\u0022,\u0022E:\\\\steamlibrary\\\\steamapps\\\\common\\\\sbox\\\\core\\\\materials\u0022,\u0022C:\\\\Users\\\\danie\\\\source\\\\repos\\\\sbox-public\\\\stratgame\\\\Assets\\\\scenes\u0022,\u0022C:\\\\Users\\\\danie\\\\source\\\\repos\\\\sbox-public\\\\stratgame\\\\Assets\\\\scenes\u0022,\u0022E:\\\\steamlibrary\\\\steamapps\\\\common\\\\sbox\\\\addons\\\\citizen\\\\assets\u0022,\u0022E:\\\\steamlibrary\\\\steamapps\\\\common\\\\sbox\\\\core\u0022,\u0022E:\\\\steamlibrary\\\\steamapps\\\\common\\\\sbox\\\\core\\\\models\u0022]",
+    "Timeout": 1772721249,
     "DeleteAt": 0
   },
   "LocalAssetBrowser.HistoryIdx": {
-    "Value": "3",
-    "Timeout": 1772717449,
+    "Value": "8",
+    "Timeout": 1772721249,
     "DeleteAt": 0
   },
   "Window.SboxSceneEditor.Dock": {
@@ -16,27 +16,72 @@
   },
   "SceneView.Viewport0.Settings": {
     "Value": "{\u0022CameraPosition\u0022:\u0022-300,0,100\u0022,\u0022CameraRotation\u0022:\u00220,0,0,1\u0022,\u0022View\u0022:0,\u0022RenderMode\u0022:0,\u0022WireframeMode\u0022:false,\u0022EnablePostProcessing\u0022:true,\u0022EnablePrefabLighting\u0022:true,\u0022ShowSkyIn2D\u0022:true,\u0022ShowGrid\u0022:true,\u0022GridOpacity\u0022:0.2,\u0022GridAxis\u0022:0,\u0022CameraOrthoHeight\u0022:1000}",
-    "Timeout": 1772717786,
+    "Timeout": 1772724866,
     "DeleteAt": 0
   },
   "scenes/main.scene.Viewport0": {
-    "Value": "{\u0022CameraPosition\u0022:\u0022448.9951,665.0282,5027.076\u0022,\u0022CameraRotation\u0022:\u0022-0.1137935,0.2979794,0.33812,0.8854006\u0022,\u0022CameraOrthoHeight\u0022:1000}",
-    "Timeout": 1772717786,
+    "Value": "{\u0022CameraPosition\u0022:\u00222630.318,3021.903,2305.981\u0022,\u0022CameraRotation\u0022:\u0022-0.06993693,0.1985472,0.3247903,0.9220624\u0022,\u0022CameraOrthoHeight\u0022:1000}",
+    "Timeout": 1772724866,
     "DeleteAt": 0
   },
   ".Viewport0": {
-    "Value": "{\u0022CameraPosition\u0022:\u0022-739.6718,1647.041,1213.58\u0022,\u0022CameraRotation\u0022:\u00220.05390001,0.1102668,-0.4358358,0.8916183\u0022,\u0022CameraOrthoHeight\u0022:1000}",
-    "Timeout": 1772716953,
+    "Value": "{\u0022CameraPosition\u0022:\u0022-527.1179,632.6004,3167.192\u0022,\u0022CameraRotation\u0022:\u0022-0.1061984,0.2489247,0.3777655,0.8854669\u0022,\u0022CameraOrthoHeight\u0022:1000}",
+    "Timeout": 1772723999,
     "DeleteAt": 0
   },
   "LocalAssetBrowser.Terrain Material.History": {
     "Value": "[\u0022C:\\\\Users\\\\danie\\\\source\\\\repos\\\\sbox-public\\\\stratgame\\\\Assets\u0022]",
-    "Timeout": 1772717391,
+    "Timeout": 1772719981,
     "DeleteAt": 0
   },
   "LocalAssetBrowser.Terrain Material.HistoryIdx": {
     "Value": "0",
-    "Timeout": 1772717391,
+    "Timeout": 1772719981,
+    "DeleteAt": 0
+  },
+  "SceneView.Layout": {
+    "Value": "{\u0022Layout\u0022:0,\u0022SplitterState\u0022:[]}",
+    "Timeout": 1772719539,
+    "DeleteAt": 0
+  },
+  "EditorDisplayMode": {
+    "Value": "\u002216:9 Aspect\u0022",
+    "Timeout": 1772723991,
+    "DeleteAt": 0
+  },
+  "LocalAssetBrowser.ViewMode": {
+    "Value": "0",
+    "Timeout": 1772721252,
+    "DeleteAt": 0
+  },
+  "LocalAssetBrowser.ShowJunkFiles": {
+    "Value": "false",
+    "Timeout": 1772721252,
+    "DeleteAt": 0
+  },
+  "LocalAssetBrowser.HideNonAssets": {
+    "Value": "false",
+    "Timeout": 1772721252,
+    "DeleteAt": 0
+  },
+  "LocalAssetBrowser.ShowRecursiveFiles": {
+    "Value": "false",
+    "Timeout": 1772721252,
+    "DeleteAt": 0
+  },
+  "LocalAssetBrowser.Search": {
+    "Value": "\u0022\u0022",
+    "Timeout": 1772721252,
+    "DeleteAt": 0
+  },
+  "LocalAssetBrowser.ActiveTags": {
+    "Value": "\u0022\u0022",
+    "Timeout": 1772721252,
+    "DeleteAt": 0
+  },
+  "LocalAssetBrowser.ExcludedTags": {
+    "Value": "\u0022\u0022",
+    "Timeout": 1772721252,
     "DeleteAt": 0
   }
 }
