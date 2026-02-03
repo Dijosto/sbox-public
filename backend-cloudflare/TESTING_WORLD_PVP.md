@@ -16,7 +16,7 @@ chmod +x setup-world.sh test-world-pvp.sh
 
 This will:
 - Generate **715 Anthropus camps** (levels 1-10)
-- Generate **50,000 wilderness tiles** (forest, savanna, hills, mountains, plains)
+- Generate **10,000 wilderness tiles** (forest, savanna, hills, mountains, plains)
 - Load all data into D1 database
 - Verify the data
 
@@ -160,13 +160,15 @@ After running `setup-world.sh`, you should have:
 - Level 9: 10 camps
 - Level 10: 5 camps (extremely rare)
 
-### Wilderness Tiles (50,000 total)
+### Wilderness Tiles (10,000 total)
 Distributed across 5 resource types:
 - **Forest** (lumber production +5% to +50%)
 - **Savanna** (food production +5% to +50%)
 - **Hills** (stone production +5% to +50%)
 - **Mountains** (metal production +5% to +50%)
 - **Plains** (outpost placement, no bonus)
+
+Note: Default is 10,000 tiles (can be increased by modifying `worldgen.ts`)
 
 ## Expected Test Results
 
@@ -218,7 +220,8 @@ Check:
 
 ### Database is too slow
 The world generation creates a large dataset. For faster testing:
-- Reduce wilderness count in `worldgen.ts` (change 50000 to 10000)
+- Current default: 10,000 wilderness tiles
+- For even faster testing: Reduce count in `worldgen.ts` (change default 10000 to 5000)
 - Regenerate world: `./setup-world.sh`
 
 ## Database Queries
@@ -246,9 +249,15 @@ wrangler d1 execute atlantis-strategy-db --local \
 ## Performance Notes
 
 - **Map Generation**: Takes ~5-10 seconds
-- **Database Load**: Takes ~30-60 seconds for 50k+ records
+- **Database Load**: Takes ~20-30 seconds for 10k+ records
 - **Region Query**: Returns <1000 tiles in <100ms
 - **PvP Combat**: Resolves in <500ms including both player DO queries
+
+## Game Mechanics Notes
+
+- **Starting Resources**: Players start with 10,000 food/wood/stone/metal and 1,000 gold
+- **Resource Caps**: No hard storage caps (matches Dragons of Atlantis)
+- **Storage Vault**: Protects resources from raids (not storage capacity)
 
 ## Next Steps
 
