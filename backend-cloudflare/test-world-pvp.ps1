@@ -143,17 +143,32 @@ $waitSeconds = [Math]::Max(0, [Math]::Ceiling($waitMs / 1000))
 Write-Host "Waiting $waitSeconds seconds for garrison construction to complete..." -ForegroundColor Blue
 Start-Sleep -Seconds $waitSeconds
 
-# Verify garrisons are built (should be immediate since we waited for completion)
+# Verify garrisons are built (with retries for alarm processing)
 Write-Host "Verifying garrisons are ready..." -ForegroundColor Blue
-$verifyState1 = Invoke-RestMethod -Uri "$BaseUrl/api/player/state" -Method Get -Headers $headers1
-$garrison1Check = $verifyState1.city.innerCity.garrison_1
+$garrisonsReady = $false
+$garrison1Check = $null
+$garrison2Check = $null
 
-$verifyState2 = Invoke-RestMethod -Uri "$BaseUrl/api/player/state" -Method Get -Headers $headers2
-$garrison2Check = $verifyState2.city.innerCity.garrison_1
+for ($i = 0; $i -lt 3; $i++) {
+    $verifyState1 = Invoke-RestMethod -Uri "$BaseUrl/api/player/state" -Method Get -Headers $headers1
+    $garrison1Check = $verifyState1.city.innerCity.garrison_1
 
-if ($garrison1Check -and $garrison2Check) {
-    Write-Host "[OK] Garrisons built! P1: Level $($garrison1Check.level), P2: Level $($garrison2Check.level)" -ForegroundColor Green
-} else {
+    $verifyState2 = Invoke-RestMethod -Uri "$BaseUrl/api/player/state" -Method Get -Headers $headers2
+    $garrison2Check = $verifyState2.city.innerCity.garrison_1
+
+    if ($garrison1Check -and $garrison2Check) {
+        Write-Host "[OK] Garrisons built! P1: Level $($garrison1Check.level), P2: Level $($garrison2Check.level)" -ForegroundColor Green
+        $garrisonsReady = $true
+        break
+    } else {
+        if ($i -lt 2) {
+            Write-Host "[WAIT] Garrisons not ready yet, retrying ($($i+1)/3)..." -ForegroundColor Yellow
+            Start-Sleep -Seconds 1
+        }
+    }
+}
+
+if (-not $garrisonsReady) {
     Write-Host "[ERROR] Garrisons not ready after waiting for completion time, aborting test" -ForegroundColor Red
     Write-Host "P1 garrison: $($garrison1Check | ConvertTo-Json)" -ForegroundColor Red
     Write-Host "P2 garrison: $($garrison2Check | ConvertTo-Json)" -ForegroundColor Red
@@ -223,14 +238,28 @@ $waitSeconds = [Math]::Max(0, [Math]::Ceiling($waitMs / 1000))
 Write-Host "Waiting $waitSeconds seconds for troop training to complete..." -ForegroundColor Blue
 Start-Sleep -Seconds $waitSeconds
 
-# Verify troops are ready (should be immediate since we waited for completion)
+# Verify troops are ready (with retries for alarm processing)
 Write-Host "Verifying troops are ready..." -ForegroundColor Blue
-$verifyState = Invoke-RestMethod -Uri "$BaseUrl/api/player/state" -Method Get -Headers $headers1
-$conscripts = ($verifyState.troops | Where-Object { $_.troopType -eq 'conscript' } | Select-Object -First 1)
+$troopsReady = $false
+$conscripts = $null
 
-if ($conscripts -and $conscripts.quantity -ge 100) {
-    Write-Host "[OK] Troops verified: $($conscripts.quantity) conscripts available" -ForegroundColor Green
-} else {
+for ($i = 0; $i -lt 3; $i++) {
+    $verifyState = Invoke-RestMethod -Uri "$BaseUrl/api/player/state" -Method Get -Headers $headers1
+    $conscripts = ($verifyState.troops | Where-Object { $_.troopType -eq 'conscript' } | Select-Object -First 1)
+
+    if ($conscripts -and $conscripts.quantity -ge 100) {
+        Write-Host "[OK] Troops verified: $($conscripts.quantity) conscripts available" -ForegroundColor Green
+        $troopsReady = $true
+        break
+    } else {
+        if ($i -lt 2) {
+            Write-Host "[WAIT] Troops not ready yet, retrying ($($i+1)/3)..." -ForegroundColor Yellow
+            Start-Sleep -Seconds 1
+        }
+    }
+}
+
+if (-not $troopsReady) {
     Write-Host "[ERROR] Troops not ready after waiting for completion time, aborting test" -ForegroundColor Red
     Write-Host "Conscripts: $($conscripts | ConvertTo-Json)" -ForegroundColor Red
     exit 1
