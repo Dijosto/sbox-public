@@ -409,12 +409,17 @@ See `schema.sql` for complete schema.
 - [x] Test suite for alliance system (test-alliance-system.ps1/.sh)
 - [ ] Reinforcement mechanics (troops sent to alliance members) - Future phase
 
-**Phase 6: Advanced Combat** 🚧 IN PROGRESS
+**Phase 6: Advanced Combat** ✅ COMPLETE
 - [x] Wilderness gathering (collect specific resources by wilderness type: 70% primary, 10% secondary each)
 - [x] NPC camp regeneration (10% per 5 min after 15 min delay, 65 min full respawn)
 - [x] Scout/spy marches (Clairvoyance required, success vs Sentinel, intelligence reports)
-- [ ] Guardian Dragon system (dragons join marches for combat bonuses)
-- [ ] March slot limits (based on Muster Point building level)
+- [x] March slot limits (1 base + 1 per 5 Muster Point levels)
+- [x] Guardian Dragon system (dragons join marches for combat bonuses)
+  - [x] Dragon combat bonuses (attack/defense multipliers based on type and level)
+  - [x] Dragon damage in combat (5-20% health loss based on troop casualties)
+  - [x] Dragon healing over time (1% max health per hour when not on marches)
+  - [x] Health fighting minimum based on Aerial Combat research (95% to 50%)
+- [ ] Battle Arts (dragon special abilities) - Future enhancement
 
 **Phase 7: Economy & Trading** 📋 TODO
 - [ ] Resource trading between players
