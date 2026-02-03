@@ -327,9 +327,9 @@ export function generateWorldMapSQL(seed: number = 12345, wildernessCount: numbe
   // Generate wilderness tiles
   const wildernessTiles = generateWildernessTiles(seed, usedCoordinates, wildernessCount);
 
-  // Generate SQL for camps (batch in groups of 100 to avoid SQLITE_TOOBIG)
+  // Generate SQL for camps (batch in groups of 10 for wrangler stability)
   const campInsertStatements: string[] = [];
-  const BATCH_SIZE = 100;
+  const BATCH_SIZE = 10;
 
   for (let i = 0; i < camps.length; i += BATCH_SIZE) {
     const batch = camps.slice(i, i + BATCH_SIZE);
@@ -359,8 +359,8 @@ export function generateWorldMapSQL(seed: number = 12345, wildernessCount: numbe
     allTiles.push(`  (${tile.x}, ${tile.y}, 'wilderness', ${tile.level}, '${tile.resource_type}', ${tile.resource_bonus})`);
   });
 
-  // Batch tiles into multiple INSERT statements
-  const TILE_BATCH_SIZE = 500;
+  // Batch tiles into multiple INSERT statements (small batches for wrangler)
+  const TILE_BATCH_SIZE = 50;
   for (let i = 0; i < allTiles.length; i += TILE_BATCH_SIZE) {
     const batch = allTiles.slice(i, i + TILE_BATCH_SIZE);
     tileInsertStatements.push(
