@@ -475,17 +475,27 @@ echo "[14/14] Testing dragon healing over time..."
 STATE=$(curl -s -X GET "$BASE_URL/api/player/state" \
   -H "Authorization: Bearer $TOKEN")
 
+DRAGON_LEVEL=$(echo "$STATE" | jq -r '.dragons[0].level')
 DRAGON_HP=$(echo "$STATE" | jq -r '.dragons[0].currentHealth')
 DRAGON_MAX_HP=$(echo "$STATE" | jq -r '.dragons[0].maxHealth')
-HEALTH_PERCENT=$(awk "BEGIN {print ($DRAGON_HP / $DRAGON_MAX_HP) * 100}")
 
-echo "  Dragon health: $DRAGON_HP/$DRAGON_MAX_HP (${HEALTH_PERCENT}%)"
-echo "  Healing rate: 1% of max health per hour"
+echo "  Dragon Level: $DRAGON_LEVEL"
+echo "  Dragon health: $DRAGON_HP/$DRAGON_MAX_HP"
 
-if [ "$DRAGON_HP" -lt "$DRAGON_MAX_HP" ]; then
-  echo "[OK] Dragon healing will restore health over time"
+# Check if dragon is still an egg (level 1-2 with 0 max HP)
+if [ "$DRAGON_MAX_HP" -eq 0 ]; then
+  echo "[OK] Dragon is still an egg (level $DRAGON_LEVEL)"
+  echo "  Note: Dragon will hatch at level 3 with 20,000 HP"
 else
-  echo "[OK] Dragon at full health (no healing needed)"
+  HEALTH_PERCENT=$(awk "BEGIN {print ($DRAGON_HP / $DRAGON_MAX_HP) * 100}")
+  echo "  Health: ${HEALTH_PERCENT}%"
+  echo "  Healing rate: 1% of max health per hour"
+
+  if [ "$DRAGON_HP" -lt "$DRAGON_MAX_HP" ]; then
+    echo "[OK] Dragon healing will restore health over time"
+  else
+    echo "[OK] Dragon at full health (no healing needed)"
+  fi
 fi
 
 echo ""

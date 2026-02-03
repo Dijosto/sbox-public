@@ -514,14 +514,23 @@ try {
     $state = Invoke-RestMethod -Uri "$BaseUrl/api/player/state" -Method Get -Headers $headers
     $dragon = $state.dragons[0]
 
-    $healthPercent = ($dragon.currentHealth / $dragon.maxHealth) * 100
-    Write-Host "  Dragon health: $($dragon.currentHealth)/$($dragon.maxHealth) ($($healthPercent.ToString('F1'))%)" -ForegroundColor Gray
-    Write-Host "  Healing rate: 1% of max health per hour" -ForegroundColor Gray
+    Write-Host "  Dragon Level: $($dragon.level)" -ForegroundColor Gray
+    Write-Host "  Dragon health: $($dragon.currentHealth)/$($dragon.maxHealth)" -ForegroundColor Gray
 
-    if ($dragon.currentHealth -lt $dragon.maxHealth) {
-        Write-Host "[OK] Dragon healing will restore health over time" -ForegroundColor Green
+    # Check if dragon is still an egg (level 1-2 with 0 max HP)
+    if ($dragon.maxHealth -eq 0) {
+        Write-Host "[OK] Dragon is still an egg (level $($dragon.level))" -ForegroundColor Green
+        Write-Host "  Note: Dragon will hatch at level 3 with 20,000 HP" -ForegroundColor Gray
     } else {
-        Write-Host "[OK] Dragon at full health (no healing needed)" -ForegroundColor Green
+        $healthPercent = ($dragon.currentHealth / $dragon.maxHealth) * 100
+        Write-Host "  Health: $($healthPercent.ToString('F1'))%" -ForegroundColor Gray
+        Write-Host "  Healing rate: 1% of max health per hour" -ForegroundColor Gray
+
+        if ($dragon.currentHealth -lt $dragon.maxHealth) {
+            Write-Host "[OK] Dragon healing will restore health over time" -ForegroundColor Green
+        } else {
+            Write-Host "[OK] Dragon at full health (no healing needed)" -ForegroundColor Green
+        }
     }
 } catch {
     Write-Host "[ERROR] Failed to check dragon healing: $($_.Exception.Message)" -ForegroundColor Red
