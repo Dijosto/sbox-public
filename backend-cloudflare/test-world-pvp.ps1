@@ -118,7 +118,8 @@ $garrisonBody2 = @{
 } | ConvertTo-Json
 
 $garrison2 = Invoke-RestMethod -Uri "$BaseUrl/api/player/building/upgrade" -Method Post -Body $garrisonBody2 -ContentType "application/json" -Headers $headers2
-Write-Host "Garrison build started: $($garrison2.success)" -ForegroundColor Green
+Write-Host "Garrison 2 build started, duration: $($garrison2.duration)s" -ForegroundColor Green
+$garrison2CompletionTime = $garrison2.completionTime
 Start-Sleep -Milliseconds 500
 
 Write-Host "Building garrison for Player 1 (Attacker)..." -ForegroundColor Blue
@@ -129,35 +130,33 @@ $garrisonBody1 = @{
 } | ConvertTo-Json
 
 $garrison1 = Invoke-RestMethod -Uri "$BaseUrl/api/player/building/upgrade" -Method Post -Body $garrisonBody1 -ContentType "application/json" -Headers $headers1
-Write-Host "Garrison build started: $($garrison1.success)" -ForegroundColor Green
+Write-Host "Garrison 1 build started, duration: $($garrison1.duration)s" -ForegroundColor Green
+$garrison1CompletionTime = $garrison1.completionTime
 Write-Host ""
 
-# Wait for garrisons to complete building
-Write-Host "Waiting for garrison construction to complete..." -ForegroundColor Blue
-Start-Sleep -Seconds 3
+# Calculate exact wait time based on completion timestamps
+$now = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+$maxCompletionTime = [Math]::Max($garrison1CompletionTime, $garrison2CompletionTime)
+$waitMs = $maxCompletionTime - $now + 1000  # +1 second buffer for alarm processing
+$waitSeconds = [Math]::Max(0, [Math]::Ceiling($waitMs / 1000))
 
-# Verify garrisons are built
+Write-Host "Waiting $waitSeconds seconds for garrison construction to complete..." -ForegroundColor Blue
+Start-Sleep -Seconds $waitSeconds
+
+# Verify garrisons are built (should be immediate since we waited for completion)
 Write-Host "Verifying garrisons are ready..." -ForegroundColor Blue
-$garrisonsReady = $false
-for ($i = 0; $i -lt 5; $i++) {
-    $verifyState1 = Invoke-RestMethod -Uri "$BaseUrl/api/player/state" -Method Get -Headers $headers1
-    $garrison1Check = $verifyState1.city.innerCity.garrison_1
+$verifyState1 = Invoke-RestMethod -Uri "$BaseUrl/api/player/state" -Method Get -Headers $headers1
+$garrison1Check = $verifyState1.city.innerCity.garrison_1
 
-    $verifyState2 = Invoke-RestMethod -Uri "$BaseUrl/api/player/state" -Method Get -Headers $headers2
-    $garrison2Check = $verifyState2.city.innerCity.garrison_1
+$verifyState2 = Invoke-RestMethod -Uri "$BaseUrl/api/player/state" -Method Get -Headers $headers2
+$garrison2Check = $verifyState2.city.innerCity.garrison_1
 
-    if ($garrison1Check -and $garrison2Check) {
-        Write-Host "[OK] Garrisons built! P1: Level $($garrison1Check.level), P2: Level $($garrison2Check.level)" -ForegroundColor Green
-        $garrisonsReady = $true
-        break
-    } else {
-        Write-Host "[WAIT] Waiting for building alarm to fire... ($($i+1)/5)" -ForegroundColor Yellow
-        Start-Sleep -Seconds 2
-    }
-}
-
-if (-not $garrisonsReady) {
-    Write-Host "[ERROR] Garrisons not ready after waiting, aborting test" -ForegroundColor Red
+if ($garrison1Check -and $garrison2Check) {
+    Write-Host "[OK] Garrisons built! P1: Level $($garrison1Check.level), P2: Level $($garrison2Check.level)" -ForegroundColor Green
+} else {
+    Write-Host "[ERROR] Garrisons not ready after waiting for completion time, aborting test" -ForegroundColor Red
+    Write-Host "P1 garrison: $($garrison1Check | ConvertTo-Json)" -ForegroundColor Red
+    Write-Host "P2 garrison: $($garrison2Check | ConvertTo-Json)" -ForegroundColor Red
     exit 1
 }
 Write-Host ""
@@ -171,6 +170,8 @@ $trainBody2 = @{
 
 $train2 = Invoke-RestMethod -Uri "$BaseUrl/api/player/troops/train" -Method Post -Body $trainBody2 -ContentType "application/json" -Headers $headers2
 $train2 | ConvertTo-Json
+$train2CompletionTime = $train2.completionTime
+Write-Host "Training started, completion time: $train2CompletionTime" -ForegroundColor Green
 
 # Complete training
 try {
@@ -204,6 +205,8 @@ for ($i = 0; $i -lt $retries; $i++) {
 }
 
 $train1 | ConvertTo-Json
+$train1CompletionTime = $train1.completionTime
+Write-Host "Training started, completion time: $train1CompletionTime" -ForegroundColor Green
 
 # Complete training
 try {
@@ -211,28 +214,26 @@ try {
 } catch {}
 Write-Host ""
 
-# Wait for state to persist
-Write-Host "Waiting for Durable Object to persist state..." -ForegroundColor Blue
-Start-Sleep -Seconds 3
+# Calculate exact wait time based on completion timestamps
+$now = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+$maxTrainingTime = [Math]::Max($train1CompletionTime, $train2CompletionTime)
+$waitMs = $maxTrainingTime - $now + 1000  # +1 second buffer for alarm processing
+$waitSeconds = [Math]::Max(0, [Math]::Ceiling($waitMs / 1000))
 
-# Verify troops are available before march (with retries for alarm processing)
+Write-Host "Waiting $waitSeconds seconds for troop training to complete..." -ForegroundColor Blue
+Start-Sleep -Seconds $waitSeconds
+
+# Verify troops are ready (should be immediate since we waited for completion)
 Write-Host "Verifying troops are ready..." -ForegroundColor Blue
-$troopsReady = $false
-for ($i = 0; $i -lt 5; $i++) {
-    $verifyState = Invoke-RestMethod -Uri "$BaseUrl/api/player/state" -Method Get -Headers $headers1
-    $conscripts = ($verifyState.troops | Where-Object { $_.troopType -eq 'conscript' } | Select-Object -First 1)
-    if ($conscripts -and $conscripts.quantity -ge 100) {
-        Write-Host "[OK] Troops verified: $($conscripts.quantity) conscripts available" -ForegroundColor Green
-        $troopsReady = $true
-        break
-    } else {
-        Write-Host "[WAIT] Waiting for training alarm to fire... ($($i+1)/5)" -ForegroundColor Yellow
-        Start-Sleep -Seconds 2
-    }
-}
+$verifyState = Invoke-RestMethod -Uri "$BaseUrl/api/player/state" -Method Get -Headers $headers1
+$conscripts = ($verifyState.troops | Where-Object { $_.troopType -eq 'conscript' } | Select-Object -First 1)
 
-if (-not $troopsReady) {
-    Write-Host "[WARN] Troops may not be ready yet, attempting march anyway..." -ForegroundColor Yellow
+if ($conscripts -and $conscripts.quantity -ge 100) {
+    Write-Host "[OK] Troops verified: $($conscripts.quantity) conscripts available" -ForegroundColor Green
+} else {
+    Write-Host "[ERROR] Troops not ready after waiting for completion time, aborting test" -ForegroundColor Red
+    Write-Host "Conscripts: $($conscripts | ConvertTo-Json)" -ForegroundColor Red
+    exit 1
 }
 Write-Host ""
 
