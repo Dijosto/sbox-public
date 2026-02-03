@@ -12,6 +12,11 @@ YELLOW='\033[1;33m'
 RED='\033[0;31m'
 NC='\033[0m' # No Color
 
+# Generate unique player IDs for each test run
+TIMESTAMP=$(date +%s%3N)
+PLAYER1_STEAM_ID="test_player_${TIMESTAMP}"
+PLAYER2_STEAM_ID="test_player_$((TIMESTAMP + 1))"
+
 echo -e "${BLUE}========================================${NC}"
 echo -e "${BLUE}World Map & PvP Combat Test Suite${NC}"
 echo -e "${BLUE}========================================${NC}"
@@ -26,10 +31,10 @@ echo ""
 echo -e "${YELLOW}[2/12] Creating Player 1 (Attacker)...${NC}"
 PLAYER1_RESPONSE=$(curl -s -X POST "$BASE_URL/api/auth/login" \
   -H "Content-Type: application/json" \
-  -d '{
-    "steamId": "test_player_001",
-    "username": "Attacker"
-  }')
+  -d "{
+    \"steamId\": \"$PLAYER1_STEAM_ID\",
+    \"username\": \"Attacker\"
+  }")
 
 echo "$PLAYER1_RESPONSE" | jq '.'
 PLAYER1_TOKEN=$(echo "$PLAYER1_RESPONSE" | jq -r '.token')
@@ -42,10 +47,10 @@ echo ""
 echo -e "${YELLOW}[3/12] Creating Player 2 (Defender)...${NC}"
 PLAYER2_RESPONSE=$(curl -s -X POST "$BASE_URL/api/auth/login" \
   -H "Content-Type: application/json" \
-  -d '{
-    "steamId": "test_player_002",
-    "username": "Defender"
-  }')
+  -d "{
+    \"steamId\": \"$PLAYER2_STEAM_ID\",
+    \"username\": \"Defender\"
+  }")
 
 echo "$PLAYER2_RESPONSE" | jq '.'
 PLAYER2_TOKEN=$(echo "$PLAYER2_RESPONSE" | jq -r '.token')

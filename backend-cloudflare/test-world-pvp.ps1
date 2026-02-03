@@ -4,6 +4,11 @@
 $ErrorActionPreference = "Stop"
 $BaseUrl = "http://localhost:8787"
 
+# Generate unique player IDs for each test run
+$timestamp = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+$player1SteamId = "test_player_$timestamp"
+$player2SteamId = "test_player_$($timestamp + 1)"
+
 Write-Host "========================================" -ForegroundColor Blue
 Write-Host "World Map & PvP Combat Test Suite" -ForegroundColor Blue
 Write-Host "========================================" -ForegroundColor Blue
@@ -14,11 +19,12 @@ Write-Host "[1/12] Checking server health..." -ForegroundColor Yellow
 $health = Invoke-RestMethod -Uri "$BaseUrl/health" -Method Get
 $health | ConvertTo-Json
 Write-Host ""
+Start-Sleep -Milliseconds 200
 
 # Step 2: Create Player 1
 Write-Host "[2/12] Creating Player 1 (Attacker)..." -ForegroundColor Yellow
 $player1Body = @{
-    steamId = "test_player_001"
+    steamId = $player1SteamId
     username = "Attacker"
 } | ConvertTo-Json
 
@@ -29,11 +35,12 @@ $player1Id = $player1.playerId
 Write-Host "Player 1 Token: $player1Token" -ForegroundColor Green
 Write-Host "Player 1 ID: $player1Id" -ForegroundColor Green
 Write-Host ""
+Start-Sleep -Milliseconds 200
 
 # Step 3: Create Player 2
 Write-Host "[3/12] Creating Player 2 (Defender)..." -ForegroundColor Yellow
 $player2Body = @{
-    steamId = "test_player_002"
+    steamId = $player2SteamId
     username = "Defender"
 } | ConvertTo-Json
 
@@ -44,6 +51,7 @@ $player2Id = $player2.playerId
 Write-Host "Player 2 Token: $player2Token" -ForegroundColor Green
 Write-Host "Player 2 ID: $player2Id" -ForegroundColor Green
 Write-Host ""
+Start-Sleep -Milliseconds 200
 
 # Step 4: Get Player 1 State
 Write-Host "[4/12] Getting Player 1 state (city location)..." -ForegroundColor Yellow
@@ -54,6 +62,7 @@ $player1X = $player1State.city.position.x
 $player1Y = $player1State.city.position.y
 Write-Host "Player 1 City: ($player1X, $player1Y)" -ForegroundColor Green
 Write-Host ""
+Start-Sleep -Milliseconds 200
 
 # Step 5: Get Player 2 State
 Write-Host "[5/12] Getting Player 2 state (city location)..." -ForegroundColor Yellow
@@ -64,6 +73,7 @@ $player2X = $player2State.city.position.x
 $player2Y = $player2State.city.position.y
 Write-Host "Player 2 City: ($player2X, $player2Y)" -ForegroundColor Green
 Write-Host ""
+Start-Sleep -Milliseconds 200
 
 # Step 6: Query world tiles
 Write-Host "[6/12] Querying world map (Player 1's region)..." -ForegroundColor Yellow
@@ -81,18 +91,21 @@ $summary = @{
 }
 $summary | ConvertTo-Json -Depth 3
 Write-Host ""
+Start-Sleep -Milliseconds 200
 
 # Step 7: Get specific tile
 Write-Host "[7/12] Getting tile details for Player 2's city..." -ForegroundColor Yellow
 $tile = Invoke-RestMethod -Uri "$BaseUrl/api/world/tile/$player2X/$player2Y" -Method Get
 $tile | ConvertTo-Json
 Write-Host ""
+Start-Sleep -Milliseconds 200
 
 # Step 8: Search players
 Write-Host "[8/12] Searching for players..." -ForegroundColor Yellow
 $search = Invoke-RestMethod -Uri "$BaseUrl/api/world/search?playerName=Player" -Method Get
 $search | ConvertTo-Json
 Write-Host ""
+Start-Sleep -Milliseconds 200
 
 # Step 9: Train troops for Player 2
 Write-Host "[9/12] Training troops for Player 2 (Defender)..." -ForegroundColor Yellow
@@ -109,6 +122,7 @@ try {
     Invoke-RestMethod -Uri "$BaseUrl/api/player/troops/complete" -Method Post -Body "{}" -ContentType "application/json" -Headers $headers2 | Out-Null
 } catch {}
 Write-Host ""
+Start-Sleep -Milliseconds 200
 
 # Step 10: Train troops for Player 1
 Write-Host "[10/12] Training troops for Player 1 (Attacker)..." -ForegroundColor Yellow
@@ -125,6 +139,7 @@ try {
     Invoke-RestMethod -Uri "$BaseUrl/api/player/troops/complete" -Method Post -Body "{}" -ContentType "application/json" -Headers $headers1 | Out-Null
 } catch {}
 Write-Host ""
+Start-Sleep -Milliseconds 200
 
 Start-Sleep -Seconds 2
 
@@ -152,6 +167,7 @@ if (-not $marchId) {
 
 Write-Host "March ID: $marchId" -ForegroundColor Green
 Write-Host ""
+Start-Sleep -Milliseconds 200
 
 # Wait for march
 $travelTime = if ($march.travelTime) { $march.travelTime } else { 10 }
@@ -160,16 +176,19 @@ Start-Sleep -Seconds ($travelTime + 2)
 
 # Step 12: Check results
 Write-Host "[12/12] Checking battle results..." -ForegroundColor Yellow
+Start-Sleep -Milliseconds 200
 
 Write-Host "Player 1 (Attacker) Messages:" -ForegroundColor Blue
 $messages1 = Invoke-RestMethod -Uri "$BaseUrl/api/player/messages" -Method Get -Headers $headers1
 $messages1.messages | Where-Object { $_.message_type -eq 'battle_report' } | Select-Object subject, body, metadata | ConvertTo-Json
 Write-Host ""
+Start-Sleep -Milliseconds 200
 
 Write-Host "Player 2 (Defender) Messages:" -ForegroundColor Blue
 $messages2 = Invoke-RestMethod -Uri "$BaseUrl/api/player/messages" -Method Get -Headers $headers2
 $messages2.messages | Where-Object { $_.message_type -eq 'battle_report' } | Select-Object subject, body, metadata | ConvertTo-Json
 Write-Host ""
+Start-Sleep -Milliseconds 200
 
 Write-Host "Player 1 Final State:" -ForegroundColor Blue
 $final1 = Invoke-RestMethod -Uri "$BaseUrl/api/player/state" -Method Get -Headers $headers1
