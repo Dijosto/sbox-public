@@ -12,12 +12,11 @@ echo ""
 
 # Step 1: Initialize Player 1
 echo "[1/13] Initializing Player 1..."
-PLAYER1_RESPONSE=$(curl -s -X POST "$BASE_URL/api/player/initialize" \
+PLAYER1_RESPONSE=$(curl -s -X POST "$BASE_URL/api/auth/login" \
   -H "Content-Type: application/json" \
   -d '{
-    "playerId": "test-research-player-1",
-    "playerName": "ResearchTester",
-    "position": {"x": 500, "y": 500}
+    "steamId": "test-research-steam-1",
+    "username": "ResearchTester"
   }')
 
 TOKEN1=$(echo "$PLAYER1_RESPONSE" | jq -r '.token')

@@ -12,13 +12,12 @@ Write-Host ""
 # Step 1: Initialize Player 1
 Write-Host "[1/13] Initializing Player 1..." -ForegroundColor Yellow
 $player1Body = @{
-    playerId = "test-research-player-1"
-    playerName = "ResearchTester"
-    position = @{ x = 500; y = 500 }
+    steamId = "test-research-steam-1"
+    username = "ResearchTester"
 } | ConvertTo-Json
 
 try {
-    $player1 = Invoke-RestMethod -Uri "$BaseUrl/api/player/initialize" -Method Post -Body $player1Body -ContentType "application/json"
+    $player1 = Invoke-RestMethod -Uri "$BaseUrl/api/auth/login" -Method Post -Body $player1Body -ContentType "application/json"
     $token1 = $player1.token
     $headers1 = @{ Authorization = "Bearer $token1" }
     Write-Host "[OK] Player 1 initialized: $($player1.playerId)" -ForegroundColor Green
