@@ -410,11 +410,11 @@ See `schema.sql` for complete schema.
 - [ ] Reinforcement mechanics (troops sent to alliance members) - Future phase
 
 **Phase 6: Advanced Combat** 📋 TODO
-- [ ] Wilderness gathering marches
-- [ ] Scout marches
-- [ ] Multi-march coordination
-- [ ] Dragon system
-- [ ] NPC camp regeneration
+- [ ] Wilderness gathering (collect specific resources by wilderness type: lakes=food, forests=wood, hills=stone, mountains=metal)
+- [ ] Scout/spy marches (reconnaissance, requires Clairvoyance research)
+- [ ] NPC camp regeneration (10% every 5 minutes after defeat, 15 min initial respawn)
+- [ ] Guardian Dragon system (dragons join marches for combat bonuses)
+- [ ] March slot limits (based on Muster Point building level)
 
 **Phase 7: Economy & Trading** 📋 TODO
 - [ ] Resource trading between players
