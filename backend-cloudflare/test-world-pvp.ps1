@@ -180,18 +180,13 @@ Write-Host ""
 Write-Host "[10/13] Training troops for Player 2 (Defender)..." -ForegroundColor Yellow
 $trainBody2 = @{
     troopType = "conscript"
-    quantity = 100
+    quantity = 10
 } | ConvertTo-Json
 
 $train2 = Invoke-RestMethod -Uri "$BaseUrl/api/player/troops/train" -Method Post -Body $trainBody2 -ContentType "application/json" -Headers $headers2
 $train2 | ConvertTo-Json
 $train2CompletionTime = $train2.completionTime
 Write-Host "Training started, completion time: $train2CompletionTime" -ForegroundColor Green
-
-# Complete training
-try {
-    Invoke-RestMethod -Uri "$BaseUrl/api/player/troops/complete" -Method Post -Body "{}" -ContentType "application/json" -Headers $headers2 | Out-Null
-} catch {}
 Write-Host ""
 Write-Host "Waiting for Durable Object to settle..." -ForegroundColor Blue
 Start-Sleep -Seconds 1
@@ -200,7 +195,7 @@ Start-Sleep -Seconds 1
 Write-Host "[11/13] Training troops for Player 1 (Attacker)..." -ForegroundColor Yellow
 $trainBody1 = @{
     troopType = "conscript"
-    quantity = 150
+    quantity = 20
 } | ConvertTo-Json
 
 $train1 = $null
@@ -222,11 +217,6 @@ for ($i = 0; $i -lt $retries; $i++) {
 $train1 | ConvertTo-Json
 $train1CompletionTime = $train1.completionTime
 Write-Host "Training started, completion time: $train1CompletionTime" -ForegroundColor Green
-
-# Complete training
-try {
-    Invoke-RestMethod -Uri "$BaseUrl/api/player/troops/complete" -Method Post -Body "{}" -ContentType "application/json" -Headers $headers1 | Out-Null
-} catch {}
 Write-Host ""
 
 # Calculate exact wait time based on completion timestamps
@@ -247,7 +237,7 @@ for ($i = 0; $i -lt 3; $i++) {
     $verifyState = Invoke-RestMethod -Uri "$BaseUrl/api/player/state" -Method Get -Headers $headers1
     $conscripts = ($verifyState.troops | Where-Object { $_.troopType -eq 'conscript' } | Select-Object -First 1)
 
-    if ($conscripts -and $conscripts.quantity -ge 100) {
+    if ($conscripts -and $conscripts.quantity -ge 10) {
         Write-Host "[OK] Troops verified: $($conscripts.quantity) conscripts available" -ForegroundColor Green
         $troopsReady = $true
         break
@@ -273,7 +263,7 @@ Write-Host "Attacker: ($player1X, $player1Y) → Defender: ($player2X, $player2Y
 $marchBody = @{
     destination = @{ x = $player2X; y = $player2Y }
     troops = @(
-        @{ troopType = "conscript"; quantity = 100 }
+        @{ troopType = "conscript"; quantity = 15 }
     )
     marchType = "attack"
     targetType = "player"
