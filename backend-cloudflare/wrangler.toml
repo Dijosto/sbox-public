@@ -47,6 +47,9 @@ max_retries = 3
 ENVIRONMENT = "development"
 JWT_SECRET = "your-secret-key-change-in-production"
 STEAM_API_KEY = "your-steam-api-key"
+# Test speed multiplier: makes all timers 100x faster for local testing
+# SECURITY: NEVER set this in production - it's a cheating risk!
+TEST_SPEED_MULTIPLIER = "100"
 
 # Development configuration
 [env.development]

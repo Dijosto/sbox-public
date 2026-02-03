@@ -25,6 +25,7 @@ import {
   MarchTroops
 } from '../utils/marches';
 import { resolveCombat, calculateLoot, CombatSide, CombatTroop } from '../utils/combat';
+import { applySpeedMultiplier } from '../utils/timing';
 
 interface PlayerState {
   playerId: string;
@@ -533,7 +534,8 @@ export class PlayerDurableObject {
 
     // Calculate build time with Levitation research
     const levitationLevel = this.playerState.research['levitation'] || 0;
-    const buildTime = calculateBuildTime(levelConfig.buildTime, levitationLevel);
+    const baseBuildTime = calculateBuildTime(levelConfig.buildTime, levitationLevel);
+    const buildTime = applySpeedMultiplier(baseBuildTime, this.env);
 
     // Add to queue
     const now = Date.now();
@@ -797,12 +799,13 @@ export class PlayerDurableObject {
       return this.errorResponse('You must build a Garrison to train troops');
     }
 
-    const trainingTime = calculateTrainingTime(
+    const baseTrainingTime = calculateTrainingTime(
       troopConfig.trainingTime,
       body.quantity,
       garrisonLevels,
       garrisonCount
     );
+    const trainingTime = applySpeedMultiplier(baseTrainingTime, this.env);
 
     // Add to queue
     const now = Date.now();
@@ -1077,6 +1080,9 @@ export class PlayerDurableObject {
     // Deduct resources
     this.playerState.resources = deductResources(this.playerState.resources, levelConfig.cost);
 
+    // Apply speed multiplier to research time
+    const researchTime = applySpeedMultiplier(levelConfig.researchTime, this.env);
+
     // Add to queue
     const now = Date.now();
     const queueItem: ResearchQueueItem = {
@@ -1084,7 +1090,7 @@ export class PlayerDurableObject {
       researchType: body.researchType,
       toLevel: targetLevel,
       startTime: now,
-      completionTime: now + (levelConfig.researchTime * 1000)
+      completionTime: now + (researchTime * 1000)
     };
 
     this.playerState.city.researchQueue.push(queueItem);
@@ -1097,7 +1103,7 @@ export class PlayerDurableObject {
       success: true,
       queueId: queueItem.queueId,
       completionTime: queueItem.completionTime,
-      duration: levelConfig.researchTime
+      duration: researchTime
     }), {
       headers: { 'Content-Type': 'application/json' },
     });
@@ -1203,7 +1209,8 @@ export class PlayerDurableObject {
     // Calculate distance and travel time
     const distance = calculateDistance(this.playerState.city.position, body.destination);
     const marchSpeed = this.playerState.research['logistics'] || 0; // Speed research bonus
-    const travelTime = calculateMarchTime(distance, body.troops, marchSpeed * 10);
+    const baseTravelTime = calculateMarchTime(distance, body.troops, marchSpeed * 10);
+    const travelTime = applySpeedMultiplier(baseTravelTime, this.env);
 
     // Deduct troops from player
     for (const marchTroop of body.troops) {
@@ -1349,7 +1356,7 @@ export class PlayerDurableObject {
       if (!npcCamp) {
         console.error(`[PlayerDO] NPC camp not found at ${march.destination.x},${march.destination.y}`);
         march.status = 'returning';
-        march.returnTime = Date.now() + 10000; // Return in 10s
+        march.returnTime = Date.now() + (applySpeedMultiplier(10, this.env) * 1000); // Return instantly
         return;
       }
 
@@ -1433,11 +1440,12 @@ export class PlayerDurableObject {
 
       // Calculate return time
       const marchSpeed = this.playerState.research['logistics'] || 0;
-      const returnTime = calculateMarchTime(
+      const baseReturnTime = calculateMarchTime(
         calculateDistance(march.destination, march.origin),
         march.troops,
         marchSpeed * 10
       );
+      const returnTime = applySpeedMultiplier(baseReturnTime, this.env);
 
       march.returnTime = Date.now() + (returnTime * 1000);
 
@@ -1459,7 +1467,7 @@ export class PlayerDurableObject {
       if (!targetTile || !targetTile.owner_id) {
         console.error(`[PlayerDO] No player city found at ${march.destination.x},${march.destination.y}`);
         march.status = 'returning';
-        march.returnTime = Date.now() + 10000;
+        march.returnTime = Date.now() + (applySpeedMultiplier(10, this.env) * 1000);
         return;
       }
 
@@ -1473,7 +1481,7 @@ export class PlayerDurableObject {
       if (!targetState) {
         console.error(`[PlayerDO] Could not load target player state for ${targetPlayerId}`);
         march.status = 'returning';
-        march.returnTime = Date.now() + 10000;
+        march.returnTime = Date.now() + (applySpeedMultiplier(10, this.env) * 1000);
         return;
       }
 
@@ -1584,11 +1592,12 @@ export class PlayerDurableObject {
 
       // Calculate return time
       const marchSpeed = this.playerState.research['logistics'] || 0;
-      const returnTime = calculateMarchTime(
+      const baseReturnTime = calculateMarchTime(
         calculateDistance(march.destination, march.origin),
         march.troops,
         marchSpeed * 10
       );
+      const returnTime = applySpeedMultiplier(baseReturnTime, this.env);
 
       march.returnTime = Date.now() + (returnTime * 1000);
 

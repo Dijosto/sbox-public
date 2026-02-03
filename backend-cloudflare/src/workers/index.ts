@@ -28,6 +28,11 @@ export interface Env {
   ENVIRONMENT: string;
   JWT_SECRET: string;
   STEAM_API_KEY: string;
+
+  // Test mode configuration (local dev only)
+  // Set to value like "100" to make everything 100x faster for testing
+  // MUST NOT be set in production - cheating risk
+  TEST_SPEED_MULTIPLIER?: string;
 }
 
 export default {
