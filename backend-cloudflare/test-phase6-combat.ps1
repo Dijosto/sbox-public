@@ -61,8 +61,9 @@ Start-Sleep -Seconds 1
 # Step 3: Build garrison for troop training
 Write-Host "[3/14] Building garrison..." -ForegroundColor Yellow
 $buildGarrisonBody = @{
+    buildingId = "garrison_1"
     buildingType = "garrison"
-    slotId = "garrison_1"
+    zone = "inner"
 } | ConvertTo-Json
 
 $garrisonCompletionTime = 0
@@ -82,7 +83,7 @@ try {
 # Calculate wait time if garrison is being built
 if ($garrisonCompletionTime -gt 0) {
     $now = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
-    $waitMs = $garrisonCompletionTime - $now + 2000  # +2 second buffer for alarm processing
+    $waitMs = $garrisonCompletionTime - $now + 3000  # +3 second buffer for alarm processing and local storage
     $waitSeconds = [Math]::Max(0, [Math]::Ceiling($waitMs / 1000))
 
     Write-Host "  Waiting $waitSeconds seconds for garrison to complete..." -ForegroundColor Gray
@@ -92,7 +93,7 @@ if ($garrisonCompletionTime -gt 0) {
     Write-Host "  Verifying garrison is ready..." -ForegroundColor Gray
     $garrisonReady = $false
 
-    for ($i = 0; $i -lt 3; $i++) {
+    for ($i = 0; $i -lt 5; $i++) {
         $verifyState = Invoke-RestMethod -Uri "$BaseUrl/api/player/state" -Method Get -Headers $headers
         $garrisonCheck = $verifyState.city.innerCity.garrison_1
 
@@ -101,9 +102,9 @@ if ($garrisonCompletionTime -gt 0) {
             $garrisonReady = $true
             break
         } else {
-            if ($i -lt 2) {
-                Write-Host "  [WAIT] Garrison not ready yet, retrying ($($i+1)/3)..." -ForegroundColor Yellow
-                Start-Sleep -Seconds 1
+            if ($i -lt 4) {
+                Write-Host "  [WAIT] Garrison not ready yet, retrying ($($i+1)/5)..." -ForegroundColor Yellow
+                Start-Sleep -Seconds 2
             }
         }
     }
@@ -119,8 +120,9 @@ Start-Sleep -Seconds 1
 # Step 4: Build Muster Point for march slots
 Write-Host "[4/14] Building Muster Point..." -ForegroundColor Yellow
 $buildMusterBody = @{
+    buildingId = "musterPoint_1"
     buildingType = "musterPoint"
-    slotId = "musterPoint_1"
+    zone = "inner"
 } | ConvertTo-Json
 
 $musterCompletionTime = 0
@@ -140,7 +142,7 @@ try {
 # Calculate wait time if Muster Point is being built
 if ($musterCompletionTime -gt 0) {
     $now = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
-    $waitMs = $musterCompletionTime - $now + 2000  # +2 second buffer for alarm processing
+    $waitMs = $musterCompletionTime - $now + 3000  # +3 second buffer for alarm processing and local storage
     $waitSeconds = [Math]::Max(0, [Math]::Ceiling($waitMs / 1000))
 
     Write-Host "  Waiting $waitSeconds seconds for Muster Point to complete..." -ForegroundColor Gray
@@ -150,7 +152,7 @@ if ($musterCompletionTime -gt 0) {
     Write-Host "  Verifying Muster Point is ready..." -ForegroundColor Gray
     $musterReady = $false
 
-    for ($i = 0; $i -lt 3; $i++) {
+    for ($i = 0; $i -lt 5; $i++) {
         $verifyState = Invoke-RestMethod -Uri "$BaseUrl/api/player/state" -Method Get -Headers $headers
         $musterCheck = $verifyState.city.innerCity.musterPoint_1
 
@@ -159,9 +161,9 @@ if ($musterCompletionTime -gt 0) {
             $musterReady = $true
             break
         } else {
-            if ($i -lt 2) {
-                Write-Host "  [WAIT] Muster Point not ready yet, retrying ($($i+1)/3)..." -ForegroundColor Yellow
-                Start-Sleep -Seconds 1
+            if ($i -lt 4) {
+                Write-Host "  [WAIT] Muster Point not ready yet, retrying ($($i+1)/5)..." -ForegroundColor Yellow
+                Start-Sleep -Seconds 2
             }
         }
     }
@@ -214,7 +216,7 @@ try {
 
 # Calculate exact wait time based on completion timestamp
 $now = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
-$waitMs = $trainCompletionTime - $now + 2000  # +2 second buffer for alarm processing
+$waitMs = $trainCompletionTime - $now + 3000  # +3 second buffer for alarm processing and local storage
 $waitSeconds = [Math]::Max(0, [Math]::Ceiling($waitMs / 1000))
 
 Write-Host "  Waiting $waitSeconds seconds for training to complete..." -ForegroundColor Gray
@@ -224,7 +226,7 @@ Start-Sleep -Seconds $waitSeconds
 Write-Host "  Verifying troops are ready..." -ForegroundColor Gray
 $troopsReady = $false
 
-for ($i = 0; $i -lt 3; $i++) {
+for ($i = 0; $i -lt 5; $i++) {
     $verifyState = Invoke-RestMethod -Uri "$BaseUrl/api/player/state" -Method Get -Headers $headers
     $conscripts = ($verifyState.troops | Where-Object { $_.troopType -eq 'conscript' } | Select-Object -First 1)
 
@@ -233,9 +235,9 @@ for ($i = 0; $i -lt 3; $i++) {
         $troopsReady = $true
         break
     } else {
-        if ($i -lt 2) {
-            Write-Host "  [WAIT] Troops not ready yet, retrying ($($i+1)/3)..." -ForegroundColor Yellow
-            Start-Sleep -Seconds 1
+        if ($i -lt 4) {
+            Write-Host "  [WAIT] Troops not ready yet, retrying ($($i+1)/5)..." -ForegroundColor Yellow
+            Start-Sleep -Seconds 2
         }
     }
 }

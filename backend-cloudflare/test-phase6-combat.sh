@@ -62,8 +62,9 @@ BUILD_GARRISON_RESPONSE=$(curl -s -X POST "$BASE_URL/api/player/building/upgrade
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
+    "buildingId": "garrison_1",
     "buildingType": "garrison",
-    "slotId": "garrison_1"
+    "zone": "inner"
   }')
 
 if echo "$BUILD_GARRISON_RESPONSE" | grep -q "already occupied"; then
@@ -121,8 +122,9 @@ BUILD_MUSTER_RESPONSE=$(curl -s -X POST "$BASE_URL/api/player/building/upgrade" 
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
+    "buildingId": "musterPoint_1",
     "buildingType": "musterPoint",
-    "slotId": "musterPoint_1"
+    "zone": "inner"
   }')
 
 if echo "$BUILD_MUSTER_RESPONSE" | grep -q "already occupied"; then
