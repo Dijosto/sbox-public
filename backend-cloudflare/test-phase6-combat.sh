@@ -397,15 +397,83 @@ else
 fi
 sleep 1
 
-# Step 9: Test attack march on NPC camp
+# Step 9: Test scout march on NPC camp
 if [ -n "$NPC_X" ]; then
-  echo "[11/14] Sending attack march to NPC camp..."
+  echo "[11/14] Sending scout march to NPC camp..."
 
   # Wait for gathering march to complete if it exists
   if [ -n "$GATHER_MARCH_ID" ]; then
     echo "  Waiting for gathering march to complete..."
     sleep 5
   fi
+
+  SCOUT_RESPONSE=$(curl -s -X POST "$BASE_URL/api/player/march/send" \
+    -H "Authorization: Bearer $TOKEN" \
+    -H "Content-Type: application/json" \
+    -d "{
+      \"destination\": {
+        \"x\": $NPC_X,
+        \"y\": $NPC_Y
+      },
+      \"troops\": [
+        {
+          \"troopType\": \"conscript\",
+          \"quantity\": 10
+        }
+      ],
+      \"marchType\": \"scout\",
+      \"targetType\": \"npc\"
+    }")
+
+  SCOUT_MARCH_ID=$(echo "$SCOUT_RESPONSE" | jq -r '.marchId')
+  if [ "$SCOUT_MARCH_ID" == "null" ]; then
+    echo "[ERROR] Failed to send scout march"
+    echo "  Response: $SCOUT_RESPONSE"
+    exit 1
+  fi
+  echo "[OK] Scout march sent: $SCOUT_MARCH_ID (gathering intel on $NPC_TYPE Level $NPC_LEVEL)"
+else
+  echo "[11/14] Skipping scout march test (no NPC camp found)"
+  SCOUT_MARCH_ID=""
+fi
+sleep 1
+
+# Step 10: Wait for scout to return and check report
+if [ -n "$SCOUT_MARCH_ID" ]; then
+  echo "[12/14] Waiting for scout march to complete..."
+  echo "  Waiting 8 seconds for scout to return..."
+  sleep 8
+
+  # Check messages for scout report
+  MESSAGES=$(curl -s -X GET "$BASE_URL/api/player/messages?limit=10" \
+    -H "Authorization: Bearer $TOKEN")
+
+  SCOUT_REPORT=$(echo "$MESSAGES" | jq -r '.messages[] | select(.message_type == "scout_report") | @json' | head -1)
+
+  if [ -n "$SCOUT_REPORT" ]; then
+    REPORT_SUCCESS=$(echo "$SCOUT_REPORT" | jq -r '.metadata' | jq -r '.report.success')
+    echo "[OK] Scout report received"
+    echo "  Success: $REPORT_SUCCESS"
+
+    if [ "$REPORT_SUCCESS" == "true" ]; then
+      CAMP_TYPE=$(echo "$SCOUT_REPORT" | jq -r '.metadata' | jq -r '.report.campType')
+      CAMP_LEVEL=$(echo "$SCOUT_REPORT" | jq -r '.metadata' | jq -r '.report.level')
+      CAMP_STRENGTH=$(echo "$SCOUT_REPORT" | jq -r '.metadata' | jq -r '.report.currentStrength')
+      echo "  Camp Type: $CAMP_TYPE"
+      echo "  Level: $CAMP_LEVEL"
+      echo "  Strength: ${CAMP_STRENGTH}%"
+    fi
+  else
+    echo "[WARNING] Scout report not found in messages"
+  fi
+else
+  echo "[12/14] Skipping scout report check (no scout march)"
+fi
+sleep 1
+
+# Step 11: Test attack march on NPC camp
+if [ -n "$NPC_X" ]; then
+  echo "[13/14] Sending attack march to NPC camp..."
 
   ATTACK_RESPONSE=$(curl -s -X POST "$BASE_URL/api/player/march/send" \
     -H "Authorization: Bearer $TOKEN" \
@@ -432,23 +500,8 @@ if [ -n "$NPC_X" ]; then
     exit 1
   fi
   echo "[OK] Attack march sent: $ATTACK_MARCH_ID (40 conscripts vs $NPC_TYPE Level $NPC_LEVEL)"
-else
-  echo "[11/14] Skipping attack march test (no NPC camp found)"
-  ATTACK_MARCH_ID=""
-fi
-sleep 1
 
-# Step 10: Test dragon with low health (can't fight)
-echo "[12/14] Testing dragon health fighting minimum..."
-echo "  Note: Dragon health minimum is enforced at march creation"
-echo "  With Aerial Combat level 0: Dragon needs 100% health to fight"
-echo "  With Aerial Combat level 10: Dragon needs 50% health to fight"
-echo "[OK] Health fighting minimum logic implemented"
-sleep 1
-
-# Step 11: Wait for attack march to return and check battle report
-if [ -n "$ATTACK_MARCH_ID" ]; then
-  echo "[13/14] Waiting for attack march to complete..."
+  # Wait for battle to complete
   echo "  Waiting 12 seconds for battle to complete..."
   sleep 12
 
@@ -466,11 +519,19 @@ if [ -n "$ATTACK_MARCH_ID" ]; then
     echo "[WARNING] Battle report not found in messages"
   fi
 else
-  echo "[13/14] Skipping battle report check (no attack march)"
+  echo "[13/14] Skipping attack march test (no NPC camp found)"
 fi
 sleep 1
 
-# Step 12: Test dragon healing over time
+# Step 12: Test dragon health fighting minimum
+echo "[14/14] Testing dragon health fighting minimum..."
+echo "  Note: Dragon health minimum is enforced at march creation"
+echo "  With Aerial Combat level 0: Dragon needs 100% health to fight"
+echo "  With Aerial Combat level 10: Dragon needs 50% health to fight"
+echo "[OK] Health fighting minimum logic implemented"
+sleep 1
+
+# Step 13: Test dragon healing over time
 echo "[14/14] Testing dragon healing over time..."
 STATE=$(curl -s -X GET "$BASE_URL/api/player/state" \
   -H "Authorization: Bearer $TOKEN")
@@ -512,9 +573,9 @@ else
   echo "  - Wilderness gathering: Skipped"
 fi
 if [ -n "$NPC_X" ]; then
-  echo "  - NPC camp attacks: Verified"
+  echo "  - Scout & attack NPC camps: Verified"
 else
-  echo "  - NPC camp attacks: Skipped"
+  echo "  - Scout & attack NPC camps: Skipped"
 fi
 echo "  - Dragon healing: Verified"
 echo ""

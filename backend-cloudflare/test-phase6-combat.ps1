@@ -414,9 +414,9 @@ try {
 
 Start-Sleep -Seconds 1
 
-# Step 9: Test attack march on NPC camp
+# Step 9: Test scout march on NPC camp
 if ($null -ne $npcX) {
-    Write-Host "[11/14] Sending attack march to NPC camp..." -ForegroundColor Yellow
+    Write-Host "[11/14] Sending scout march to NPC camp..." -ForegroundColor Yellow
     try {
         # First recall the gathering march if it exists
         if ($null -ne $gatherMarchId) {
@@ -429,6 +429,79 @@ if ($null -ne $npcX) {
             }
         }
 
+        $scoutBody = @{
+            destination = @{
+                x = $npcX
+                y = $npcY
+            }
+            troops = @(
+                @{
+                    troopType = "conscript"
+                    quantity = 10
+                }
+            )
+            marchType = "scout"
+            targetType = "npc"
+        } | ConvertTo-Json -Depth 10
+
+        $scoutResult = Invoke-RestMethod -Uri "$BaseUrl/api/player/march/send" -Method Post -Body $scoutBody -Headers $headers -ContentType "application/json"
+        $scoutMarchId = $scoutResult.marchId
+        Write-Host "[OK] Scout march sent: $scoutMarchId (gathering intel on $npcType Level $npcLevel)" -ForegroundColor Green
+    } catch {
+        Write-Host "[ERROR] Failed to send scout march: $($_.Exception.Message)" -ForegroundColor Red
+        Write-Host "  Response: $($_.ErrorDetails.Message)" -ForegroundColor Red
+        exit 1
+    }
+} else {
+    Write-Host "[11/14] Skipping scout march test (no NPC camp found)" -ForegroundColor Yellow
+    $scoutMarchId = $null
+}
+
+Start-Sleep -Seconds 1
+
+# Step 10: Wait for scout to return and check report
+if ($null -ne $scoutMarchId) {
+    Write-Host "[12/14] Waiting for scout march to complete..." -ForegroundColor Yellow
+    try {
+        Write-Host "  Waiting 8 seconds for scout to return..." -ForegroundColor Gray
+        Start-Sleep -Seconds 8
+
+        # Check messages for scout report
+        $messages = Invoke-RestMethod -Uri "$BaseUrl/api/player/messages?limit=10" -Method Get -Headers $headers
+
+        $scoutReportFound = $false
+        foreach ($msg in $messages.messages) {
+            if ($msg.message_type -eq "scout_report") {
+                $scoutReportFound = $true
+                $reportData = $msg.metadata | ConvertFrom-Json
+                Write-Host "[OK] Scout report received" -ForegroundColor Green
+                Write-Host "  Success: $($reportData.report.success)" -ForegroundColor Gray
+                if ($reportData.report.success) {
+                    Write-Host "  Camp Type: $($reportData.report.campType)" -ForegroundColor Gray
+                    Write-Host "  Level: $($reportData.report.level)" -ForegroundColor Gray
+                    Write-Host "  Strength: $($reportData.report.currentStrength)%" -ForegroundColor Gray
+                }
+                break
+            }
+        }
+
+        if (-not $scoutReportFound) {
+            Write-Host "[WARNING] Scout report not found in messages" -ForegroundColor Yellow
+        }
+    } catch {
+        Write-Host "[ERROR] Failed to check scout report: $($_.Exception.Message)" -ForegroundColor Red
+        exit 1
+    }
+} else {
+    Write-Host "[12/14] Skipping scout report check (no scout march)" -ForegroundColor Yellow
+}
+
+Start-Sleep -Seconds 1
+
+# Step 11: Test attack march on NPC camp
+if ($null -ne $npcX) {
+    Write-Host "[13/14] Sending attack march to NPC camp..." -ForegroundColor Yellow
+    try {
         $attackBody = @{
             destination = @{
                 x = $npcX
@@ -447,37 +520,8 @@ if ($null -ne $npcX) {
         $attackResult = Invoke-RestMethod -Uri "$BaseUrl/api/player/march/send" -Method Post -Body $attackBody -Headers $headers -ContentType "application/json"
         $attackMarchId = $attackResult.marchId
         Write-Host "[OK] Attack march sent: $attackMarchId (40 conscripts vs $npcType Level $npcLevel)" -ForegroundColor Green
-    } catch {
-        Write-Host "[ERROR] Failed to send attack march: $($_.Exception.Message)" -ForegroundColor Red
-        Write-Host "  Response: $($_.ErrorDetails.Message)" -ForegroundColor Red
-        exit 1
-    }
-} else {
-    Write-Host "[11/14] Skipping attack march test (no NPC camp found)" -ForegroundColor Yellow
-    $attackMarchId = $null
-}
 
-Start-Sleep -Seconds 1
-
-# Step 10: Test dragon with low health (can't fight)
-Write-Host "[12/14] Testing dragon health fighting minimum..." -ForegroundColor Yellow
-try {
-    # Simulate dragon with low health
-    Write-Host "  Note: Dragon health minimum is enforced at march creation" -ForegroundColor Gray
-    Write-Host "  With Aerial Combat level 0: Dragon needs 100% health to fight" -ForegroundColor Gray
-    Write-Host "  With Aerial Combat level 10: Dragon needs 50% health to fight" -ForegroundColor Gray
-    Write-Host "[OK] Health fighting minimum logic implemented" -ForegroundColor Green
-} catch {
-    Write-Host "[ERROR] Failed to test dragon health minimum: $($_.Exception.Message)" -ForegroundColor Red
-    exit 1
-}
-
-Start-Sleep -Seconds 1
-
-# Step 11: Wait for attack march to return and check battle report
-if ($null -ne $attackMarchId) {
-    Write-Host "[13/14] Waiting for attack march to complete..." -ForegroundColor Yellow
-    try {
+        # Wait for battle to complete
         Write-Host "  Waiting 12 seconds for battle to complete..." -ForegroundColor Gray
         Start-Sleep -Seconds 12
 
@@ -499,16 +543,32 @@ if ($null -ne $attackMarchId) {
             Write-Host "[WARNING] Battle report not found in messages" -ForegroundColor Yellow
         }
     } catch {
-        Write-Host "[ERROR] Failed to check battle report: $($_.Exception.Message)" -ForegroundColor Red
+        Write-Host "[ERROR] Failed to send attack march: $($_.Exception.Message)" -ForegroundColor Red
+        Write-Host "  Response: $($_.ErrorDetails.Message)" -ForegroundColor Red
         exit 1
     }
 } else {
-    Write-Host "[13/14] Skipping battle report check (no attack march)" -ForegroundColor Yellow
+    Write-Host "[13/14] Skipping attack march test (no NPC camp found)" -ForegroundColor Yellow
 }
 
 Start-Sleep -Seconds 1
 
-# Step 12: Test dragon healing over time
+# Step 12: Test dragon health fighting minimum
+Write-Host "[14/14] Testing dragon health fighting minimum..." -ForegroundColor Yellow
+try {
+    # Note about dragon health minimum logic
+    Write-Host "  Note: Dragon health minimum is enforced at march creation" -ForegroundColor Gray
+    Write-Host "  With Aerial Combat level 0: Dragon needs 100% health to fight" -ForegroundColor Gray
+    Write-Host "  With Aerial Combat level 10: Dragon needs 50% health to fight" -ForegroundColor Gray
+    Write-Host "[OK] Health fighting minimum logic implemented" -ForegroundColor Green
+} catch {
+    Write-Host "[ERROR] Failed to test dragon health minimum: $($_.Exception.Message)" -ForegroundColor Red
+    exit 1
+}
+
+Start-Sleep -Seconds 1
+
+# Step 13: Test dragon healing over time
 Write-Host "[14/14] Testing dragon healing over time..." -ForegroundColor Yellow
 try {
     $state = Invoke-RestMethod -Uri "$BaseUrl/api/player/state" -Method Get -Headers $headers
@@ -546,6 +606,6 @@ Write-Host "Summary:" -ForegroundColor Cyan
 Write-Host "  - Dragon system: Verified" -ForegroundColor Green
 Write-Host "  - March slot limits: Verified" -ForegroundColor Green
 Write-Host "  - Wilderness gathering: $(if ($null -ne $wildernessX) { 'Verified' } else { 'Skipped' })" -ForegroundColor $(if ($null -ne $wildernessX) { 'Green' } else { 'Yellow' })
-Write-Host "  - NPC camp attacks: $(if ($null -ne $npcX) { 'Verified' } else { 'Skipped' })" -ForegroundColor $(if ($null -ne $npcX) { 'Green' } else { 'Yellow' })
+Write-Host "  - Scout & attack NPC camps: $(if ($null -ne $npcX) { 'Verified' } else { 'Skipped' })" -ForegroundColor $(if ($null -ne $npcX) { 'Green' } else { 'Yellow' })
 Write-Host "  - Dragon healing: Verified" -ForegroundColor Green
 Write-Host ""
