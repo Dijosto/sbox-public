@@ -433,21 +433,31 @@ if ($null -ne $npcX) {
     try {
         # Wait for gathering march to complete if it exists
         if ($null -ne $gatherMarchId) {
-            Write-Host "  Waiting for gathering march to complete..." -ForegroundColor Gray
+            Write-Host "  Waiting for gathering march to complete (full round trip)..." -ForegroundColor Gray
 
-            for ($i = 0; $i -lt 20; $i++) {
+            for ($i = 0; $i -lt 60; $i++) {
                 $state = Invoke-RestMethod -Uri "$BaseUrl/api/player/state" -Method Get -Headers $headers
                 $gatherMarch = $state.activeMarches | Where-Object { $_.marchId -eq $gatherMarchId }
 
                 if ($null -eq $gatherMarch) {
-                    Write-Host "  Gathering march completed" -ForegroundColor Gray
+                    Write-Host "  Gathering march fully completed and returned home" -ForegroundColor Gray
                     break
                 }
 
-                if ($i -lt 19) {
+                # Log progress every 10 checks
+                if (($i % 10) -eq 0 -and $i -gt 0) {
+                    Write-Host "  Still waiting... (${i} checks, march status: $($gatherMarch.status))" -ForegroundColor DarkGray
+                }
+
+                if ($i -lt 59) {
                     Start-Sleep -Seconds 2
                 }
             }
+
+            # Final check - verify we have march slots available
+            $finalState = Invoke-RestMethod -Uri "$BaseUrl/api/player/state" -Method Get -Headers $headers
+            $activeMarchCount = $finalState.activeMarches.Count
+            Write-Host "  Active marches: $activeMarchCount" -ForegroundColor Gray
         }
 
         $scoutBody = @{

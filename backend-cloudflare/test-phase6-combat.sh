@@ -420,23 +420,35 @@ if [ -n "$NPC_X" ]; then
 
   # Wait for gathering march to complete if it exists
   if [ -n "$GATHER_MARCH_ID" ]; then
-    echo "  Waiting for gathering march to complete..."
+    echo "  Waiting for gathering march to complete (full round trip)..."
 
-    for i in {1..20}; do
+    for i in {1..60}; do
       STATE=$(curl -s -X GET "$BASE_URL/api/player/state" \
         -H "Authorization: Bearer $TOKEN")
 
       MARCH_FOUND=$(echo "$STATE" | jq -r ".activeMarches[] | select(.marchId == \"$GATHER_MARCH_ID\") | .marchId")
 
       if [ -z "$MARCH_FOUND" ]; then
-        echo "  Gathering march completed"
+        echo "  Gathering march fully completed and returned home"
         break
       fi
 
-      if [ $i -lt 20 ]; then
+      # Log progress every 10 checks
+      if [ $((i % 10)) -eq 0 ] && [ $i -gt 0 ]; then
+        MARCH_STATUS=$(echo "$STATE" | jq -r ".activeMarches[] | select(.marchId == \"$GATHER_MARCH_ID\") | .status")
+        echo "  Still waiting... ($i checks, march status: $MARCH_STATUS)"
+      fi
+
+      if [ $i -lt 60 ]; then
         sleep 2
       fi
     done
+
+    # Final check - verify we have march slots available
+    FINAL_STATE=$(curl -s -X GET "$BASE_URL/api/player/state" \
+      -H "Authorization: Bearer $TOKEN")
+    ACTIVE_MARCH_COUNT=$(echo "$FINAL_STATE" | jq '.activeMarches | length')
+    echo "  Active marches: $ACTIVE_MARCH_COUNT"
   fi
 
   SCOUT_RESPONSE=$(curl -s -X POST "$BASE_URL/api/player/march/send" \
