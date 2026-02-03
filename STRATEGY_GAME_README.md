@@ -367,21 +367,28 @@ Compare:
 - [x] March travel time based on troop speed
 - [x] Troop casualties system
 - [x] Gather resources from wilderness
+- [x] **World map generation** (750x750 grid, 715 Anthropus camps, 50k wilderness tiles)
+- [x] **Player city spawning** on random empty tiles during registration
+- [x] **PvP combat system** with plundering and battle reports
+- [x] **Map query endpoints** (region queries, tile details, player search)
+- [x] **Anthropus NPC troops** (9 types: brat, cannibal, stench, she-devil, clubber, hurler, shredder, launcher, gnasher)
 
-### Phase 4: World Map 📋
-- [ ] City placement on login
-- [ ] Wilderness conquest
-- [ ] NPC camp spawning
-- [ ] Alliance territories
-- [ ] March visualization on map
+### Phase 4: Alliance System 📋
+- [ ] Alliance creation and management
+- [ ] Alliance chat system
+- [ ] Alliance territories on map
+- [ ] Coordinated attacks
+- [ ] Resource sharing
+- [ ] Alliance wars
 
 ### Phase 5: Advanced Features 📋
-- [ ] Dragon egg discovery
+- [ ] Dragon egg discovery from NPC camps
 - [ ] Dragon armor collection
-- [ ] Outpost construction
+- [ ] Outpost construction on plains tiles
 - [ ] Dragon-specific troops
-- [ ] Alliance chat system
-- [ ] Coordinated attacks
+- [ ] Wilderness conquest bonuses
+- [ ] March visualization on world map
+- [ ] Scouting system for camps and cities
 
 ### Phase 6: Polish 📋
 - [ ] UI/UX improvements
@@ -412,7 +419,9 @@ Compare:
 12. **backend-cloudflare/src/utils/resources.ts** - Production, economy, taxation formulas
 13. **backend-cloudflare/src/utils/marches.ts** - March system, travel time, validation
 14. **backend-cloudflare/src/utils/combat.ts** - Combat resolution, casualties, loot calculation
-15. **backend-cloudflare/schema.sql** - D1 database schema (messages, battle_reports, npc_camps)
+15. **backend-cloudflare/src/utils/worldgen.ts** - World map procedural generation (750x750 grid)
+16. **backend-cloudflare/scripts/generate-world.ts** - SQL generation script for world data
+17. **backend-cloudflare/schema.sql** - D1 database schema (world_tiles, messages, battle_reports, npc_camps)
 
 ## 🔒 Security Considerations
 
