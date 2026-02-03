@@ -409,10 +409,10 @@ See `schema.sql` for complete schema.
 - [x] Test suite for alliance system (test-alliance-system.ps1/.sh)
 - [ ] Reinforcement mechanics (troops sent to alliance members) - Future phase
 
-**Phase 6: Advanced Combat** 📋 TODO
-- [ ] Wilderness gathering (collect specific resources by wilderness type: lakes=food, forests=wood, hills=stone, mountains=metal)
+**Phase 6: Advanced Combat** 🚧 IN PROGRESS
+- [x] Wilderness gathering (collect specific resources by wilderness type: 70% primary, 10% secondary each)
+- [x] NPC camp regeneration (10% per 5 min after 15 min delay, 65 min full respawn)
 - [ ] Scout/spy marches (reconnaissance, requires Clairvoyance research)
-- [ ] NPC camp regeneration (10% every 5 minutes after defeat, 15 min initial respawn)
 - [ ] Guardian Dragon system (dragons join marches for combat bonuses)
 - [ ] March slot limits (based on Muster Point building level)
 
