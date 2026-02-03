@@ -522,7 +522,7 @@ export class AllianceHandler {
     };
 
     // Create new request with fresh body since we consumed the original
-    const newRequest = new Request(request.url, {
+    const newRequest = new Request('http://alliance-do/member/promote', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -544,7 +544,7 @@ export class AllianceHandler {
     };
 
     // Create new request with fresh body since we consumed the original
-    const newRequest = new Request(request.url, {
+    const newRequest = new Request('http://alliance-do/member/demote', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
