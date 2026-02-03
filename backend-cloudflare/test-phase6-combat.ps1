@@ -54,9 +54,57 @@ try {
 
 Start-Sleep -Seconds 1
 
-# Step 3: Test march slot limits (should have 1 slot with level 1 Muster Point)
-Write-Host "[3/12] Testing march slot limits..." -ForegroundColor Yellow
+# Step 3: Build garrison for troop training
+Write-Host "[3/14] Building garrison..." -ForegroundColor Yellow
 try {
+    $buildGarrisonBody = @{
+        buildingType = "garrison"
+        slotId = "garrison_1"
+    } | ConvertTo-Json
+
+    $buildResult = Invoke-RestMethod -Uri "$BaseUrl/api/player/build" -Method Post -Body $buildGarrisonBody -Headers $headers -ContentType "application/json"
+    Write-Host "[OK] Garrison construction started" -ForegroundColor Green
+    Write-Host "  Waiting for garrison to complete..." -ForegroundColor Gray
+    Start-Sleep -Seconds 5  # Wait for construction
+} catch {
+    # Garrison might already exist
+    if ($_.Exception.Message -match "already occupied" -or $_.ErrorDetails.Message -match "already occupied") {
+        Write-Host "[OK] Garrison already exists" -ForegroundColor Green
+    } else {
+        Write-Host "[WARNING] Garrison build issue: $($_.Exception.Message)" -ForegroundColor Yellow
+    }
+}
+
+Start-Sleep -Seconds 1
+
+# Step 4: Build Muster Point for march slots
+Write-Host "[4/14] Building Muster Point..." -ForegroundColor Yellow
+try {
+    $buildMusterBody = @{
+        buildingType = "musterPoint"
+        slotId = "musterPoint_1"
+    } | ConvertTo-Json
+
+    $buildResult = Invoke-RestMethod -Uri "$BaseUrl/api/player/build" -Method Post -Body $buildMusterBody -Headers $headers -ContentType "application/json"
+    Write-Host "[OK] Muster Point construction started" -ForegroundColor Green
+    Write-Host "  Waiting for Muster Point to complete..." -ForegroundColor Gray
+    Start-Sleep -Seconds 5  # Wait for construction
+} catch {
+    # Muster Point might already exist
+    if ($_.Exception.Message -match "already occupied" -or $_.ErrorDetails.Message -match "already occupied") {
+        Write-Host "[OK] Muster Point already exists" -ForegroundColor Green
+    } else {
+        Write-Host "[WARNING] Muster Point build issue: $($_.Exception.Message)" -ForegroundColor Yellow
+    }
+}
+
+Start-Sleep -Seconds 1
+
+# Step 5: Check march slot limits
+Write-Host "[5/14] Testing march slot limits..." -ForegroundColor Yellow
+try {
+    $state = Invoke-RestMethod -Uri "$BaseUrl/api/player/state" -Method Get -Headers $headers
+
     # Check Muster Point level
     $musterPoint = $state.city.innerCity.musterPoint_1
     if ($null -eq $musterPoint) {
@@ -73,8 +121,8 @@ try {
 
 Start-Sleep -Seconds 1
 
-# Step 4: Train some troops for testing
-Write-Host "[4/12] Training troops for combat tests..." -ForegroundColor Yellow
+# Step 6: Train some troops for testing
+Write-Host "[6/14] Training troops for combat tests..." -ForegroundColor Yellow
 try {
     $trainBody = @{
         troopType = "militia"
@@ -82,16 +130,19 @@ try {
     } | ConvertTo-Json
 
     $trainResult = Invoke-RestMethod -Uri "$BaseUrl/api/player/train" -Method Post -Body $trainBody -Headers $headers -ContentType "application/json"
-    Write-Host "[OK] Training 100 Militia" -ForegroundColor Green
+    Write-Host "[OK] Training 100 Militia queued" -ForegroundColor Green
+    Write-Host "  Waiting for training to complete..." -ForegroundColor Gray
+    Start-Sleep -Seconds 5  # Wait for training
 } catch {
     Write-Host "[ERROR] Failed to train troops: $($_.Exception.Message)" -ForegroundColor Red
+    Write-Host "  Response: $($_.ErrorDetails.Message)" -ForegroundColor Red
     exit 1
 }
 
-Start-Sleep -Seconds 2
+Start-Sleep -Seconds 1
 
-# Step 5: Query world map for wilderness tile
-Write-Host "[5/12] Finding wilderness tile..." -ForegroundColor Yellow
+# Step 7: Query world map for wilderness tile
+Write-Host "[7/14] Finding wilderness tile..." -ForegroundColor Yellow
 try {
     $state = Invoke-RestMethod -Uri "$BaseUrl/api/player/state" -Method Get -Headers $headers
     $playerX = $state.city.position.x
@@ -125,7 +176,7 @@ Start-Sleep -Seconds 1
 
 # Step 6: Test gathering march to wilderness (with dragon)
 if ($null -ne $wildernessX) {
-    Write-Host "[6/12] Sending gathering march with dragon..." -ForegroundColor Yellow
+    Write-Host "[8/14] Sending gathering march with dragon..." -ForegroundColor Yellow
     try {
         # Wait for troops to finish training
         Write-Host "  Waiting for troops to finish training..." -ForegroundColor Gray
@@ -158,14 +209,14 @@ if ($null -ne $wildernessX) {
         exit 1
     }
 } else {
-    Write-Host "[6/12] Skipping wilderness gathering test (no wilderness found)" -ForegroundColor Yellow
+    Write-Host "[8/14] Skipping wilderness gathering test (no wilderness found)" -ForegroundColor Yellow
     $gatherMarchId = $null
 }
 
 Start-Sleep -Seconds 1
 
 # Step 7: Try to send another march (test march slot limit)
-Write-Host "[7/12] Testing march slot limit..." -ForegroundColor Yellow
+Write-Host "[9/14] Testing march slot limit..." -ForegroundColor Yellow
 try {
     $state = Invoke-RestMethod -Uri "$BaseUrl/api/player/state" -Method Get -Headers $headers
     $activeMarchCount = $state.activeMarches.Count
@@ -210,7 +261,7 @@ try {
 Start-Sleep -Seconds 1
 
 # Step 8: Find NPC camp
-Write-Host "[8/12] Finding NPC camp..." -ForegroundColor Yellow
+Write-Host "[10/14] Finding NPC camp..." -ForegroundColor Yellow
 try {
     $npcFound = $false
     foreach ($tile in $viewport.tiles) {
@@ -238,7 +289,7 @@ Start-Sleep -Seconds 1
 
 # Step 9: Test scout march
 if ($null -ne $npcX) {
-    Write-Host "[9/12] Sending scout march to NPC camp..." -ForegroundColor Yellow
+    Write-Host "[11/14] Sending scout march to NPC camp..." -ForegroundColor Yellow
     try {
         # First recall the gathering march if it exists
         if ($null -ne $gatherMarchId) {
@@ -275,14 +326,14 @@ if ($null -ne $npcX) {
         exit 1
     }
 } else {
-    Write-Host "[9/12] Skipping scout march test (no NPC camp found)" -ForegroundColor Yellow
+    Write-Host "[11/14] Skipping scout march test (no NPC camp found)" -ForegroundColor Yellow
     $scoutMarchId = $null
 }
 
 Start-Sleep -Seconds 1
 
 # Step 10: Test dragon with low health (can't fight)
-Write-Host "[10/12] Testing dragon health fighting minimum..." -ForegroundColor Yellow
+Write-Host "[12/14] Testing dragon health fighting minimum..." -ForegroundColor Yellow
 try {
     # Simulate dragon with low health
     Write-Host "  Note: Dragon health minimum is enforced at march creation" -ForegroundColor Gray
@@ -298,7 +349,7 @@ Start-Sleep -Seconds 1
 
 # Step 11: Wait for scout march to return and check report
 if ($null -ne $scoutMarchId) {
-    Write-Host "[11/12] Waiting for scout march to complete..." -ForegroundColor Yellow
+    Write-Host "[13/14] Waiting for scout march to complete..." -ForegroundColor Yellow
     try {
         Write-Host "  Waiting 8 seconds for scout to return..." -ForegroundColor Gray
         Start-Sleep -Seconds 8
@@ -325,13 +376,13 @@ if ($null -ne $scoutMarchId) {
         exit 1
     }
 } else {
-    Write-Host "[11/12] Skipping scout report check (no scout march)" -ForegroundColor Yellow
+    Write-Host "[13/14] Skipping scout report check (no scout march)" -ForegroundColor Yellow
 }
 
 Start-Sleep -Seconds 1
 
 # Step 12: Test dragon healing over time
-Write-Host "[12/12] Testing dragon healing over time..." -ForegroundColor Yellow
+Write-Host "[14/14] Testing dragon healing over time..." -ForegroundColor Yellow
 try {
     $state = Invoke-RestMethod -Uri "$BaseUrl/api/player/state" -Method Get -Headers $headers
     $dragon = $state.dragons[0]

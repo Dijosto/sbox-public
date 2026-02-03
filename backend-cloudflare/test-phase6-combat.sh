@@ -52,15 +52,56 @@ DRAGON_MAX_HP=$(echo "$STATE" | jq -r '.dragons[0].maxHealth')
 echo "[OK] Great Dragon found: $DRAGON_ID (HP: $DRAGON_HP/$DRAGON_MAX_HP)"
 sleep 1
 
-# Step 3: Test march slot limits
-echo "[3/12] Testing march slot limits..."
+# Step 3: Build garrison for troop training
+echo "[3/14] Building garrison..."
+BUILD_GARRISON_RESPONSE=$(curl -s -X POST "$BASE_URL/api/player/build" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "buildingType": "garrison",
+    "slotId": "garrison_1"
+  }')
+
+if echo "$BUILD_GARRISON_RESPONSE" | grep -q "already occupied"; then
+  echo "[OK] Garrison already exists"
+else
+  echo "[OK] Garrison construction started"
+  echo "  Waiting for garrison to complete..."
+  sleep 5
+fi
+sleep 1
+
+# Step 4: Build Muster Point for march slots
+echo "[4/14] Building Muster Point..."
+BUILD_MUSTER_RESPONSE=$(curl -s -X POST "$BASE_URL/api/player/build" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "buildingType": "musterPoint",
+    "slotId": "musterPoint_1"
+  }')
+
+if echo "$BUILD_MUSTER_RESPONSE" | grep -q "already occupied"; then
+  echo "[OK] Muster Point already exists"
+else
+  echo "[OK] Muster Point construction started"
+  echo "  Waiting for Muster Point to complete..."
+  sleep 5
+fi
+sleep 1
+
+# Step 5: Check march slot limits
+echo "[5/14] Testing march slot limits..."
+STATE=$(curl -s -X GET "$BASE_URL/api/player/state" \
+  -H "Authorization: Bearer $TOKEN")
+
 MUSTER_LEVEL=$(echo "$STATE" | jq -r '.city.innerCity.musterPoint_1.level // 0')
 EXPECTED_SLOTS=$((1 + MUSTER_LEVEL / 5))
 echo "[OK] Muster Point level $MUSTER_LEVEL, expected slots: $EXPECTED_SLOTS"
 sleep 1
 
-# Step 4: Train some troops for testing
-echo "[4/12] Training troops for combat tests..."
+# Step 6: Train some troops for testing
+echo "[6/14] Training troops for combat tests..."
 TRAIN_RESPONSE=$(curl -s -X POST "$BASE_URL/api/player/train" \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
@@ -69,11 +110,13 @@ TRAIN_RESPONSE=$(curl -s -X POST "$BASE_URL/api/player/train" \
     "quantity": 100
   }')
 
-echo "[OK] Training 100 Militia"
-sleep 2
+echo "[OK] Training 100 Militia queued"
+echo "  Waiting for training to complete..."
+sleep 5
+sleep 1
 
 # Step 5: Query world map for wilderness tile
-echo "[5/12] Finding wilderness tile..."
+echo "[7/14] Finding wilderness tile..."
 STATE=$(curl -s -X GET "$BASE_URL/api/player/state" \
   -H "Authorization: Bearer $TOKEN")
 
@@ -103,7 +146,7 @@ sleep 1
 
 # Step 6: Test gathering march to wilderness (with dragon)
 if [ -n "$WILDERNESS_X" ]; then
-  echo "[6/12] Sending gathering march with dragon..."
+  echo "[8/14] Sending gathering march with dragon..."
   echo "  Waiting for troops to finish training..."
   sleep 3
 
@@ -137,13 +180,13 @@ if [ -n "$WILDERNESS_X" ]; then
   fi
   echo "[OK] Gathering march sent with dragon: $GATHER_MARCH_ID"
 else
-  echo "[6/12] Skipping wilderness gathering test (no wilderness found)"
+  echo "[8/14] Skipping wilderness gathering test (no wilderness found)"
   GATHER_MARCH_ID=""
 fi
 sleep 1
 
 # Step 7: Try to send another march (test march slot limit)
-echo "[7/12] Testing march slot limit..."
+echo "[9/14] Testing march slot limit..."
 STATE=$(curl -s -X GET "$BASE_URL/api/player/state" \
   -H "Authorization: Bearer $TOKEN")
 
@@ -184,7 +227,7 @@ fi
 sleep 1
 
 # Step 8: Find NPC camp
-echo "[8/12] Finding NPC camp..."
+echo "[10/14] Finding NPC camp..."
 NPC_TILE=$(echo "$VIEWPORT" | jq -r '.tiles[] | select(.tileType == "npc") | @json' | head -1)
 
 if [ -z "$NPC_TILE" ]; then
@@ -201,7 +244,7 @@ sleep 1
 
 # Step 9: Test scout march
 if [ -n "$NPC_X" ]; then
-  echo "[9/12] Sending scout march to NPC camp..."
+  echo "[11/14] Sending scout march to NPC camp..."
 
   # Wait for gathering march to complete if it exists
   if [ -n "$GATHER_MARCH_ID" ]; then
@@ -235,13 +278,13 @@ if [ -n "$NPC_X" ]; then
   fi
   echo "[OK] Scout march sent: $SCOUT_MARCH_ID"
 else
-  echo "[9/12] Skipping scout march test (no NPC camp found)"
+  echo "[11/14] Skipping scout march test (no NPC camp found)"
   SCOUT_MARCH_ID=""
 fi
 sleep 1
 
 # Step 10: Test dragon with low health (can't fight)
-echo "[10/12] Testing dragon health fighting minimum..."
+echo "[12/14] Testing dragon health fighting minimum..."
 echo "  Note: Dragon health minimum is enforced at march creation"
 echo "  With Aerial Combat level 0: Dragon needs 100% health to fight"
 echo "  With Aerial Combat level 10: Dragon needs 50% health to fight"
@@ -250,7 +293,7 @@ sleep 1
 
 # Step 11: Wait for scout march to return and check report
 if [ -n "$SCOUT_MARCH_ID" ]; then
-  echo "[11/12] Waiting for scout march to complete..."
+  echo "[13/14] Waiting for scout march to complete..."
   echo "  Waiting 8 seconds for scout to return..."
   sleep 8
 
@@ -268,12 +311,12 @@ if [ -n "$SCOUT_MARCH_ID" ]; then
     echo "[WARNING] Scout report not found in messages"
   fi
 else
-  echo "[11/12] Skipping scout report check (no scout march)"
+  echo "[13/14] Skipping scout report check (no scout march)"
 fi
 sleep 1
 
 # Step 12: Test dragon healing over time
-echo "[12/12] Testing dragon healing over time..."
+echo "[14/14] Testing dragon healing over time..."
 STATE=$(curl -s -X GET "$BASE_URL/api/player/state" \
   -H "Authorization: Bearer $TOKEN")
 
