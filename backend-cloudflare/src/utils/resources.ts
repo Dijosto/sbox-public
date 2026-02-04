@@ -122,8 +122,8 @@ export function calculateGoldProduction(
   theaterLevel: number
 ): number {
   // Calculate happiness
-  // Formula: 100 - tax_rate + (theater_level * 2)
-  const happiness = Math.max(0, Math.min(120, 100 - taxRate + (theaterLevel * 2)));
+  // Formula: 100 - tax_rate + (theater_level * 2.5)
+  const happiness = Math.max(0, Math.min(120, 100 - taxRate + (theaterLevel * 2.5)));
 
   // Calculate hourly gold
   return Math.floor(homeCapacity * (happiness / 100) * (taxRate / 100));
@@ -138,7 +138,7 @@ export function calculatePopulation(
   taxRate: number,
   theaterLevel: number
 ): number {
-  const happiness = Math.max(0, Math.min(120, 100 - taxRate + (theaterLevel * 2)));
+  const happiness = Math.max(0, Math.min(120, 100 - taxRate + (theaterLevel * 2.5)));
   return Math.floor(maxCapacity * (happiness / 100));
 }
 

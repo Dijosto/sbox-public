@@ -218,6 +218,10 @@ export class PlayerDurableObject {
       case '/api/player/trade/my-offers':
         return this.handleGetMyOffers(request);
 
+      // Tax endpoints
+      case '/api/player/tax/set':
+        return this.handleSetTaxRate(request);
+
       // Internal completion handlers (called by alarms)
       case '/internal/complete':
         return this.handleCompletions(request);
@@ -455,7 +459,7 @@ export class PlayerDurableObject {
       ],
       activeMarches: [],
       activeTradeOffers: [],
-      taxRate: 25, // Default 25% tax
+      taxRate: 50, // Default 50% tax (optimal for most cities)
       wilderness: {},
       lastUpdateTimestamp: Date.now(),
     };
@@ -2738,6 +2742,45 @@ export class PlayerDurableObject {
     });
 
     console.log(`[PlayerDO] Expired trade offer: ${offer.offerId}`);
+  }
+
+  /**
+   * Set tax rate (0-100%)
+   */
+  private async handleSetTaxRate(request: Request): Promise<Response> {
+    if (!this.playerState) {
+      return this.errorResponse('State not loaded', 500);
+    }
+
+    const body = await request.json() as { taxRate: number };
+
+    // Validate tax rate (0-100%)
+    if (body.taxRate < 0 || body.taxRate > 100) {
+      return this.errorResponse('Tax rate must be between 0 and 100');
+    }
+
+    // Update tax rate
+    this.playerState.taxRate = body.taxRate;
+
+    // Recalculate gold production rate
+    this.updateResources();
+
+    await this.saveState();
+
+    // Notify via WebSocket
+    this.pushEvent('tax_rate_changed', {
+      taxRate: body.taxRate,
+      newGoldRate: this.playerState.resources.goldRate
+    });
+
+    return new Response(JSON.stringify({
+      success: true,
+      taxRate: body.taxRate,
+      goldRate: this.playerState.resources.goldRate,
+      message: `Tax rate set to ${body.taxRate}%. Gold production: ${this.playerState.resources.goldRate}/hour`
+    }), {
+      headers: { 'Content-Type': 'application/json' }
+    });
   }
 
   /**
