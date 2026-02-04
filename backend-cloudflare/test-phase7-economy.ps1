@@ -41,6 +41,17 @@ Write-Host "Player 2: $($player2.playerName) (ID: $player2Id)" -ForegroundColor 
 Write-Host ""
 Start-Sleep -Milliseconds 200
 
+# Add extra resources for testing (development only)
+Write-Host "[1.5/20] Adding test resources to players..." -ForegroundColor Yellow
+$resourceBody1 = @{ gold = 10000; wood = 20000; food = 15000 } | ConvertTo-Json
+$resourceBody2 = @{ gold = 5000 } | ConvertTo-Json
+Invoke-RestMethod -Uri "$BaseUrl/api/player/test/add-resources" -Method Post -Body $resourceBody1 -ContentType "application/json" -Headers $headers1 | Out-Null
+$headers2 = @{ Authorization = "Bearer $player2Token" }
+Invoke-RestMethod -Uri "$BaseUrl/api/player/test/add-resources" -Method Post -Body $resourceBody2 -ContentType "application/json" -Headers $headers2 | Out-Null
+Write-Host "[OK] Added test resources to both players" -ForegroundColor Green
+Write-Host ""
+Start-Sleep -Milliseconds 200
+
 # ============================================
 # TEST 1: TAX SYSTEM
 # ============================================
@@ -241,17 +252,29 @@ Start-Sleep -Milliseconds 200
 
 Write-Host "[8/20] Researching Mercantilism Level 1..." -ForegroundColor Yellow
 $mercantilismBody = @{ researchType = "mercantilism" } | ConvertTo-Json
-$mercantilism = Invoke-RestMethod -Uri "$BaseUrl/api/player/research/start" -Method Post -Body $mercantilismBody -ContentType "application/json" -Headers $headers1
-Write-Host "Mercantilism research started, duration: $($mercantilism.duration)s" -ForegroundColor Green
 
-$mercantilismCompletionTime = $mercantilism.completionTime
-$now = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
-$waitMs = $mercantilismCompletionTime - $now + 2000
-$waitSeconds = [Math]::Max(0, [Math]::Ceiling($waitMs / 1000))
+try {
+    $mercantilism = Invoke-RestMethod -Uri "$BaseUrl/api/player/research/start" -Method Post -Body $mercantilismBody -ContentType "application/json" -Headers $headers1
 
-Write-Host "Waiting $waitSeconds seconds for research..." -ForegroundColor Blue
-Start-Sleep -Seconds $waitSeconds
-Write-Host "[OK] Mercantilism research completed" -ForegroundColor Green
+    if ($mercantilism.success) {
+        Write-Host "Mercantilism research started, duration: $($mercantilism.duration)s" -ForegroundColor Green
+
+        $mercantilismCompletionTime = $mercantilism.completionTime
+        $now = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+        $waitMs = $mercantilismCompletionTime - $now + 2000
+        $waitSeconds = [Math]::Max(0, [Math]::Ceiling($waitMs / 1000))
+
+        Write-Host "Waiting $waitSeconds seconds for research..." -ForegroundColor Blue
+        Start-Sleep -Seconds $waitSeconds
+        Write-Host "[OK] Mercantilism research completed" -ForegroundColor Green
+    } else {
+        Write-Host "[WARNING] Mercantilism research failed: $($mercantilism.error)" -ForegroundColor Yellow
+        Write-Host "Continuing test without Mercantilism..." -ForegroundColor Yellow
+    }
+} catch {
+    Write-Host "[WARNING] Mercantilism research failed: $($_.Exception.Message)" -ForegroundColor Yellow
+    Write-Host "Continuing test without Mercantilism..." -ForegroundColor Yellow
+}
 Write-Host ""
 Start-Sleep -Milliseconds 200
 
@@ -266,16 +289,27 @@ $createOfferBody = @{
     pricePerUnit = 0.5
 } | ConvertTo-Json
 
-$createOffer = Invoke-RestMethod -Uri "$BaseUrl/api/player/trade/create" -Method Post -Body $createOfferBody -ContentType "application/json" -Headers $headers1
-$offerId = $createOffer.offer.offerId
+try {
+    $createOffer = Invoke-RestMethod -Uri "$BaseUrl/api/player/trade/create" -Method Post -Body $createOfferBody -ContentType "application/json" -Headers $headers1
 
-Write-Host "[OK] Trade offer created" -ForegroundColor Green
-Write-Host "Offer ID: $offerId" -ForegroundColor Cyan
-Write-Host "Resource: $($createOffer.offer.resourceType)" -ForegroundColor Cyan
-Write-Host "Quantity: $($createOffer.offer.quantity)" -ForegroundColor Cyan
-Write-Host "Price per unit: $($createOffer.offer.pricePerUnit) gold" -ForegroundColor Cyan
-Write-Host "Total price: $($createOffer.offer.totalPrice) gold" -ForegroundColor Cyan
-Write-Host "Expires at: $($createOffer.offer.expiresAt)" -ForegroundColor Cyan
+    if ($createOffer.success) {
+        $offerId = $createOffer.offer.offerId
+
+        Write-Host "[OK] Trade offer created" -ForegroundColor Green
+        Write-Host "Offer ID: $offerId" -ForegroundColor Cyan
+        Write-Host "Resource: $($createOffer.offer.resourceType)" -ForegroundColor Cyan
+        Write-Host "Quantity: $($createOffer.offer.quantity)" -ForegroundColor Cyan
+        Write-Host "Price per unit: $($createOffer.offer.pricePerUnit) gold" -ForegroundColor Cyan
+        Write-Host "Total price: $($createOffer.offer.totalPrice) gold" -ForegroundColor Cyan
+        Write-Host "Expires at: $($createOffer.offer.expiresAt)" -ForegroundColor Cyan
+    } else {
+        Write-Host "[FAIL] Trade offer creation failed: $($createOffer.error)" -ForegroundColor Red
+        $offerId = $null
+    }
+} catch {
+    Write-Host "[FAIL] Trade offer creation failed: $($_.Exception.Message)" -ForegroundColor Red
+    $offerId = $null
+}
 Write-Host ""
 Start-Sleep -Milliseconds 200
 
@@ -300,13 +334,25 @@ Write-Host ""
 Start-Sleep -Milliseconds 200
 
 Write-Host "[12/20] Player 2 buying from Player 1's offer..." -ForegroundColor Yellow
-$buyBody = @{ offerId = $offerId } | ConvertTo-Json
+if (-not $offerId) {
+    Write-Host "[SKIP] No offer to buy (previous creation failed)" -ForegroundColor Yellow
+} else {
+    $buyBody = @{ offerId = $offerId } | ConvertTo-Json
 
-$buyResult = Invoke-RestMethod -Uri "$BaseUrl/api/player/trade/buy" -Method Post -Body $buyBody -ContentType "application/json" -Headers $headers2
+    try {
+        $buyResult = Invoke-RestMethod -Uri "$BaseUrl/api/player/trade/buy" -Method Post -Body $buyBody -ContentType "application/json" -Headers $headers2
 
-Write-Host "[OK] Purchase successful" -ForegroundColor Green
-Write-Host "Bought: $($buyResult.trade.quantity) $($buyResult.trade.resourceType)" -ForegroundColor Cyan
-Write-Host "Paid: $($buyResult.trade.totalPrice) gold" -ForegroundColor Cyan
+        if ($buyResult.success) {
+            Write-Host "[OK] Purchase successful" -ForegroundColor Green
+            Write-Host "Bought: $($buyResult.trade.quantity) $($buyResult.trade.resourceType)" -ForegroundColor Cyan
+            Write-Host "Paid: $($buyResult.trade.totalPrice) gold" -ForegroundColor Cyan
+        } else {
+            Write-Host "[FAIL] Purchase failed: $($buyResult.error)" -ForegroundColor Red
+        }
+    } catch {
+        Write-Host "[FAIL] Purchase failed: $($_.Exception.Message)" -ForegroundColor Red
+    }
+}
 Write-Host ""
 Start-Sleep -Milliseconds 200
 

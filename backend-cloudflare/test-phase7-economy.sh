@@ -38,6 +38,20 @@ echo "Player 2: $(echo "$PLAYER2" | jq -r '.playerName') (ID: $PLAYER2_ID)"
 echo ""
 sleep 0.2
 
+# Add extra resources for testing (development only)
+echo "[1.5/20] Adding test resources to players..."
+curl -s -X POST "$BASE_URL/api/player/test/add-resources" \
+  -H "Authorization: Bearer $PLAYER1_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"gold":10000,"wood":20000,"food":15000}' > /dev/null
+curl -s -X POST "$BASE_URL/api/player/test/add-resources" \
+  -H "Authorization: Bearer $PLAYER2_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"gold":5000}' > /dev/null
+echo "[OK] Added test resources to both players"
+echo ""
+sleep 0.2
+
 # ============================================
 # TEST 1: TAX SYSTEM
 # ============================================
@@ -250,17 +264,23 @@ MERCANTILISM=$(curl -s -X POST "$BASE_URL/api/player/research/start" \
   -H "Content-Type: application/json" \
   -d '{"researchType":"mercantilism"}')
 
-echo "Mercantilism research started, duration: $(echo "$MERCANTILISM" | jq -r '.duration')s"
+SUCCESS=$(echo "$MERCANTILISM" | jq -r '.success')
+if [ "$SUCCESS" == "true" ]; then
+  echo "Mercantilism research started, duration: $(echo "$MERCANTILISM" | jq -r '.duration')s"
 
-MERCANTILISM_COMPLETION=$(echo "$MERCANTILISM" | jq -r '.completionTime')
-NOW=$(date +%s%3N)
-WAIT_MS=$((MERCANTILISM_COMPLETION - NOW + 2000))
-WAIT_SECONDS=$(( (WAIT_MS + 999) / 1000 ))
-if [ $WAIT_SECONDS -lt 0 ]; then WAIT_SECONDS=0; fi
+  MERCANTILISM_COMPLETION=$(echo "$MERCANTILISM" | jq -r '.completionTime')
+  NOW=$(date +%s%3N)
+  WAIT_MS=$((MERCANTILISM_COMPLETION - NOW + 2000))
+  WAIT_SECONDS=$(( (WAIT_MS + 999) / 1000 ))
+  if [ $WAIT_SECONDS -lt 0 ]; then WAIT_SECONDS=0; fi
 
-echo "Waiting $WAIT_SECONDS seconds for research..."
-sleep $WAIT_SECONDS
-echo "[OK] Mercantilism research completed"
+  echo "Waiting $WAIT_SECONDS seconds for research..."
+  sleep $WAIT_SECONDS
+  echo "[OK] Mercantilism research completed"
+else
+  echo "[WARNING] Mercantilism research failed: $(echo "$MERCANTILISM" | jq -r '.error')"
+  echo "Continuing test without Mercantilism..."
+fi
 echo ""
 sleep 0.2
 
@@ -274,15 +294,21 @@ CREATE_OFFER=$(curl -s -X POST "$BASE_URL/api/player/trade/create" \
   -H "Content-Type: application/json" \
   -d '{"resourceType":"wood","quantity":5000,"pricePerUnit":0.5}')
 
-OFFER_ID=$(echo "$CREATE_OFFER" | jq -r '.offer.offerId')
+SUCCESS=$(echo "$CREATE_OFFER" | jq -r '.success')
+if [ "$SUCCESS" == "true" ]; then
+  OFFER_ID=$(echo "$CREATE_OFFER" | jq -r '.offer.offerId')
 
-echo "[OK] Trade offer created"
-echo "Offer ID: $OFFER_ID"
-echo "Resource: $(echo "$CREATE_OFFER" | jq -r '.offer.resourceType')"
-echo "Quantity: $(echo "$CREATE_OFFER" | jq -r '.offer.quantity')"
-echo "Price per unit: $(echo "$CREATE_OFFER" | jq -r '.offer.pricePerUnit') gold"
-echo "Total price: $(echo "$CREATE_OFFER" | jq -r '.offer.totalPrice') gold"
-echo "Expires at: $(echo "$CREATE_OFFER" | jq -r '.offer.expiresAt')"
+  echo "[OK] Trade offer created"
+  echo "Offer ID: $OFFER_ID"
+  echo "Resource: $(echo "$CREATE_OFFER" | jq -r '.offer.resourceType')"
+  echo "Quantity: $(echo "$CREATE_OFFER" | jq -r '.offer.quantity')"
+  echo "Price per unit: $(echo "$CREATE_OFFER" | jq -r '.offer.pricePerUnit') gold"
+  echo "Total price: $(echo "$CREATE_OFFER" | jq -r '.offer.totalPrice') gold"
+  echo "Expires at: $(echo "$CREATE_OFFER" | jq -r '.offer.expiresAt')"
+else
+  echo "[FAIL] Trade offer creation failed: $(echo "$CREATE_OFFER" | jq -r '.error')"
+  OFFER_ID="null"
+fi
 echo ""
 sleep 0.2
 
@@ -311,14 +337,23 @@ echo ""
 sleep 0.2
 
 echo "[12/20] Player 2 buying from Player 1's offer..."
-BUY_RESULT=$(curl -s -X POST "$BASE_URL/api/player/trade/buy" \
-  -H "Authorization: Bearer $PLAYER2_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d "{\"offerId\":\"$OFFER_ID\"}")
+if [ "$OFFER_ID" == "null" ]; then
+  echo "[SKIP] No offer to buy (previous creation failed)"
+else
+  BUY_RESULT=$(curl -s -X POST "$BASE_URL/api/player/trade/buy" \
+    -H "Authorization: Bearer $PLAYER2_TOKEN" \
+    -H "Content-Type: application/json" \
+    -d "{\"offerId\":\"$OFFER_ID\"}")
 
-echo "[OK] Purchase successful"
-echo "Bought: $(echo "$BUY_RESULT" | jq -r '.trade.quantity') $(echo "$BUY_RESULT" | jq -r '.trade.resourceType')"
-echo "Paid: $(echo "$BUY_RESULT" | jq -r '.trade.totalPrice') gold"
+  SUCCESS=$(echo "$BUY_RESULT" | jq -r '.success')
+  if [ "$SUCCESS" == "true" ]; then
+    echo "[OK] Purchase successful"
+    echo "Bought: $(echo "$BUY_RESULT" | jq -r '.trade.quantity') $(echo "$BUY_RESULT" | jq -r '.trade.resourceType')"
+    echo "Paid: $(echo "$BUY_RESULT" | jq -r '.trade.totalPrice') gold"
+  else
+    echo "[FAIL] Purchase failed: $(echo "$BUY_RESULT" | jq -r '.error')"
+  fi
+fi
 echo ""
 sleep 0.2
 

@@ -222,6 +222,10 @@ export class PlayerDurableObject {
       case '/api/player/tax/set':
         return this.handleSetTaxRate(request);
 
+      // Test/Debug endpoints (development only)
+      case '/api/player/test/add-resources':
+        return this.handleTestAddResources(request);
+
       // Internal completion handlers (called by alarms)
       case '/internal/complete':
         return this.handleCompletions(request);
@@ -2778,6 +2782,50 @@ export class PlayerDurableObject {
       taxRate: body.taxRate,
       goldRate: this.playerState.resources.goldRate,
       message: `Tax rate set to ${body.taxRate}%. Gold production: ${this.playerState.resources.goldRate}/hour`
+    }), {
+      headers: { 'Content-Type': 'application/json' }
+    });
+  }
+
+  /**
+   * Test/Debug endpoint to add resources (development only)
+   */
+  private async handleTestAddResources(request: Request): Promise<Response> {
+    // Only allow in development environment
+    if (this.env.ENVIRONMENT !== 'development') {
+      return this.errorResponse('Test endpoints only available in development', 403);
+    }
+
+    if (!this.playerState) {
+      return this.errorResponse('State not loaded', 500);
+    }
+
+    const body = await request.json() as {
+      food?: number;
+      wood?: number;
+      stone?: number;
+      metal?: number;
+      gold?: number;
+    };
+
+    // Add resources (default to 0 if not specified)
+    if (body.food) this.playerState.resources.food += body.food;
+    if (body.wood) this.playerState.resources.wood += body.wood;
+    if (body.stone) this.playerState.resources.stone += body.stone;
+    if (body.metal) this.playerState.resources.metal += body.metal;
+    if (body.gold) this.playerState.resources.gold += body.gold;
+
+    await this.saveState();
+
+    return new Response(JSON.stringify({
+      success: true,
+      resources: {
+        food: this.playerState.resources.food,
+        wood: this.playerState.resources.wood,
+        stone: this.playerState.resources.stone,
+        metal: this.playerState.resources.metal,
+        gold: this.playerState.resources.gold
+      }
     }), {
       headers: { 'Content-Type': 'application/json' }
     });
