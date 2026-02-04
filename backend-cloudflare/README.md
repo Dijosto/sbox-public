@@ -421,11 +421,18 @@ See `schema.sql` for complete schema.
   - [x] Health fighting minimum based on Aerial Combat research (95% to 50%)
 - [ ] Battle Arts (dragon special abilities) - Future enhancement
 
-**Phase 7: Economy & Trading** 📋 TODO
-- [ ] Resource trading between players
-- [ ] Market system
-- [ ] Storage vault protection from raids
-- [ ] Tax collection and gold economy
+**Phase 7: Economy & Trading** ✅ COMPLETE
+- [x] Storage Vault building with raid protection (formula: 5000 * 1.5^(level-1))
+- [x] Factory building (unlocks trading at level 1)
+- [x] Levitation and Mercantilism research technologies
+- [x] Marketplace trading system (create/search/buy/cancel offers)
+- [x] Trade duration: 30 minutes (adjusted by speed multiplier)
+- [x] Trade slots based on Mercantilism level (max 16)
+- [x] Seller fees (gold = quantity sold)
+- [x] Tax system with adjustable rates (0-100%, default 50%)
+- [x] Happiness calculation (100 - tax_rate + theater_level * 2.5)
+- [x] Hourly gold generation (home_capacity * happiness * tax_rate)
+- [x] Test suite for all economy features (test-phase7-economy.ps1/.sh)
 
 **Phase 8: Polish & End Game** 📋 TODO
 - [ ] Leaderboards (power, kills, resources)
