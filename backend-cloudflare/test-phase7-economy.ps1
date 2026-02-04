@@ -370,12 +370,12 @@ Write-Host "Phase 7: Economy Tests Complete!" -ForegroundColor Green
 Write-Host "========================================" -ForegroundColor Green
 Write-Host ""
 Write-Host "Summary:" -ForegroundColor Blue
-Write-Host "  ✓ Tax system with adjustable rates (0-100%)" -ForegroundColor Green
-Write-Host "  ✓ Happiness calculation (tax + theater bonus)" -ForegroundColor Green
-Write-Host "  ✓ Hourly gold generation based on tax/happiness" -ForegroundColor Green
-Write-Host "  ✓ Storage Vault building with protection formula" -ForegroundColor Green
-Write-Host "  ✓ Trading requirements (Factory + Levitation + Mercantilism)" -ForegroundColor Green
-Write-Host "  ✓ Marketplace create/search/buy/cancel" -ForegroundColor Green
-Write-Host "  ✓ Trade slot limits enforced (Mercantilism level)" -ForegroundColor Green
-Write-Host "  ✓ Seller fees and trade notifications" -ForegroundColor Green
+Write-Host "  [OK] Tax system with adjustable rates (0-100 percent)" -ForegroundColor Green
+Write-Host "  [OK] Happiness calculation (tax + theater bonus)" -ForegroundColor Green
+Write-Host "  [OK] Hourly gold generation based on tax/happiness" -ForegroundColor Green
+Write-Host "  [OK] Storage Vault building with protection formula" -ForegroundColor Green
+Write-Host "  [OK] Trading requirements (Factory + Levitation + Mercantilism)" -ForegroundColor Green
+Write-Host "  [OK] Marketplace create/search/buy/cancel" -ForegroundColor Green
+Write-Host "  [OK] Trade slot limits enforced (Mercantilism level)" -ForegroundColor Green
+Write-Host "  [OK] Seller fees and trade notifications" -ForegroundColor Green
 Write-Host ""
