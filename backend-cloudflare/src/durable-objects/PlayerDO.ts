@@ -1694,12 +1694,36 @@ export class PlayerDurableObject {
       let loot = null;
       if (combatResult.winner === 'attacker') {
         const capacity = calculateMarchCapacity(march.troops);
+
+        // Get defender's Storage Vault level and calculate protected resources
+        const vaultLevel = targetState.city?.innerCity?.storageVault_1?.level || 0;
+        const vaultProtection = this.calculateVaultProtection(vaultLevel);
+
+        // Calculate total resources
+        const totalResources = {
+          food: targetState.resources?.food || 0,
+          wood: targetState.resources?.wood || 0,
+          stone: targetState.resources?.stone || 0,
+          metal: targetState.resources?.metal || 0,
+          gold: targetState.resources?.gold || 0
+        };
+
+        // Calculate unprotected resources (subtract vault protection)
+        const unprotectedResources = {
+          food: Math.max(0, totalResources.food - vaultProtection.food),
+          wood: Math.max(0, totalResources.wood - vaultProtection.wood),
+          stone: Math.max(0, totalResources.stone - vaultProtection.stone),
+          metal: Math.max(0, totalResources.metal - vaultProtection.metal),
+          gold: Math.max(0, totalResources.gold - vaultProtection.gold)
+        };
+
+        // Can plunder 10% of unprotected resources
         const defenderResources = {
-          food: Math.floor((targetState.resources?.food || 0) * 0.1), // Can plunder 10% of unprotected resources
-          wood: Math.floor((targetState.resources?.wood || 0) * 0.1),
-          stone: Math.floor((targetState.resources?.stone || 0) * 0.1),
-          metal: Math.floor((targetState.resources?.metal || 0) * 0.1),
-          gold: Math.floor((targetState.resources?.gold || 0) * 0.1)
+          food: Math.floor(unprotectedResources.food * 0.1),
+          wood: Math.floor(unprotectedResources.wood * 0.1),
+          stone: Math.floor(unprotectedResources.stone * 0.1),
+          metal: Math.floor(unprotectedResources.metal * 0.1),
+          gold: Math.floor(unprotectedResources.gold * 0.1)
         };
 
         const victorySeverity = combatResult.defenderSurvivors.reduce((sum, t) => sum + t.quantity, 0) === 0 ? 1.0 : 0.7;
@@ -2311,6 +2335,34 @@ export class PlayerDurableObject {
         data: JSON.stringify(data),
       }));
     }
+  }
+
+  /**
+   * Calculate Storage Vault protection based on building level
+   * Formula: capacity = 5000 * 1.5^(level - 1)
+   * Level 1-10: Protects food, wood, stone, metal
+   * Level 11+: Also protects gold
+   */
+  private calculateVaultProtection(vaultLevel: number): {
+    food: number;
+    wood: number;
+    stone: number;
+    metal: number;
+    gold: number;
+  } {
+    if (vaultLevel === 0) {
+      return { food: 0, wood: 0, stone: 0, metal: 0, gold: 0 };
+    }
+
+    const capacity = Math.floor(5000 * Math.pow(1.5, vaultLevel - 1));
+
+    return {
+      food: capacity,
+      wood: capacity,
+      stone: capacity,
+      metal: capacity,
+      gold: vaultLevel >= 11 ? capacity : 0 // Gold protection starts at level 11
+    };
   }
 
   /**
