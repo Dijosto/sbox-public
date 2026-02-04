@@ -537,6 +537,7 @@ if [ -n "$NPC_X" ]; then
     }")
 
   ATTACK_MARCH_ID=$(echo "$ATTACK_RESPONSE" | jq -r '.marchId')
+  ATTACK_ARRIVAL_TIME=$(echo "$ATTACK_RESPONSE" | jq -r '.arrivalTime')
   if [ "$ATTACK_MARCH_ID" == "null" ]; then
     echo "[ERROR] Failed to send attack march"
     echo "  Response: $ATTACK_RESPONSE"
@@ -544,9 +545,71 @@ if [ -n "$NPC_X" ]; then
   fi
   echo "[OK] Attack march sent: $ATTACK_MARCH_ID (40 conscripts vs $NPC_TYPE Level $NPC_LEVEL)"
 
-  # Wait for battle to complete
-  echo "  Waiting 12 seconds for battle to complete..."
-  sleep 12
+  # Wait for march to arrive and battle to complete
+  CURRENT_TIME=$(date +%s)000
+  WAIT_UNTIL_ARRIVAL=$((ATTACK_ARRIVAL_TIME - CURRENT_TIME))
+  WAIT_SECONDS_ARRIVAL=$(((WAIT_UNTIL_ARRIVAL + 999) / 1000))
+
+  if [ $WAIT_SECONDS_ARRIVAL -lt 0 ]; then
+    WAIT_SECONDS_ARRIVAL=0
+  fi
+
+  echo "  Waiting $WAIT_SECONDS_ARRIVAL seconds for march to arrive and battle..."
+  if [ $WAIT_SECONDS_ARRIVAL -gt 0 ]; then
+    sleep $((WAIT_SECONDS_ARRIVAL + 2))  # Add 2 second buffer
+  fi
+
+  # Poll until returnTime is set (after battle completes)
+  RETURN_TIME=""
+  for i in {1..10}; do
+    STATE=$(curl -s -X GET "$BASE_URL/api/player/state" \
+      -H "Authorization: Bearer $TOKEN")
+
+    ATTACK_MARCH=$(echo "$STATE" | jq -r ".activeMarches[] | select(.marchId == \"$ATTACK_MARCH_ID\") | .marchId")
+
+    if [ -z "$ATTACK_MARCH" ]; then
+      echo "  March completed during wait"
+      break
+    fi
+
+    RETURN_TIME=$(echo "$STATE" | jq -r ".activeMarches[] | select(.marchId == \"$ATTACK_MARCH_ID\") | .returnTime")
+    ATTACK_STATUS=$(echo "$STATE" | jq -r ".activeMarches[] | select(.marchId == \"$ATTACK_MARCH_ID\") | .status")
+
+    if [ -n "$RETURN_TIME" ] && [ "$RETURN_TIME" != "null" ]; then
+      echo "  Battle complete, march status: $ATTACK_STATUS"
+      break
+    fi
+
+    sleep 2
+  done
+
+  # Wait for march to return home
+  if [ -n "$RETURN_TIME" ] && [ "$RETURN_TIME" != "null" ]; then
+    CURRENT_TIME=$(date +%s)000
+    WAIT_UNTIL_RETURN=$((RETURN_TIME - CURRENT_TIME))
+    WAIT_SECONDS_RETURN=$(((WAIT_UNTIL_RETURN + 999) / 1000))
+
+    if [ $WAIT_SECONDS_RETURN -lt 0 ]; then
+      WAIT_SECONDS_RETURN=0
+    fi
+
+    if [ $WAIT_SECONDS_RETURN -gt 0 ]; then
+      echo "  Waiting $WAIT_SECONDS_RETURN seconds for march to return home..."
+      sleep $((WAIT_SECONDS_RETURN + 2))  # Add 2 second buffer
+    fi
+  fi
+
+  # Verify march returned
+  FINAL_STATE=$(curl -s -X GET "$BASE_URL/api/player/state" \
+    -H "Authorization: Bearer $TOKEN")
+  FINAL_MARCH=$(echo "$FINAL_STATE" | jq -r ".activeMarches[] | select(.marchId == \"$ATTACK_MARCH_ID\") | .marchId")
+
+  if [ -z "$FINAL_MARCH" ]; then
+    echo "  Attack march fully completed and returned home"
+  else
+    FINAL_STATUS=$(echo "$FINAL_STATE" | jq -r ".activeMarches[] | select(.marchId == \"$ATTACK_MARCH_ID\") | .status")
+    echo "  Warning: March still active (status: $FINAL_STATUS)"
+  fi
 
   # Check messages for battle report
   MESSAGES=$(curl -s -X GET "$BASE_URL/api/player/messages?limit=10" \

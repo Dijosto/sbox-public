@@ -544,11 +544,60 @@ if ($null -ne $npcX) {
 
         $attackResult = Invoke-RestMethod -Uri "$BaseUrl/api/player/march/send" -Method Post -Body $attackBody -Headers $headers -ContentType "application/json"
         $attackMarchId = $attackResult.marchId
+        $attackArrivalTime = $attackResult.arrivalTime
         Write-Host "[OK] Attack march sent: $attackMarchId (40 conscripts vs $npcType Level $npcLevel)" -ForegroundColor Green
 
-        # Wait for battle to complete
-        Write-Host "  Waiting 12 seconds for battle to complete..." -ForegroundColor Gray
-        Start-Sleep -Seconds 12
+        # Wait for march to arrive and battle to complete
+        $currentTime = [int64](([datetime]::UtcNow - [datetime]'1970-01-01').TotalMilliseconds)
+        $waitUntilArrival = [math]::Max(0, $attackArrivalTime - $currentTime)
+        $waitSecondsArrival = [math]::Ceiling($waitUntilArrival / 1000)
+
+        Write-Host "  Waiting $waitSecondsArrival seconds for march to arrive and battle..." -ForegroundColor Gray
+        if ($waitSecondsArrival -gt 0) {
+            Start-Sleep -Seconds ($waitSecondsArrival + 2)  # Add 2 second buffer
+        }
+
+        # Poll until returnTime is set (after battle completes)
+        $returnTime = $null
+        for ($i = 0; $i -lt 10; $i++) {
+            $state = Invoke-RestMethod -Uri "$BaseUrl/api/player/state" -Method Get -Headers $headers
+            $attackMarch = $state.activeMarches | Where-Object { $_.marchId -eq $attackMarchId }
+
+            if ($null -eq $attackMarch) {
+                Write-Host "  March completed during wait" -ForegroundColor Gray
+                break
+            }
+
+            if ($null -ne $attackMarch.returnTime) {
+                $returnTime = $attackMarch.returnTime
+                Write-Host "  Battle complete, march status: $($attackMarch.status)" -ForegroundColor Gray
+                break
+            }
+
+            Start-Sleep -Seconds 2
+        }
+
+        # Wait for march to return home
+        if ($null -ne $returnTime) {
+            $currentTime = [int64](([datetime]::UtcNow - [datetime]'1970-01-01').TotalMilliseconds)
+            $waitUntilReturn = [math]::Max(0, $returnTime - $currentTime)
+            $waitSecondsReturn = [math]::Ceiling($waitUntilReturn / 1000)
+
+            if ($waitSecondsReturn -gt 0) {
+                Write-Host "  Waiting $waitSecondsReturn seconds for march to return home..." -ForegroundColor Gray
+                Start-Sleep -Seconds ($waitSecondsReturn + 2)  # Add 2 second buffer
+            }
+        }
+
+        # Verify march returned
+        $finalState = Invoke-RestMethod -Uri "$BaseUrl/api/player/state" -Method Get -Headers $headers
+        $finalMarch = $finalState.activeMarches | Where-Object { $_.marchId -eq $attackMarchId }
+
+        if ($null -eq $finalMarch) {
+            Write-Host "  Attack march fully completed and returned home" -ForegroundColor Gray
+        } else {
+            Write-Host "  Warning: March still active (status: $($finalMarch.status))" -ForegroundColor Yellow
+        }
 
         # Check messages for battle report
         $messages = Invoke-RestMethod -Uri "$BaseUrl/api/player/messages?limit=10" -Method Get -Headers $headers
