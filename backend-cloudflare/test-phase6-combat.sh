@@ -615,24 +615,11 @@ if [ -n "$NPC_X" ]; then
   MESSAGES=$(curl -s -X GET "$BASE_URL/api/player/messages?limit=10" \
     -H "Authorization: Bearer $TOKEN")
 
-  BATTLE_REPORT=$(echo "$MESSAGES" | jq -r '.messages[] | select(.message_type == "battle_report") | @json' | head -1)
+  BATTLE_REPORT=$(echo "$MESSAGES" | jq '.messages[] | select(.message_type == "battle_report") | {subject, body, metadata}' | head -1)
 
   if [ -n "$BATTLE_REPORT" ]; then
-    REPORT_WINNER=$(echo "$BATTLE_REPORT" | jq -r '.metadata' | jq -r '.winner')
-    ATTACKER_LOSSES=$(echo "$BATTLE_REPORT" | jq -r '.metadata' | jq -r '.attackerLosses | map(.quantity) | add')
-    DEFENDER_LOSSES=$(echo "$BATTLE_REPORT" | jq -r '.metadata' | jq -r '.defenderLosses | map(.quantity) | add')
     echo "[OK] Battle report received"
-    echo "  Winner: $REPORT_WINNER"
-    echo "  Your losses: $ATTACKER_LOSSES troops"
-    echo "  Enemy losses: $DEFENDER_LOSSES troops"
-
-    LOOT=$(echo "$BATTLE_REPORT" | jq -r '.metadata' | jq -r '.loot')
-    if [ "$LOOT" != "null" ]; then
-      TOTAL_LOOT=$(echo "$LOOT" | jq '[.food, .wood, .stone, .metal, .gold] | map(select(. != null)) | add')
-      if [ "$TOTAL_LOOT" != "0" ] && [ "$TOTAL_LOOT" != "null" ]; then
-        echo "  Loot: $TOTAL_LOOT resources"
-      fi
-    fi
+    echo "$BATTLE_REPORT" | jq '.'
   else
     echo "[WARNING] Battle report not found in messages"
   fi

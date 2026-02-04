@@ -602,30 +602,12 @@ if ($null -ne $npcX) {
         # Check messages for battle report
         $messages = Invoke-RestMethod -Uri "$BaseUrl/api/player/messages?limit=10" -Method Get -Headers $headers
 
-        $battleReportFound = $false
-        foreach ($msg in $messages.messages) {
-            if ($msg.message_type -eq "battle_report") {
-                $battleReportFound = $true
-                $reportData = $msg.metadata | ConvertFrom-Json
-                Write-Host "[OK] Battle report received" -ForegroundColor Green
-                Write-Host "  Winner: $($reportData.winner)" -ForegroundColor Gray
+        $battleReport = $messages.messages | Where-Object { $_.message_type -eq "battle_report" } | Select-Object -First 1
 
-                $attackerLossCount = ($reportData.attackerLosses | Measure-Object -Property quantity -Sum).Sum
-                $defenderLossCount = ($reportData.defenderLosses | Measure-Object -Property quantity -Sum).Sum
-                Write-Host "  Your losses: $attackerLossCount troops" -ForegroundColor Gray
-                Write-Host "  Enemy losses: $defenderLossCount troops" -ForegroundColor Gray
-
-                if ($reportData.loot) {
-                    $totalLoot = ($reportData.loot.PSObject.Properties | Where-Object { $_.Value -gt 0 } | Measure-Object -Property Value -Sum).Sum
-                    if ($totalLoot -gt 0) {
-                        Write-Host "  Loot: $totalLoot resources" -ForegroundColor Gray
-                    }
-                }
-                break
-            }
-        }
-
-        if (-not $battleReportFound) {
+        if ($battleReport) {
+            Write-Host "[OK] Battle report received" -ForegroundColor Green
+            $battleReport | Select-Object subject, body, metadata | ConvertTo-Json
+        } else {
             Write-Host "[WARNING] Battle report not found in messages" -ForegroundColor Yellow
         }
     } catch {
