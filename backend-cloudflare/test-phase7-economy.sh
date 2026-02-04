@@ -132,27 +132,64 @@ sleep $WAIT_SECONDS
 echo ""
 sleep 0.2
 
-echo "[5.5/20] Building Science Center (required for woodcraft research)..."
-SCIENCE_CENTER=$(curl -s -X POST "$BASE_URL/api/player/building/upgrade" \
-  -H "Authorization: Bearer $PLAYER1_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"buildingId":"scienceCenter_1","buildingType":"scienceCenter","zone":"inner"}')
+# Need to upgrade Lumbermill and Science Center to L5 for woodcraft L5
+echo "[5.5/20] Upgrading Lumbermill to L5 (required for woodcraft)..."
+echo "Note: Woodcraft requires Lumbermill of equal level..."
 
-echo "Science Center build started, duration: $(echo "$SCIENCE_CENTER" | jq -r '.duration')s"
+for i in {2..5}; do
+  LUMBERMILL=$(curl -s -X POST "$BASE_URL/api/player/building/upgrade" \
+    -H "Authorization: Bearer $PLAYER1_TOKEN" \
+    -H "Content-Type: application/json" \
+    -d '{"buildingId":"lumbermill_1","buildingType":"lumbermill","zone":"outer"}')
 
-SCIENCE_CENTER_COMPLETION=$(echo "$SCIENCE_CENTER" | jq -r '.completionTime')
-NOW=$(date +%s%3N)
-WAIT_MS=$((SCIENCE_CENTER_COMPLETION - NOW + 2000))
-WAIT_SECONDS=$(( (WAIT_MS + 999) / 1000 ))
-if [ $WAIT_SECONDS -lt 0 ]; then WAIT_SECONDS=0; fi
+  SUCCESS=$(echo "$LUMBERMILL" | jq -r '.success')
+  if [ "$SUCCESS" != "true" ]; then
+    echo "  [WARNING] Lumbermill L$i failed: $(echo "$LUMBERMILL" | jq -r '.error')"
+    break
+  fi
 
-echo "Waiting $WAIT_SECONDS seconds for Science Center construction..."
-sleep $WAIT_SECONDS
-echo "[OK] Science Center Level 1 built"
+  COMPLETION=$(echo "$LUMBERMILL" | jq -r '.completionTime')
+  NOW=$(date +%s%3N)
+  WAIT_MS=$((COMPLETION - NOW + 2000))
+  WAIT_SECONDS=$(( (WAIT_MS + 999) / 1000 ))
+  if [ $WAIT_SECONDS -lt 0 ]; then WAIT_SECONDS=0; fi
+
+  echo "  Lumbermill L$i started, waiting $WAIT_SECONDS seconds..."
+  sleep $WAIT_SECONDS
+done
+echo "[OK] Lumbermill upgraded to L5"
 echo ""
 sleep 0.2
 
-# Research prerequisites for Levitation (needs woodcraft L5, which requires Science Center)
+echo "[5.6/20] Building and upgrading Science Center to L5..."
+echo "Note: Woodcraft requires Science Center of equal level..."
+
+for i in {1..5}; do
+  SCIENCE_CENTER=$(curl -s -X POST "$BASE_URL/api/player/building/upgrade" \
+    -H "Authorization: Bearer $PLAYER1_TOKEN" \
+    -H "Content-Type: application/json" \
+    -d '{"buildingId":"scienceCenter_1","buildingType":"scienceCenter","zone":"inner"}')
+
+  SUCCESS=$(echo "$SCIENCE_CENTER" | jq -r '.success')
+  if [ "$SUCCESS" != "true" ]; then
+    echo "  [WARNING] Science Center L$i failed: $(echo "$SCIENCE_CENTER" | jq -r '.error')"
+    break
+  fi
+
+  COMPLETION=$(echo "$SCIENCE_CENTER" | jq -r '.completionTime')
+  NOW=$(date +%s%3N)
+  WAIT_MS=$((COMPLETION - NOW + 2000))
+  WAIT_SECONDS=$(( (WAIT_MS + 999) / 1000 ))
+  if [ $WAIT_SECONDS -lt 0 ]; then WAIT_SECONDS=0; fi
+
+  echo "  Science Center L$i started, waiting $WAIT_SECONDS seconds..."
+  sleep $WAIT_SECONDS
+done
+echo "[OK] Science Center upgraded to L5"
+echo ""
+sleep 0.2
+
+# Research prerequisites for Levitation (needs woodcraft L5, which requires Lumbermill L5 + Science Center L5)
 echo "[6/20] Researching woodcraft (prerequisite for Levitation)..."
 echo "Note: Researching multiple levels to reach L5..."
 
@@ -198,7 +235,6 @@ if [ "$SUCCESS" == "true" ]; then
   if [ $WAIT_SECONDS -lt 0 ]; then WAIT_SECONDS=0; fi
 
   echo "Waiting $WAIT_SECONDS seconds for research..."
-echo "[OK] Mercantilism research completed"
   sleep $WAIT_SECONDS
   echo "[OK] Levitation research completed"
 else

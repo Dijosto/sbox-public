@@ -134,28 +134,66 @@ Start-Sleep -Seconds $waitSeconds
 Write-Host ""
 Start-Sleep -Milliseconds 200
 
-Write-Host "[5.5/20] Building Science Center (required for woodcraft research)..." -ForegroundColor Yellow
-$scienceCenterBody = @{
-    buildingId = "scienceCenter_1"
-    buildingType = "scienceCenter"
-    zone = "inner"
-} | ConvertTo-Json
+# Need to upgrade Lumbermill and Science Center to L5 for woodcraft L5
+Write-Host "[5.5/20] Upgrading Lumbermill to L5 (required for woodcraft)..." -ForegroundColor Yellow
+Write-Host "Note: Woodcraft requires Lumbermill of equal level..." -ForegroundColor Gray
 
-$scienceCenter = Invoke-RestMethod -Uri "$BaseUrl/api/player/building/upgrade" -Method Post -Body $scienceCenterBody -ContentType "application/json" -Headers $headers1
-Write-Host "Science Center build started, duration: $($scienceCenter.duration)s" -ForegroundColor Green
+for ($i = 2; $i -le 5; $i++) {
+    try {
+        $lumbermillBody = @{
+            buildingId = "lumbermill_1"
+            buildingType = "lumbermill"
+            zone = "outer"
+        } | ConvertTo-Json
 
-$scienceCenterCompletionTime = $scienceCenter.completionTime
-$now = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
-$waitMs = $scienceCenterCompletionTime - $now + 2000
-$waitSeconds = [Math]::Max(0, [Math]::Ceiling($waitMs / 1000))
+        $lumbermill = Invoke-RestMethod -Uri "$BaseUrl/api/player/building/upgrade" -Method Post -Body $lumbermillBody -ContentType "application/json" -Headers $headers1
 
-Write-Host "Waiting $waitSeconds seconds for Science Center construction..." -ForegroundColor Blue
-Start-Sleep -Seconds $waitSeconds
-Write-Host "[OK] Science Center Level 1 built" -ForegroundColor Green
+        $completionTime = $lumbermill.completionTime
+        $now = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+        $waitMs = $completionTime - $now + 2000
+        $waitSeconds = [Math]::Max(0, [Math]::Ceiling($waitMs / 1000))
+
+        Write-Host "  Lumbermill L$i started, waiting $waitSeconds seconds..." -ForegroundColor Gray
+        Start-Sleep -Seconds $waitSeconds
+    } catch {
+        Write-Host "  [WARNING] Lumbermill L$i failed: $($_.Exception.Message)" -ForegroundColor Yellow
+        break
+    }
+}
+Write-Host "[OK] Lumbermill upgraded to L5" -ForegroundColor Green
 Write-Host ""
 Start-Sleep -Milliseconds 200
 
-# Research prerequisites for Levitation (needs woodcraft L5, which requires Science Center)
+Write-Host "[5.6/20] Building and upgrading Science Center to L5..." -ForegroundColor Yellow
+Write-Host "Note: Woodcraft requires Science Center of equal level..." -ForegroundColor Gray
+
+for ($i = 1; $i -le 5; $i++) {
+    try {
+        $scienceCenterBody = @{
+            buildingId = "scienceCenter_1"
+            buildingType = "scienceCenter"
+            zone = "inner"
+        } | ConvertTo-Json
+
+        $scienceCenter = Invoke-RestMethod -Uri "$BaseUrl/api/player/building/upgrade" -Method Post -Body $scienceCenterBody -ContentType "application/json" -Headers $headers1
+
+        $completionTime = $scienceCenter.completionTime
+        $now = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+        $waitMs = $completionTime - $now + 2000
+        $waitSeconds = [Math]::Max(0, [Math]::Ceiling($waitMs / 1000))
+
+        Write-Host "  Science Center L$i started, waiting $waitSeconds seconds..." -ForegroundColor Gray
+        Start-Sleep -Seconds $waitSeconds
+    } catch {
+        Write-Host "  [WARNING] Science Center L$i failed: $($_.Exception.Message)" -ForegroundColor Yellow
+        break
+    }
+}
+Write-Host "[OK] Science Center upgraded to L5" -ForegroundColor Green
+Write-Host ""
+Start-Sleep -Milliseconds 200
+
+# Research prerequisites for Levitation (needs woodcraft L5, which requires Lumbermill L5 + Science Center L5)
 Write-Host "[6/20] Researching woodcraft (prerequisite for Levitation)..." -ForegroundColor Yellow
 Write-Host "Note: Researching multiple levels to reach L5..." -ForegroundColor Gray
 
