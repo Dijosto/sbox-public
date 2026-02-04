@@ -608,7 +608,19 @@ if ($null -ne $npcX) {
                 $battleReportFound = $true
                 $reportData = $msg.metadata | ConvertFrom-Json
                 Write-Host "[OK] Battle report received" -ForegroundColor Green
-                Write-Host "  Outcome: $($reportData.outcome)" -ForegroundColor Gray
+                Write-Host "  Winner: $($reportData.winner)" -ForegroundColor Gray
+
+                $attackerLossCount = ($reportData.attackerLosses | Measure-Object -Property quantity -Sum).Sum
+                $defenderLossCount = ($reportData.defenderLosses | Measure-Object -Property quantity -Sum).Sum
+                Write-Host "  Your losses: $attackerLossCount troops" -ForegroundColor Gray
+                Write-Host "  Enemy losses: $defenderLossCount troops" -ForegroundColor Gray
+
+                if ($reportData.loot) {
+                    $totalLoot = ($reportData.loot.PSObject.Properties | Where-Object { $_.Value -gt 0 } | Measure-Object -Property Value -Sum).Sum
+                    if ($totalLoot -gt 0) {
+                        Write-Host "  Loot: $totalLoot resources" -ForegroundColor Gray
+                    }
+                }
                 break
             }
         }

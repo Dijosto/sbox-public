@@ -1584,7 +1584,14 @@ export class PlayerDurableObject {
         message_type: 'battle_report',
         subject: `Battle Report: ${npcCamp.camp_type} Camp Lv.${npcCamp.level}`,
         body: `Your forces ${combatResult.winner === 'attacker' ? 'defeated' : 'were defeated by'} the ${npcCamp.camp_type} camp.`,
-        metadata: JSON.stringify({ battleId, marchId: march.marchId })
+        metadata: JSON.stringify({
+          battleId,
+          marchId: march.marchId,
+          winner: combatResult.winner,
+          loot: loot || null,
+          attackerLosses: combatResult.attackerLosses,
+          defenderLosses: combatResult.defenderLosses
+        })
       });
 
       march.status = 'returning';
@@ -1753,7 +1760,15 @@ export class PlayerDurableObject {
         message_type: 'battle_report',
         subject: `Battle Report: Attack on ${targetState.playerName}`,
         body: `Your forces ${combatResult.winner === 'attacker' ? 'defeated' : 'were defeated by'} ${targetState.playerName}.`,
-        metadata: JSON.stringify({ battleId, marchId: march.marchId, isAttacker: true })
+        metadata: JSON.stringify({
+          battleId,
+          marchId: march.marchId,
+          winner: combatResult.winner,
+          loot: loot || null,
+          attackerLosses: combatResult.attackerLosses,
+          defenderLosses: combatResult.defenderLosses,
+          isAttacker: true
+        })
       });
 
       // Send battle report to defender
@@ -1764,7 +1779,13 @@ export class PlayerDurableObject {
         message_type: 'battle_report',
         subject: `Battle Report: Defended against ${this.playerState.playerName}`,
         body: `${this.playerState.playerName} attacked your city. ${combatResult.winner === 'defender' ? 'Your defenses held!' : 'Your city was plundered!'}`,
-        metadata: JSON.stringify({ battleId, isAttacker: false })
+        metadata: JSON.stringify({
+          battleId,
+          winner: combatResult.winner,
+          attackerLosses: combatResult.attackerLosses,
+          defenderLosses: combatResult.defenderLosses,
+          isAttacker: false
+        })
       });
 
       march.status = 'returning';
