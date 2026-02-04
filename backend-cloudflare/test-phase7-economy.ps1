@@ -134,7 +134,28 @@ Start-Sleep -Seconds $waitSeconds
 Write-Host ""
 Start-Sleep -Milliseconds 200
 
-# Research prerequisites for Levitation (needs woodcraft L5)
+Write-Host "[5.5/20] Building Science Center (required for woodcraft research)..." -ForegroundColor Yellow
+$scienceCenterBody = @{
+    buildingId = "scienceCenter_1"
+    buildingType = "scienceCenter"
+    zone = "inner"
+} | ConvertTo-Json
+
+$scienceCenter = Invoke-RestMethod -Uri "$BaseUrl/api/player/building/upgrade" -Method Post -Body $scienceCenterBody -ContentType "application/json" -Headers $headers1
+Write-Host "Science Center build started, duration: $($scienceCenter.duration)s" -ForegroundColor Green
+
+$scienceCenterCompletionTime = $scienceCenter.completionTime
+$now = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+$waitMs = $scienceCenterCompletionTime - $now + 2000
+$waitSeconds = [Math]::Max(0, [Math]::Ceiling($waitMs / 1000))
+
+Write-Host "Waiting $waitSeconds seconds for Science Center construction..." -ForegroundColor Blue
+Start-Sleep -Seconds $waitSeconds
+Write-Host "[OK] Science Center Level 1 built" -ForegroundColor Green
+Write-Host ""
+Start-Sleep -Milliseconds 200
+
+# Research prerequisites for Levitation (needs woodcraft L5, which requires Science Center)
 Write-Host "[6/20] Researching woodcraft (prerequisite for Levitation)..." -ForegroundColor Yellow
 Write-Host "Note: Researching multiple levels to reach L5..." -ForegroundColor Gray
 

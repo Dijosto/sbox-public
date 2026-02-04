@@ -132,7 +132,27 @@ sleep $WAIT_SECONDS
 echo ""
 sleep 0.2
 
-# Research prerequisites for Levitation (needs woodcraft L5)
+echo "[5.5/20] Building Science Center (required for woodcraft research)..."
+SCIENCE_CENTER=$(curl -s -X POST "$BASE_URL/api/player/building/upgrade" \
+  -H "Authorization: Bearer $PLAYER1_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"buildingId":"scienceCenter_1","buildingType":"scienceCenter","zone":"inner"}')
+
+echo "Science Center build started, duration: $(echo "$SCIENCE_CENTER" | jq -r '.duration')s"
+
+SCIENCE_CENTER_COMPLETION=$(echo "$SCIENCE_CENTER" | jq -r '.completionTime')
+NOW=$(date +%s%3N)
+WAIT_MS=$((SCIENCE_CENTER_COMPLETION - NOW + 2000))
+WAIT_SECONDS=$(( (WAIT_MS + 999) / 1000 ))
+if [ $WAIT_SECONDS -lt 0 ]; then WAIT_SECONDS=0; fi
+
+echo "Waiting $WAIT_SECONDS seconds for Science Center construction..."
+sleep $WAIT_SECONDS
+echo "[OK] Science Center Level 1 built"
+echo ""
+sleep 0.2
+
+# Research prerequisites for Levitation (needs woodcraft L5, which requires Science Center)
 echo "[6/20] Researching woodcraft (prerequisite for Levitation)..."
 echo "Note: Researching multiple levels to reach L5..."
 
