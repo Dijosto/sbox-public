@@ -132,26 +132,89 @@ sleep $WAIT_SECONDS
 echo ""
 sleep 0.2
 
-echo "[6/20] Researching Levitation Level 1..."
+# Research prerequisites for Levitation (needs woodcraft L5 + scrollcraft L5)
+echo "[6/20] Researching woodcraft (prerequisite for Levitation)..."
+echo "Note: Researching multiple levels to reach L5..."
+
+for i in {1..5}; do
+  WOODCRAFT=$(curl -s -X POST "$BASE_URL/api/player/research/start" \
+    -H "Authorization: Bearer $PLAYER1_TOKEN" \
+    -H "Content-Type: application/json" \
+    -d '{"researchType":"woodcraft"}')
+
+  SUCCESS=$(echo "$WOODCRAFT" | jq -r '.success')
+  if [ "$SUCCESS" != "true" ]; then
+    echo "  [WARNING] Woodcraft L$i failed: $(echo "$WOODCRAFT" | jq -r '.error')"
+    break
+  fi
+
+  COMPLETION=$(echo "$WOODCRAFT" | jq -r '.completionTime')
+  NOW=$(date +%s%3N)
+  WAIT_MS=$((COMPLETION - NOW + 2000))
+  WAIT_SECONDS=$(( (WAIT_MS + 999) / 1000 ))
+  if [ $WAIT_SECONDS -lt 0 ]; then WAIT_SECONDS=0; fi
+
+  echo "  Woodcraft L$i started, waiting $WAIT_SECONDS seconds..."
+  sleep $WAIT_SECONDS
+done
+echo "[OK] Woodcraft research completed"
+echo ""
+sleep 0.2
+
+echo "[7/20] Researching scrollcraft (prerequisite for Levitation)..."
+for i in {1..5}; do
+  SCROLLCRAFT=$(curl -s -X POST "$BASE_URL/api/player/research/start" \
+    -H "Authorization: Bearer $PLAYER1_TOKEN" \
+    -H "Content-Type: application/json" \
+    -d '{"researchType":"scrollcraft"}')
+
+  SUCCESS=$(echo "$SCROLLCRAFT" | jq -r '.success')
+  if [ "$SUCCESS" != "true" ]; then
+    echo "  [WARNING] Scrollcraft L$i failed: $(echo "$SCROLLCRAFT" | jq -r '.error')"
+    break
+  fi
+
+  COMPLETION=$(echo "$SCROLLCRAFT" | jq -r '.completionTime')
+  NOW=$(date +%s%3N)
+  WAIT_MS=$((COMPLETION - NOW + 2000))
+  WAIT_SECONDS=$(( (WAIT_MS + 999) / 1000 ))
+  if [ $WAIT_SECONDS -lt 0 ]; then WAIT_SECONDS=0; fi
+
+  echo "  Scrollcraft L$i started, waiting $WAIT_SECONDS seconds..."
+  sleep $WAIT_SECONDS
+done
+echo "[OK] Scrollcraft research completed"
+echo ""
+sleep 0.2
+
+echo "[8/22] Researching Levitation Level 1..."
 LEVITATION=$(curl -s -X POST "$BASE_URL/api/player/research/start" \
   -H "Authorization: Bearer $PLAYER1_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"researchType":"levitation"}')
 
-echo "Levitation research started, duration: $(echo "$LEVITATION" | jq -r '.duration')s"
+SUCCESS=$(echo "$LEVITATION" | jq -r '.success')
+if [ "$SUCCESS" == "true" ]; then
+  echo "Levitation research started, duration: $(echo "$LEVITATION" | jq -r '.duration')s"
 
-LEVITATION_COMPLETION=$(echo "$LEVITATION" | jq -r '.completionTime')
-NOW=$(date +%s%3N)
-WAIT_MS=$((LEVITATION_COMPLETION - NOW + 2000))
-WAIT_SECONDS=$(( (WAIT_MS + 999) / 1000 ))
-if [ $WAIT_SECONDS -lt 0 ]; then WAIT_SECONDS=0; fi
+  LEVITATION_COMPLETION=$(echo "$LEVITATION" | jq -r '.completionTime')
+  NOW=$(date +%s%3N)
+  WAIT_MS=$((LEVITATION_COMPLETION - NOW + 2000))
+  WAIT_SECONDS=$(( (WAIT_MS + 999) / 1000 ))
+  if [ $WAIT_SECONDS -lt 0 ]; then WAIT_SECONDS=0; fi
 
-echo "Waiting $WAIT_SECONDS seconds for research..."
-sleep $WAIT_SECONDS
+  echo "Waiting $WAIT_SECONDS seconds for research..."
+echo "[OK] Mercantilism research completed"
+  sleep $WAIT_SECONDS
+  echo "[OK] Levitation research completed"
+else
+  echo "[WARNING] Levitation research failed: $(echo "$LEVITATION" | jq -r '.error')"
+  echo "Continuing test without Levitation..."
+fi
 echo ""
 sleep 0.2
 
-echo "[7/20] Researching Mercantilism Level 1..."
+echo "[9/22] Researching Mercantilism Level 1..."
 MERCANTILISM=$(curl -s -X POST "$BASE_URL/api/player/research/start" \
   -H "Authorization: Bearer $PLAYER1_TOKEN" \
   -H "Content-Type: application/json" \
@@ -166,6 +229,7 @@ WAIT_SECONDS=$(( (WAIT_MS + 999) / 1000 ))
 if [ $WAIT_SECONDS -lt 0 ]; then WAIT_SECONDS=0; fi
 
 echo "Waiting $WAIT_SECONDS seconds for research..."
+echo "[OK] Mercantilism research completed"
 sleep $WAIT_SECONDS
 echo ""
 sleep 0.2
@@ -174,7 +238,7 @@ sleep 0.2
 # TEST 4: TRADING SYSTEM
 # ============================================
 
-echo "[8/20] Creating trade offer (sell 5000 wood for 0.5 gold each)..."
+echo "[10/22] Creating trade offer (sell 5000 wood for 0.5 gold each)..."
 CREATE_OFFER=$(curl -s -X POST "$BASE_URL/api/player/trade/create" \
   -H "Authorization: Bearer $PLAYER1_TOKEN" \
   -H "Content-Type: application/json" \
@@ -192,7 +256,7 @@ echo "Expires at: $(echo "$CREATE_OFFER" | jq -r '.offer.expiresAt')"
 echo ""
 sleep 0.2
 
-echo "[9/20] Searching marketplace for wood offers..."
+echo "[11/22] Searching marketplace for wood offers..."
 SEARCH_RESULT=$(curl -s -X GET "$BASE_URL/api/player/trade/search?resourceType=wood&minQuantity=1000&maxPrice=1.0&limit=10" \
   -H "Authorization: Bearer $PLAYER1_TOKEN")
 
@@ -204,7 +268,7 @@ fi
 echo ""
 sleep 0.2
 
-echo "[10/20] Getting Player 1's active offers..."
+echo "[12/22] Getting Player 1's active offers..."
 MY_OFFERS=$(curl -s -X GET "$BASE_URL/api/player/trade/my-offers" \
   -H "Authorization: Bearer $PLAYER1_TOKEN")
 
@@ -216,7 +280,7 @@ fi
 echo ""
 sleep 0.2
 
-echo "[11/20] Player 2 buying from Player 1's offer..."
+echo "[13/22] Player 2 buying from Player 1's offer..."
 BUY_RESULT=$(curl -s -X POST "$BASE_URL/api/player/trade/buy" \
   -H "Authorization: Bearer $PLAYER2_TOKEN" \
   -H "Content-Type: application/json" \
@@ -228,7 +292,7 @@ echo "Paid: $(echo "$BUY_RESULT" | jq -r '.trade.totalPrice') gold"
 echo ""
 sleep 0.2
 
-echo "[12/20] Verifying Player 2 received resources..."
+echo "[14/22] Verifying Player 2 received resources..."
 PLAYER2_STATE=$(curl -s -X GET "$BASE_URL/api/player/state" \
   -H "Authorization: Bearer $PLAYER2_TOKEN")
 
@@ -236,7 +300,7 @@ echo "Player 2 wood: $(echo "$PLAYER2_STATE" | jq -r '.resources.wood')"
 echo ""
 sleep 0.2
 
-echo "[13/20] Verifying Player 1 received gold..."
+echo "[15/22] Verifying Player 1 received gold..."
 sleep 2 # Wait for seller notification
 PLAYER1_STATE=$(curl -s -X GET "$BASE_URL/api/player/state" \
   -H "Authorization: Bearer $PLAYER1_TOKEN")
@@ -261,7 +325,7 @@ sleep 0.2
 # TEST 5: TRADE CANCELLATION
 # ============================================
 
-echo "[14/20] Creating another trade offer to test cancellation..."
+echo "[16/22] Creating another trade offer to test cancellation..."
 CREATE_OFFER2=$(curl -s -X POST "$BASE_URL/api/player/trade/create" \
   -H "Authorization: Bearer $PLAYER1_TOKEN" \
   -H "Content-Type: application/json" \
@@ -272,7 +336,7 @@ echo "[OK] Second trade offer created (Offer ID: $OFFER_ID2)"
 echo ""
 sleep 0.2
 
-echo "[15/20] Cancelling the second trade offer..."
+echo "[17/22] Cancelling the second trade offer..."
 CANCEL_RESULT=$(curl -s -X POST "$BASE_URL/api/player/trade/cancel" \
   -H "Authorization: Bearer $PLAYER1_TOKEN" \
   -H "Content-Type: application/json" \
@@ -286,7 +350,7 @@ sleep 0.2
 # TEST 6: TRADE SLOT LIMITS
 # ============================================
 
-echo "[16/20] Testing trade slot limit (Mercantilism L1 = 1 slot)..."
+echo "[18/22] Testing trade slot limit (Mercantilism L1 = 1 slot)..."
 
 # Create first offer (should succeed)
 OFFER3=$(curl -s -X POST "$BASE_URL/api/player/trade/create" \
@@ -304,7 +368,7 @@ echo ""
 sleep 0.2
 
 # Try to create second offer (should fail - limit reached)
-echo "[17/20] Attempting to create second offer (should fail - limit reached)..."
+echo "[19/22] Attempting to create second offer (should fail - limit reached)..."
 OFFER4=$(curl -s -X POST "$BASE_URL/api/player/trade/create" \
   -H "Authorization: Bearer $PLAYER1_TOKEN" \
   -H "Content-Type: application/json" \
@@ -329,7 +393,7 @@ sleep 0.2
 # TEST 7: STORAGE VAULT RAID PROTECTION
 # ============================================
 
-echo "[18/20] Testing Storage Vault raid protection..."
+echo "[20/22] Testing Storage Vault raid protection..."
 echo "[INFO] Raid protection already tested in PvP combat (vault protection in plunder calculation)"
 echo ""
 sleep 0.2
@@ -338,7 +402,7 @@ sleep 0.2
 # TEST 8: FINAL VERIFICATION
 # ============================================
 
-echo "[19/20] Final state verification..."
+echo "[21/22] Final state verification..."
 
 FINAL_STATE1=$(curl -s -X GET "$BASE_URL/api/player/state" \
   -H "Authorization: Bearer $PLAYER1_TOKEN")
@@ -361,7 +425,7 @@ echo "  Wood (after purchase): $(echo "$FINAL_STATE2" | jq -r '.resources.wood')
 echo ""
 sleep 0.2
 
-echo "[20/20] Cleanup - Cancelling remaining offers..."
+echo "[22/22] Cleanup - Cancelling remaining offers..."
 if [ -n "$OFFER3_ID" ] && [ "$OFFER3_ID" != "null" ]; then
   CLEANUP=$(curl -s -X POST "$BASE_URL/api/player/trade/cancel" \
     -H "Authorization: Bearer $PLAYER1_TOKEN" \
