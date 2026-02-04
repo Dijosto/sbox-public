@@ -134,7 +134,7 @@ Start-Sleep -Seconds $waitSeconds
 Write-Host ""
 Start-Sleep -Milliseconds 200
 
-# Research prerequisites for Levitation (needs woodcraft L5 + scrollcraft L5)
+# Research prerequisites for Levitation (needs woodcraft L5)
 Write-Host "[6/20] Researching woodcraft (prerequisite for Levitation)..." -ForegroundColor Yellow
 Write-Host "Note: Researching multiple levels to reach L5..." -ForegroundColor Gray
 
@@ -159,29 +159,7 @@ Write-Host "[OK] Woodcraft research completed" -ForegroundColor Green
 Write-Host ""
 Start-Sleep -Milliseconds 200
 
-Write-Host "[7/20] Researching scrollcraft (prerequisite for Levitation)..." -ForegroundColor Yellow
-for ($i = 1; $i -le 5; $i++) {
-    try {
-        $scrollcraftBody = @{ researchType = "scrollcraft" } | ConvertTo-Json
-        $scrollcraft = Invoke-RestMethod -Uri "$BaseUrl/api/player/research/start" -Method Post -Body $scrollcraftBody -ContentType "application/json" -Headers $headers1
-
-        $completionTime = $scrollcraft.completionTime
-        $now = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
-        $waitMs = $completionTime - $now + 2000
-        $waitSeconds = [Math]::Max(0, [Math]::Ceiling($waitMs / 1000))
-
-        Write-Host "  Scrollcraft L$i started, waiting $waitSeconds seconds..." -ForegroundColor Gray
-        Start-Sleep -Seconds $waitSeconds
-    } catch {
-        Write-Host "  [WARNING] Scrollcraft L$i failed: $($_.Exception.Message)" -ForegroundColor Yellow
-        break
-    }
-}
-Write-Host "[OK] Scrollcraft research completed" -ForegroundColor Green
-Write-Host ""
-Start-Sleep -Milliseconds 200
-
-Write-Host "[8/20] Researching Levitation Level 1..." -ForegroundColor Yellow
+Write-Host "[7/20] Researching Levitation Level 1..." -ForegroundColor Yellow
 try {
     $levitationBody = @{ researchType = "levitation" } | ConvertTo-Json
     $levitation = Invoke-RestMethod -Uri "$BaseUrl/api/player/research/start" -Method Post -Body $levitationBody -ContentType "application/json" -Headers $headers1
@@ -202,7 +180,7 @@ try {
 Write-Host ""
 Start-Sleep -Milliseconds 200
 
-Write-Host "[9/20] Researching Mercantilism Level 1..." -ForegroundColor Yellow
+Write-Host "[8/20] Researching Mercantilism Level 1..." -ForegroundColor Yellow
 $mercantilismBody = @{ researchType = "mercantilism" } | ConvertTo-Json
 $mercantilism = Invoke-RestMethod -Uri "$BaseUrl/api/player/research/start" -Method Post -Body $mercantilismBody -ContentType "application/json" -Headers $headers1
 Write-Host "Mercantilism research started, duration: $($mercantilism.duration)s" -ForegroundColor Green
@@ -242,7 +220,7 @@ Write-Host "Expires at: $($createOffer.offer.expiresAt)" -ForegroundColor Cyan
 Write-Host ""
 Start-Sleep -Milliseconds 200
 
-Write-Host "[11/22] Searching marketplace for wood offers..." -ForegroundColor Yellow
+Write-Host "[10/20] Searching marketplace for wood offers..." -ForegroundColor Yellow
 $searchResult = Invoke-RestMethod -Uri "$BaseUrl/api/player/trade/search?resourceType=wood&minQuantity=1000&maxPrice=1.0&limit=10" -Method Get -Headers $headers1
 
 Write-Host "[OK] Found $($searchResult.offers.Count) wood offer(s)" -ForegroundColor Green
@@ -252,7 +230,7 @@ if ($searchResult.offers.Count -gt 0) {
 Write-Host ""
 Start-Sleep -Milliseconds 200
 
-Write-Host "[12/22] Getting Player 1's active offers..." -ForegroundColor Yellow
+Write-Host "[11/20] Getting Player 1's active offers..." -ForegroundColor Yellow
 $myOffers = Invoke-RestMethod -Uri "$BaseUrl/api/player/trade/my-offers" -Method Get -Headers $headers1
 
 Write-Host "[OK] Player 1 has $($myOffers.offers.Count) active offer(s)" -ForegroundColor Green
@@ -262,7 +240,7 @@ if ($myOffers.offers.Count -gt 0) {
 Write-Host ""
 Start-Sleep -Milliseconds 200
 
-Write-Host "[13/22] Player 2 buying from Player 1's offer..." -ForegroundColor Yellow
+Write-Host "[12/20] Player 2 buying from Player 1's offer..." -ForegroundColor Yellow
 $buyBody = @{ offerId = $offerId } | ConvertTo-Json
 
 $buyResult = Invoke-RestMethod -Uri "$BaseUrl/api/player/trade/buy" -Method Post -Body $buyBody -ContentType "application/json" -Headers $headers2
@@ -273,14 +251,14 @@ Write-Host "Paid: $($buyResult.trade.totalPrice) gold" -ForegroundColor Cyan
 Write-Host ""
 Start-Sleep -Milliseconds 200
 
-Write-Host "[14/22] Verifying Player 2 received resources..." -ForegroundColor Yellow
+Write-Host "[13/20] Verifying Player 2 received resources..." -ForegroundColor Yellow
 $player2State = Invoke-RestMethod -Uri "$BaseUrl/api/player/state" -Method Get -Headers $headers2
 
 Write-Host "Player 2 wood: $($player2State.resources.wood)" -ForegroundColor Cyan
 Write-Host ""
 Start-Sleep -Milliseconds 200
 
-Write-Host "[15/22] Verifying Player 1 received gold..." -ForegroundColor Yellow
+Write-Host "[14/20] Verifying Player 1 received gold..." -ForegroundColor Yellow
 Start-Sleep -Seconds 2 # Wait for seller notification
 $player1State = Invoke-RestMethod -Uri "$BaseUrl/api/player/state" -Method Get -Headers $headers1
 
@@ -303,7 +281,7 @@ Start-Sleep -Milliseconds 200
 # TEST 5: TRADE CANCELLATION
 # ============================================
 
-Write-Host "[16/22] Creating another trade offer to test cancellation..." -ForegroundColor Yellow
+Write-Host "[15/20] Creating another trade offer to test cancellation..." -ForegroundColor Yellow
 $createOffer2Body = @{
     resourceType = "stone"
     quantity = 3000
@@ -317,7 +295,7 @@ Write-Host "[OK] Second trade offer created (Offer ID: $offerId2)" -ForegroundCo
 Write-Host ""
 Start-Sleep -Milliseconds 200
 
-Write-Host "[17/22] Cancelling the second trade offer..." -ForegroundColor Yellow
+Write-Host "[16/20] Cancelling the second trade offer..." -ForegroundColor Yellow
 $cancelBody = @{ offerId = $offerId2 } | ConvertTo-Json
 
 $cancelResult = Invoke-RestMethod -Uri "$BaseUrl/api/player/trade/cancel" -Method Post -Body $cancelBody -ContentType "application/json" -Headers $headers1
@@ -330,7 +308,7 @@ Start-Sleep -Milliseconds 200
 # TEST 6: TRADE SLOT LIMITS
 # ============================================
 
-Write-Host "[18/22] Testing trade slot limit (Mercantilism L1 = 1 slot)..." -ForegroundColor Yellow
+Write-Host "[17/20] Testing trade slot limit (Mercantilism L1 = 1 slot)..." -ForegroundColor Yellow
 
 # Create first offer (should succeed)
 $offer3Body = @{
@@ -350,7 +328,7 @@ Write-Host ""
 Start-Sleep -Milliseconds 200
 
 # Try to create second offer (should fail - limit reached)
-Write-Host "[19/22] Attempting to create second offer (should fail - limit reached)..." -ForegroundColor Yellow
+Write-Host "[18/20] Attempting to create second offer (should fail - limit reached)..." -ForegroundColor Yellow
 $offer4Body = @{
     resourceType = "metal"
     quantity = 500
@@ -376,7 +354,7 @@ Start-Sleep -Milliseconds 200
 # TEST 7: STORAGE VAULT RAID PROTECTION
 # ============================================
 
-Write-Host "[20/22] Testing Storage Vault raid protection..." -ForegroundColor Yellow
+Write-Host "[19/20] Testing Storage Vault raid protection..." -ForegroundColor Yellow
 
 # Give Player 2 lots of resources
 Write-Host "Setting up Player 2 with large resource stockpile..." -ForegroundColor Blue
@@ -389,7 +367,7 @@ Start-Sleep -Milliseconds 200
 # TEST 8: FINAL VERIFICATION
 # ============================================
 
-Write-Host "[21/22] Final state verification..." -ForegroundColor Yellow
+Write-Host "[20/20] Final state verification..." -ForegroundColor Yellow
 
 $finalState1 = Invoke-RestMethod -Uri "$BaseUrl/api/player/state" -Method Get -Headers $headers1
 Write-Host "Player 1 ($($finalState1.playerName)):" -ForegroundColor Cyan
@@ -408,7 +386,7 @@ Write-Host "  Wood (after purchase): $($finalState2.resources.wood)" -Foreground
 Write-Host ""
 Start-Sleep -Milliseconds 200
 
-Write-Host "[22/22] Cleanup - Cancelling remaining offers..." -ForegroundColor Yellow
+Write-Host "Cleanup - Cancelling remaining offers..." -ForegroundColor Yellow
 if ($offer3Id) {
     try {
         $cleanup = Invoke-RestMethod -Uri "$BaseUrl/api/player/trade/cancel" -Method Post -Body (@{ offerId = $offer3Id } | ConvertTo-Json) -ContentType "application/json" -Headers $headers1

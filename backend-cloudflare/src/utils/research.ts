@@ -373,8 +373,7 @@ function generateLevitationLevels(): ResearchLevel[] {
       },
       researchTime: calculateResearchTime(level),
       prerequisites: level === 1 ? [
-        { type: 'research', id: 'woodcraft', level: 5 },
-        { type: 'research', id: 'scrollcraft', level: 5 }
+        { type: 'research', id: 'woodcraft', level: 5 }
       ] : [
         { type: 'research', id: 'levitation', level: level - 1 }
       ],
