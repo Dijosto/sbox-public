@@ -174,6 +174,15 @@ function generateProductionResearch(
 ): ResearchLevel[] {
   const levels: ResearchLevel[] = [];
 
+  // Map research to production building
+  const buildingMap: Record<string, string> = {
+    'woodcraft': 'lumbermill',
+    'agriculture': 'farm',
+    'masonry': 'quarry',
+    'alloys': 'mine'
+  };
+  const productionBuilding = buildingMap[id] || 'farm';
+
   for (let level = 1; level <= 20; level++) {
     const bonus = level <= 10 ? bonusL1_10 : bonusL11Plus;
 
@@ -187,9 +196,12 @@ function generateProductionResearch(
       },
       researchTime: calculateResearchTime(level),
       prerequisites: level === 1 ? [
-        { type: 'building', id: 'scienceCenter', level: 1 }
+        { type: 'building', id: 'scienceCenter', level: 1 },
+        { type: 'building', id: productionBuilding, level: 1 }
       ] : [
-        { type: 'research', id, level: level - 1 }
+        { type: 'research', id, level: level - 1 },
+        { type: 'building', id: productionBuilding, level },
+        { type: 'building', id: 'scienceCenter', level }
       ],
       bonus: `+${bonus}% ${resource} production`,
       effect: {
