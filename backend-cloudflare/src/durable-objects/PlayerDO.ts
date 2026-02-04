@@ -38,6 +38,7 @@ interface PlayerState {
   troops: TroopStack[];
   dragons: DragonInstance[]; // Player's dragons
   activeMarches: March[];
+  activeTradeOffers: TradeOffer[]; // Active sell offers on marketplace
   taxRate: number;
   wilderness: Record<string, number>; // Conquered wilderness by type
   lastUpdateTimestamp: number;
@@ -112,6 +113,17 @@ interface March {
   status: 'outbound' | 'at_target' | 'returning' | 'completed';
   targetType: 'player' | 'npc' | 'wilderness';
   targetId?: string;
+}
+
+interface TradeOffer {
+  offerId: string;
+  resourceType: 'food' | 'wood' | 'stone' | 'metal' | 'gold';
+  quantity: number;
+  pricePerUnit: number; // gold per resource unit
+  totalPrice: number; // quantity * pricePerUnit
+  sellerFee: number; // gold fee (equal to quantity)
+  createdAt: number;
+  expiresAt: number;
 }
 
 export class PlayerDurableObject {
@@ -190,12 +202,31 @@ export class PlayerDurableObject {
       case '/api/player/messages/read':
         return this.handleMarkMessageRead(request);
 
+      // Trade endpoints
+      case '/api/player/trade/create':
+        return this.handleCreateTradeOffer(request);
+
+      case '/api/player/trade/cancel':
+        return this.handleCancelTradeOffer(request);
+
+      case '/api/player/trade/buy':
+        return this.handleBuyFromOffer(request);
+
+      case '/api/player/trade/search':
+        return this.handleSearchOffers(request);
+
+      case '/api/player/trade/my-offers':
+        return this.handleGetMyOffers(request);
+
       // Internal completion handlers (called by alarms)
       case '/internal/complete':
         return this.handleCompletions(request);
 
       case '/internal/plunder':
         return this.handlePlunder(request);
+
+      case '/internal/trade-sold':
+        return this.handleTradeSold(request);
 
       default:
         return new Response('Not Found', { status: 404 });
@@ -268,6 +299,16 @@ export class PlayerDurableObject {
 
     for (const march of returningMarches) {
       await this.processMarchReturn(march);
+      hasCompletions = true;
+    }
+
+    // Process expired trade offers
+    const expiredOffers = this.playerState.activeTradeOffers.filter(
+      offer => offer.expiresAt <= now
+    );
+
+    for (const offer of expiredOffers) {
+      await this.expireTradeOffer(offer);
       hasCompletions = true;
     }
 
@@ -413,6 +454,7 @@ export class PlayerDurableObject {
         }
       ],
       activeMarches: [],
+      activeTradeOffers: [],
       taxRate: 25, // Default 25% tax
       wilderness: {},
       lastUpdateTimestamp: Date.now(),
@@ -736,6 +778,15 @@ export class PlayerDurableObject {
       if (march.status === 'returning' && march.returnTime && march.returnTime > now) {
         if (!nextCompletion || march.returnTime < nextCompletion) {
           nextCompletion = march.returnTime;
+        }
+      }
+    }
+
+    // Check trade offer expirations
+    for (const offer of this.playerState.activeTradeOffers) {
+      if (offer.expiresAt > now) {
+        if (!nextCompletion || offer.expiresAt < nextCompletion) {
+          nextCompletion = offer.expiresAt;
         }
       }
     }
@@ -2294,6 +2345,399 @@ export class PlayerDurableObject {
     return new Response(JSON.stringify({ success: true }), {
       headers: { 'Content-Type': 'application/json' }
     });
+  }
+
+  /**
+   * Create a trade offer (sell on marketplace)
+   */
+  private async handleCreateTradeOffer(request: Request): Promise<Response> {
+    if (!this.playerState) {
+      return this.errorResponse('State not loaded', 500);
+    }
+
+    const body = await request.json() as {
+      resourceType: 'food' | 'wood' | 'stone' | 'metal' | 'gold';
+      quantity: number;
+      pricePerUnit: number;
+    };
+
+    // Validate requirements: Factory L1, Levitation L1, Mercantilism L1
+    const factoryLevel = this.playerState.city.innerCity.factory_1?.level || 0;
+    const levitationLevel = this.playerState.research['levitation'] || 0;
+    const mercantilismLevel = this.playerState.research['mercantilism'] || 0;
+
+    if (factoryLevel < 1) {
+      return this.errorResponse('Trading requires Factory Level 1');
+    }
+    if (levitationLevel < 1) {
+      return this.errorResponse('Trading requires Levitation Level 1 research');
+    }
+    if (mercantilismLevel < 1) {
+      return this.errorResponse('Trading requires Mercantilism Level 1 research');
+    }
+
+    // Check trade slot limit (Mercantilism level = max concurrent trades)
+    if (this.playerState.activeTradeOffers.length >= mercantilismLevel) {
+      return this.errorResponse(`Trade limit reached (${this.playerState.activeTradeOffers.length}/${mercantilismLevel}). Research Mercantilism to unlock more slots.`);
+    }
+
+    // Validate inputs
+    if (!['food', 'wood', 'stone', 'metal', 'gold'].includes(body.resourceType)) {
+      return this.errorResponse('Invalid resource type');
+    }
+    if (body.quantity <= 0 || body.pricePerUnit <= 0) {
+      return this.errorResponse('Quantity and price must be positive');
+    }
+
+    // Calculate costs
+    const totalPrice = Math.floor(body.quantity * body.pricePerUnit);
+    const sellerFee = body.quantity; // Fee in gold equals quantity
+
+    // Check if player has enough resources
+    const currentResource = this.playerState.resources[body.resourceType] || 0;
+    const currentGold = this.playerState.resources.gold || 0;
+
+    if (currentResource < body.quantity) {
+      return this.errorResponse(`Insufficient ${body.resourceType}. Have: ${currentResource}, Need: ${body.quantity}`);
+    }
+    if (currentGold < sellerFee) {
+      return this.errorResponse(`Insufficient gold for seller fee. Have: ${currentGold}, Need: ${sellerFee}`);
+    }
+
+    // Deduct resources and fee
+    this.playerState.resources[body.resourceType] -= body.quantity;
+    this.playerState.resources.gold -= sellerFee;
+
+    // Create trade offer
+    const offerId = crypto.randomUUID();
+    const createdAt = Date.now();
+    const tradeDuration = 30 * 60; // 30 minutes
+    const expiresAt = createdAt + (applySpeedMultiplier(tradeDuration, this.env) * 1000);
+
+    const offer: TradeOffer = {
+      offerId,
+      resourceType: body.resourceType,
+      quantity: body.quantity,
+      pricePerUnit: body.pricePerUnit,
+      totalPrice,
+      sellerFee,
+      createdAt,
+      expiresAt
+    };
+
+    // Add to player state
+    this.playerState.activeTradeOffers.push(offer);
+
+    // Save to database
+    await this.env.DB.prepare(`
+      INSERT INTO trade_offers (offer_id, seller_id, resource_type, quantity, price_per_unit, total_price, seller_fee, created_at, expires_at, status)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'active')
+    `).bind(
+      offerId,
+      this.playerState.playerId,
+      body.resourceType,
+      body.quantity,
+      body.pricePerUnit,
+      totalPrice,
+      sellerFee,
+      createdAt,
+      expiresAt
+    ).run();
+
+    await this.saveState();
+
+    // Set alarm for expiry
+    const nextAlarm = await this.state.storage.getAlarm();
+    if (!nextAlarm || expiresAt < nextAlarm) {
+      await this.state.storage.setAlarm(expiresAt);
+    }
+
+    return new Response(JSON.stringify({
+      success: true,
+      offer: {
+        offerId,
+        resourceType: body.resourceType,
+        quantity: body.quantity,
+        pricePerUnit: body.pricePerUnit,
+        totalPrice,
+        expiresAt
+      }
+    }), {
+      headers: { 'Content-Type': 'application/json' }
+    });
+  }
+
+  /**
+   * Cancel a trade offer
+   */
+  private async handleCancelTradeOffer(request: Request): Promise<Response> {
+    if (!this.playerState) {
+      return this.errorResponse('State not loaded', 500);
+    }
+
+    const body = await request.json() as { offerId: string };
+
+    // Find offer in player state
+    const offerIndex = this.playerState.activeTradeOffers.findIndex(o => o.offerId === body.offerId);
+    if (offerIndex === -1) {
+      return this.errorResponse('Trade offer not found');
+    }
+
+    const offer = this.playerState.activeTradeOffers[offerIndex];
+
+    // Return resources to player (seller fee is not refunded)
+    this.playerState.resources[offer.resourceType] += offer.quantity;
+
+    // Remove from player state
+    this.playerState.activeTradeOffers.splice(offerIndex, 1);
+
+    // Update database
+    await this.env.DB.prepare(`
+      UPDATE trade_offers SET status = 'cancelled' WHERE offer_id = ?
+    `).bind(body.offerId).run();
+
+    await this.saveState();
+
+    return new Response(JSON.stringify({
+      success: true,
+      message: `Trade cancelled. ${offer.quantity} ${offer.resourceType} returned.`
+    }), {
+      headers: { 'Content-Type': 'application/json' }
+    });
+  }
+
+  /**
+   * Buy from a trade offer
+   */
+  private async handleBuyFromOffer(request: Request): Promise<Response> {
+    if (!this.playerState) {
+      return this.errorResponse('State not loaded', 500);
+    }
+
+    const body = await request.json() as { offerId: string };
+
+    // Get offer from database
+    const offerResult = await this.env.DB.prepare(`
+      SELECT * FROM trade_offers WHERE offer_id = ? AND status = 'active'
+    `).bind(body.offerId).first();
+
+    if (!offerResult) {
+      return this.errorResponse('Trade offer not found or expired');
+    }
+
+    const offer = offerResult as any;
+
+    // Cannot buy own offer
+    if (offer.seller_id === this.playerState.playerId) {
+      return this.errorResponse('Cannot buy your own trade offer');
+    }
+
+    // Check if buyer has enough gold
+    if (this.playerState.resources.gold < offer.total_price) {
+      return this.errorResponse(`Insufficient gold. Have: ${this.playerState.resources.gold}, Need: ${offer.total_price}`);
+    }
+
+    // Deduct gold from buyer
+    this.playerState.resources.gold -= offer.total_price;
+
+    // Add resources to buyer
+    this.playerState.resources[offer.resource_type as keyof Resources] += offer.quantity;
+
+    // Update database - mark as sold
+    await this.env.DB.prepare(`
+      UPDATE trade_offers SET status = 'sold', buyer_id = ?, completed_at = ? WHERE offer_id = ?
+    `).bind(this.playerState.playerId, Date.now(), body.offerId).run();
+
+    await this.saveState();
+
+    // Notify seller via their DO
+    const sellerDO = this.env.PLAYER_DO.get(this.env.PLAYER_DO.idFromName(offer.seller_id));
+    await sellerDO.fetch(new Request('https://fake/internal/trade-sold', {
+      method: 'POST',
+      body: JSON.stringify({
+        offerId: body.offerId,
+        buyerId: this.playerState.playerId,
+        buyerName: this.playerState.playerName,
+        resourceType: offer.resource_type,
+        quantity: offer.quantity,
+        totalPrice: offer.total_price
+      })
+    }));
+
+    return new Response(JSON.stringify({
+      success: true,
+      message: `Purchased ${offer.quantity} ${offer.resource_type} for ${offer.total_price} gold`,
+      trade: {
+        resourceType: offer.resource_type,
+        quantity: offer.quantity,
+        totalPrice: offer.total_price
+      }
+    }), {
+      headers: { 'Content-Type': 'application/json' }
+    });
+  }
+
+  /**
+   * Search marketplace offers
+   */
+  private async handleSearchOffers(request: Request): Promise<Response> {
+    const url = new URL(request.url);
+    const resourceType = url.searchParams.get('resourceType');
+    const minQuantity = parseInt(url.searchParams.get('minQuantity') || '0');
+    const maxPricePerUnit = parseFloat(url.searchParams.get('maxPrice') || '999999');
+    const limit = parseInt(url.searchParams.get('limit') || '50');
+
+    let query = `
+      SELECT offer_id, seller_id, resource_type, quantity, price_per_unit, total_price, created_at, expires_at
+      FROM trade_offers
+      WHERE status = 'active' AND expires_at > ?
+    `;
+    const params: any[] = [Date.now()];
+
+    if (resourceType) {
+      query += ` AND resource_type = ?`;
+      params.push(resourceType);
+    }
+
+    if (minQuantity > 0) {
+      query += ` AND quantity >= ?`;
+      params.push(minQuantity);
+    }
+
+    if (maxPricePerUnit < 999999) {
+      query += ` AND price_per_unit <= ?`;
+      params.push(maxPricePerUnit);
+    }
+
+    query += ` ORDER BY price_per_unit ASC LIMIT ?`;
+    params.push(limit);
+
+    const result = await this.env.DB.prepare(query).bind(...params).all();
+
+    return new Response(JSON.stringify({
+      success: true,
+      offers: result.results || []
+    }), {
+      headers: { 'Content-Type': 'application/json' }
+    });
+  }
+
+  /**
+   * Get player's active trade offers
+   */
+  private async handleGetMyOffers(request: Request): Promise<Response> {
+    if (!this.playerState) {
+      return this.errorResponse('State not loaded', 500);
+    }
+
+    return new Response(JSON.stringify({
+      success: true,
+      offers: this.playerState.activeTradeOffers
+    }), {
+      headers: { 'Content-Type': 'application/json' }
+    });
+  }
+
+  /**
+   * Handle trade sold notification (called by buyer's DO)
+   */
+  private async handleTradeSold(request: Request): Promise<Response> {
+    if (!this.playerState) {
+      return this.errorResponse('State not loaded', 500);
+    }
+
+    const body = await request.json() as {
+      offerId: string;
+      buyerId: string;
+      buyerName: string;
+      resourceType: string;
+      quantity: number;
+      totalPrice: number;
+    };
+
+    // Remove from activeTradeOffers
+    this.playerState.activeTradeOffers = this.playerState.activeTradeOffers.filter(
+      o => o.offerId !== body.offerId
+    );
+
+    // Add gold to seller
+    this.playerState.resources.gold += body.totalPrice;
+
+    await this.saveState();
+
+    // Send message to seller
+    await this.sendMessage({
+      recipient_id: this.playerState.playerId,
+      sender_id: null,
+      sender_name: 'Trade System',
+      message_type: 'trade',
+      subject: `Trade Completed: ${body.quantity} ${body.resourceType}`,
+      body: `${body.buyerName} purchased your ${body.quantity} ${body.resourceType} for ${body.totalPrice} gold.`,
+      metadata: JSON.stringify({
+        offerId: body.offerId,
+        buyerId: body.buyerId,
+        resourceType: body.resourceType,
+        quantity: body.quantity,
+        totalPrice: body.totalPrice
+      })
+    });
+
+    // Notify via WebSocket
+    this.pushEvent('trade_sold', {
+      offerId: body.offerId,
+      resourceType: body.resourceType,
+      quantity: body.quantity,
+      totalPrice: body.totalPrice
+    });
+
+    return new Response(JSON.stringify({ success: true }), {
+      headers: { 'Content-Type': 'application/json' }
+    });
+  }
+
+  /**
+   * Expire a trade offer (called by alarm when offer expires)
+   */
+  private async expireTradeOffer(offer: TradeOffer): Promise<void> {
+    if (!this.playerState) return;
+
+    // Return resources to seller (seller fee is not refunded)
+    this.playerState.resources[offer.resourceType] += offer.quantity;
+
+    // Remove from activeTradeOffers
+    this.playerState.activeTradeOffers = this.playerState.activeTradeOffers.filter(
+      o => o.offerId !== offer.offerId
+    );
+
+    // Update database
+    await this.env.DB.prepare(`
+      UPDATE trade_offers SET status = 'expired' WHERE offer_id = ?
+    `).bind(offer.offerId).run();
+
+    // Send message to seller
+    await this.sendMessage({
+      recipient_id: this.playerState.playerId,
+      sender_id: null,
+      sender_name: 'Trade System',
+      message_type: 'trade',
+      subject: `Trade Expired: ${offer.quantity} ${offer.resourceType}`,
+      body: `Your trade offer expired unsold. ${offer.quantity} ${offer.resourceType} returned to your city. Seller fee (${offer.sellerFee} gold) not refunded.`,
+      metadata: JSON.stringify({
+        offerId: offer.offerId,
+        resourceType: offer.resourceType,
+        quantity: offer.quantity,
+        sellerFee: offer.sellerFee
+      })
+    });
+
+    // Notify via WebSocket
+    this.pushEvent('trade_expired', {
+      offerId: offer.offerId,
+      resourceType: offer.resourceType,
+      quantity: offer.quantity
+    });
+
+    console.log(`[PlayerDO] Expired trade offer: ${offer.offerId}`);
   }
 
   /**

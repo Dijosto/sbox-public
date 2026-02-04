@@ -192,6 +192,28 @@ CREATE TABLE IF NOT EXISTS leaderboard (
 CREATE INDEX IF NOT EXISTS idx_leaderboard_category ON leaderboard(category, rank ASC);
 CREATE INDEX IF NOT EXISTS idx_leaderboard_score ON leaderboard(category, score DESC);
 
+-- Trade offers (marketplace system)
+CREATE TABLE IF NOT EXISTS trade_offers (
+  offer_id TEXT PRIMARY KEY,
+  seller_id TEXT NOT NULL,
+  resource_type TEXT NOT NULL, -- 'food', 'wood', 'stone', 'metal', 'gold'
+  quantity INTEGER NOT NULL,
+  price_per_unit REAL NOT NULL, -- gold per resource unit
+  total_price INTEGER NOT NULL, -- quantity * price_per_unit (rounded)
+  seller_fee INTEGER NOT NULL, -- gold fee paid by seller (equal to quantity)
+  created_at INTEGER NOT NULL,
+  expires_at INTEGER NOT NULL, -- created_at + 30 minutes (adjusted by speed multiplier)
+  status TEXT NOT NULL DEFAULT 'active', -- 'active', 'sold', 'expired', 'cancelled'
+  buyer_id TEXT, -- Set when sold
+  completed_at INTEGER, -- Set when sold
+  FOREIGN KEY (seller_id) REFERENCES players(player_id),
+  FOREIGN KEY (buyer_id) REFERENCES players(player_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_trade_offers_active ON trade_offers(status, resource_type, price_per_unit ASC);
+CREATE INDEX IF NOT EXISTS idx_trade_offers_seller ON trade_offers(seller_id, status);
+CREATE INDEX IF NOT EXISTS idx_trade_offers_expiry ON trade_offers(expires_at, status);
+
 -- Sample data for testing
 INSERT OR IGNORE INTO world_tiles (x, y, tile_type, level, resource_type, resource_bonus) VALUES
   -- Anthropus Camps (various levels)
