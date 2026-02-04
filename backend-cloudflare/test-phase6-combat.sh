@@ -458,6 +458,66 @@ sleep 1
 if [ -n "$NPC_X" ]; then
   echo "[13/14] Sending attack march to NPC camp..."
 
+  # Wait for gathering march to complete if it exists
+  if [ -n "$GATHER_MARCH_ID" ]; then
+    echo "  Waiting for gathering march to complete (full round trip)..."
+
+    # Step 1: Poll until returnTime is set (march has arrived and is returning)
+    RETURN_TIME=""
+    for i in {1..30}; do
+      STATE=$(curl -s -X GET "$BASE_URL/api/player/state" \
+        -H "Authorization: Bearer $TOKEN")
+
+      MARCH_FOUND=$(echo "$STATE" | jq -r ".activeMarches[] | select(.marchId == \"$GATHER_MARCH_ID\") | .marchId")
+
+      if [ -z "$MARCH_FOUND" ]; then
+        echo "  March completed during initial wait"
+        break
+      fi
+
+      RETURN_TIME=$(echo "$STATE" | jq -r ".activeMarches[] | select(.marchId == \"$GATHER_MARCH_ID\") | .returnTime")
+      MARCH_STATUS=$(echo "$STATE" | jq -r ".activeMarches[] | select(.marchId == \"$GATHER_MARCH_ID\") | .status")
+
+      if [ -n "$RETURN_TIME" ] && [ "$RETURN_TIME" != "null" ]; then
+        echo "  March status: $MARCH_STATUS, returnTime set"
+        break
+      fi
+
+      sleep 2
+    done
+
+    # Step 2: If returnTime is set, wait for that exact time
+    if [ -n "$RETURN_TIME" ] && [ "$RETURN_TIME" != "null" ]; then
+      CURRENT_TIME=$(date +%s)000  # Convert to milliseconds
+      WAIT_TIME=$((RETURN_TIME - CURRENT_TIME))
+      WAIT_SECONDS=$(((WAIT_TIME + 999) / 1000))  # Ceiling division
+
+      if [ $WAIT_SECONDS -lt 0 ]; then
+        WAIT_SECONDS=0
+      fi
+
+      if [ $WAIT_SECONDS -gt 0 ]; then
+        echo "  Waiting $WAIT_SECONDS seconds for march to return home..."
+        sleep $((WAIT_SECONDS + 2))  # Add 2 second buffer
+      fi
+    fi
+
+    # Step 3: Verify march is gone
+    FINAL_STATE=$(curl -s -X GET "$BASE_URL/api/player/state" \
+      -H "Authorization: Bearer $TOKEN")
+    FINAL_MARCH=$(echo "$FINAL_STATE" | jq -r ".activeMarches[] | select(.marchId == \"$GATHER_MARCH_ID\") | .marchId")
+
+    if [ -z "$FINAL_MARCH" ]; then
+      echo "  Gathering march fully completed and returned home"
+    else
+      FINAL_STATUS=$(echo "$FINAL_STATE" | jq -r ".activeMarches[] | select(.marchId == \"$GATHER_MARCH_ID\") | .status")
+      echo "  Warning: March still active (status: $FINAL_STATUS)"
+    fi
+
+    ACTIVE_MARCH_COUNT=$(echo "$FINAL_STATE" | jq '.activeMarches | length')
+    echo "  Active marches: $ACTIVE_MARCH_COUNT"
+  fi
+
   ATTACK_RESPONSE=$(curl -s -X POST "$BASE_URL/api/player/march/send" \
     -H "Authorization: Bearer $TOKEN" \
     -H "Content-Type: application/json" \
