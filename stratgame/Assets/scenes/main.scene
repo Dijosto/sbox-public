@@ -523,7 +523,7 @@
       "__version": 2,
       "Flags": 0,
       "Name": "castleruins",
-      "Position": "5189.663,4966.157,3.960945",
+      "Position": "5265.269,5708.955,197.4335",
       "Rotation": "0,0,0,1",
       "Scale": "1,1,2",
       "Tags": "",
@@ -611,7 +611,7 @@
               "IsTrigger": false,
               "Mesh": {
                 "Topology": "H4sIAAAAAAAACl2QCQ7CMAwEp4Qj3NBy/f+laMRGsohUVbFn1+t04ANs+Z0VsM69AwfgBFyAKZ9MPXdgk3qLnsI+Um/h/me9i2ZXfFvYOazafTJN0XRgKZmPyWtfXvYVL73PZRd52WdYPa7xtC8veys7u6t17/7t6Tn0ZtFjvIXZR895zjKjPWf4NiOrGt+ivpXZ3XnozaOndVn9vvVkkTjEAQAA",
-                "Position": "782.8403,2802.719,313.3177",
+                "Position": "782.8398,2802.719,313.3177",
                 "Rotation": "0,0,0.1305262,0.9914449",
                 "Positions": [
                   "-86.36438,-2291.583,154.9132",
@@ -669,17 +669,17 @@
                   "0.2500002,0.25",
                   "0.2500002,0.25",
                   "0.2500001,0.2500001",
-                  "0.2500001,0.2500001",
+                  "0.25,0.2500001",
                   "0.25,0.2500001",
                   "0.2500002,0.2500001"
                 ],
                 "TextureOffset": [
-                  "67.47681,334.1109",
-                  "67.47705,334.1108",
-                  "334.1035,511.9993",
-                  "177.8984,511.9993",
-                  "444.4775,511.9992",
-                  "67.47852,511.9993"
+                  "67.47827,334.1125",
+                  "67.47827,334.1125",
+                  "334.1055,511.9993",
+                  "177.8926,511.9993",
+                  "444.4756,511.9992",
+                  "67.47998,511.9993"
                 ],
                 "MaterialIndex": [
                   0,
@@ -7557,7 +7557,7 @@
           "__version": 2,
           "Flags": 0,
           "Name": "Block (3)",
-          "Position": "3645.655,5377.241,-2956.732",
+          "Position": "2900.606,5831.151,-2956.732",
           "Rotation": "0,0,0,1",
           "Scale": "1,1,1",
           "Tags": "",
@@ -7581,8 +7581,8 @@
               "HideInGame": false,
               "IsTrigger": false,
               "Mesh": {
-                "Topology": "H4sIAAAAAAAACl2QCQ7CMAwEp4Qj3NBy/f+laMRGsohUVbFn1+t04ANs+Z0VsM69AwfgBFyAKZ9MPXdgk3qLnsI+Um/h/me9i2ZXfFvYOazafTJN0XRgKZmPyWtfXvYVL73PZRd52WdYPa7xtC8veys7u6t17/7t6Tn0ZtFjvIXZR895zjKjPWf4NiOrGt+ivpXZ3XnozaOndVn9vvVkkTjEAQAA",
-                "Position": "5145.26,3160.316,552.7361",
+                "Topology": "H4sIAAAAAAAACr2RWw6CQBAEa0HwhQo+f73/JTUVe5MNB3B+SHaqe3qGCXgDW37VARtgBHbAAZiAM/BZVQFKNG0twJD3Pn407D3vfbhxNfvVaGouwstew6rdJ2OJxsy3Zodj8pfwss946X3KbiW87COsHpd4lvCyc7Pzkvcu3zmeQ/Rm0aPewuy15zxnmdGeM7xNzarGW7S3Mrs7q1//j3+X+b2HO5nLrO5j7wuIS/9HWAIAAA==",
+                "Position": "4400.211,3614.226,552.7361",
                 "Rotation": "0,0,0,1",
                 "Positions": [
                   "-249.9851,-249.981,64",
@@ -7592,33 +7592,45 @@
                   "-249.9851,249.981,-64",
                   "249.9851,249.981,-64",
                   "249.9851,-249.981,-64",
-                  "-249.9851,-249.981,-64"
+                  "-249.9851,-249.981,-64",
+                  "-94.67578,-17.00635,220.4182",
+                  "405.2949,-17.00635,220.4182",
+                  "405.2949,482.9553,220.4182",
+                  "-94.67578,482.9553,220.4182"
                 ],
                 "TextureCoord": [
-                  "25.08632,-38.48076",
-                  "21.1803,-5.205299",
-                  "25.08632,-42.38671",
-                  "38.48076,-5.205299",
-                  "21.1803,-42.38671",
-                  "-25.08632,-5.205299",
-                  "21.1803,-38.48076",
-                  "-42.38671,-5.205299",
-                  "25.08632,-42.38671",
-                  "-21.1803,-4.205299",
-                  "25.08632,-38.48076",
-                  "42.38671,-4.205299",
-                  "21.1803,-38.48076",
-                  "25.08632,-4.205299",
-                  "21.1803,-42.38671",
-                  "-38.48076,-4.205299",
-                  "-38.48076,-5.205299",
-                  "21.1803,-4.205299",
-                  "-42.38671,-4.205299",
-                  "-21.1803,-5.205299",
-                  "38.48076,-4.205299",
-                  "25.08632,-5.205299",
-                  "42.38671,-5.205299",
-                  "-25.08632,-4.205299"
+                  "37.08632,-25.48076",
+                  "33.1803,-4.205299",
+                  "37.08632,-29.38671",
+                  "26.48076,-4.205299",
+                  "33.1803,-29.38671",
+                  "-36.08632,-4.205299",
+                  "33.1803,-25.48076",
+                  "-29.38671,-4.205299",
+                  "37.08632,-29.38671",
+                  "-32.1803,-3.205299",
+                  "37.08632,-25.48076",
+                  "30.38671,-3.205299",
+                  "33.1803,-25.48076",
+                  "37.08632,-3.205299",
+                  "33.1803,-29.38671",
+                  "-25.48076,-3.205299",
+                  "-25.48076,-4.205299",
+                  "33.1803,-3.205299",
+                  "-29.38671,-3.205299",
+                  "-32.1803,-4.205299",
+                  "26.48076,-3.205299",
+                  "37.08632,-4.205299",
+                  "30.38671,-4.205299",
+                  "-36.08632,-3.205299",
+                  "38.29967,-27.30087",
+                  "0,0",
+                  "38.29967,-31.20682",
+                  "0,0",
+                  "34.39365,-31.20682",
+                  "0,0",
+                  "34.39365,-27.30087",
+                  "0,0"
                 ],
                 "TextureUAxis": [
                   "1,0,0",
@@ -7626,7 +7638,8 @@
                   "0,-1,0",
                   "0,1,0",
                   "-1,0,0",
-                  "1,-0,0"
+                  "1,-0,0",
+                  "1,0,0"
                 ],
                 "TextureVAxis": [
                   "0,-1,0",
@@ -7634,25 +7647,29 @@
                   "0,0,-1",
                   "-0,0,-1",
                   "0,0,-1",
-                  "-0,0,-1"
+                  "-0,0,-1",
+                  "0,-1,0"
                 ],
                 "TextureScale": [
-                  "0.25,0.25",
-                  "0.25,0.25",
-                  "0.25,0.25",
-                  "0.25,0.25",
-                  "0.25,0.25",
+                  "0.2500002,0.2500002",
+                  "0.2500002,0.2500002",
+                  "0.2500002,0.25",
+                  "0.2500002,0.25",
+                  "0.2500002,0.25",
+                  "0.2500002,0.25",
                   "0.25,0.25"
                 ],
                 "TextureOffset": [
-                  "479.2158,131.1924",
-                  "479.2158,131.1924",
-                  "131.1924,313.8313",
-                  "380.8076,313.8313",
-                  "32.78418,313.8313",
-                  "479.2158,313.8313"
+                  "387.4277,410.8174",
+                  "387.4277,410.8174",
+                  "410.8174,313.8315",
+                  "101.1826,313.8315",
+                  "124.5723,313.8315",
+                  "387.4277,313.8315",
+                  "387.411,410.831"
                 ],
                 "MaterialIndex": [
+                  0,
                   0,
                   0,
                   0,
@@ -7661,6 +7678,14 @@
                   0
                 ],
                 "EdgeFlags": [
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
                   0,
                   0,
                   0,
@@ -7715,7 +7740,7 @@
           "__version": 2,
           "Flags": 0,
           "Name": "Block (2)",
-          "Position": "3131.259,5889.016,-2956.732",
+          "Position": "2333.865,5844.001,-2956.732",
           "Rotation": "0,0,0,1",
           "Scale": "1,1,1",
           "Tags": "",
@@ -7740,7 +7765,7 @@
               "IsTrigger": false,
               "Mesh": {
                 "Topology": "H4sIAAAAAAAACl2QCQ7CMAwEp4Qj3NBy/f+laMRGsohUVbFn1+t04ANs+Z0VsM69AwfgBFyAKZ9MPXdgk3qLnsI+Um/h/me9i2ZXfFvYOazafTJN0XRgKZmPyWtfXvYVL73PZRd52WdYPa7xtC8veys7u6t17/7t6Tn0ZtFjvIXZR895zjKjPWf4NiOrGt+ivpXZ3XnozaOndVn9vvVkkTjEAQAA",
-                "Position": "4630.864,3672.091,552.7361",
+                "Position": "3833.47,3627.076,552.7361",
                 "Rotation": "0,0,0,1",
                 "Positions": [
                   "-249.9851,-249.981,64",
@@ -7795,20 +7820,20 @@
                   "-0,0,-1"
                 ],
                 "TextureScale": [
+                  "0.2499997,0.25",
+                  "0.2499997,0.25",
                   "0.25,0.25",
                   "0.25,0.25",
-                  "0.25,0.25",
-                  "0.25,0.25",
-                  "0.25,0.25",
-                  "0.25,0.25"
+                  "0.2499998,0.25",
+                  "0.2499998,0.25"
                 ],
                 "TextureOffset": [
-                  "488.7979,130.292",
-                  "488.7979,130.292",
-                  "130.292,313.8313",
-                  "381.708,313.8313",
-                  "23.20215,313.8313",
-                  "488.7979,313.8313"
+                  "94.35645,462.2334",
+                  "94.35645,462.2334",
+                  "462.2334,313.8313",
+                  "49.7666,313.8313",
+                  "417.6416,313.8313",
+                  "94.3584,313.8313"
                 ],
                 "MaterialIndex": [
                   0,
@@ -7873,7 +7898,7 @@
           "__version": 2,
           "Flags": 0,
           "Name": "Block (1)",
-          "Position": "2602.511,6403.043,-2956.732",
+          "Position": "1820.086,6403.043,-2956.732",
           "Rotation": "0,0,0,1",
           "Scale": "1,1,1",
           "Tags": "",
@@ -7898,7 +7923,7 @@
               "IsTrigger": false,
               "Mesh": {
                 "Topology": "H4sIAAAAAAAACl2QCQ7CMAwEp4Qj3NBy/f+laMRGsohUVbFn1+t04ANs+Z0VsM69AwfgBFyAKZ9MPXdgk3qLnsI+Um/h/me9i2ZXfFvYOazafTJN0XRgKZmPyWtfXvYVL73PZRd52WdYPa7xtC8veys7u6t17/7t6Tn0ZtFjvIXZR895zjKjPWf4NiOrGt+ivpXZ3XnozaOndVn9vvVkkTjEAQAA",
-                "Position": "4102.116,4186.118,552.7361",
+                "Position": "3319.691,4186.118,552.7361",
                 "Rotation": "0,0,0,1",
                 "Positions": [
                   "-249.9851,-249.981,64",
@@ -7953,20 +7978,20 @@
                   "-0,0,-1"
                 ],
                 "TextureScale": [
-                  "0.2499999,0.25",
-                  "0.2499999,0.25",
+                  "0.2499997,0.25",
+                  "0.2499997,0.25",
                   "0.25,0.25",
                   "0.25,0.25",
-                  "0.2499999,0.25",
-                  "0.2499999,0.25"
+                  "0.2499998,0.25",
+                  "0.2499998,0.25"
                 ],
                 "TextureOffset": [
-                  "43.78125,138.4004",
-                  "43.78125,138.4004",
+                  "101.4775,138.4004",
+                  "101.4775,138.4004",
                   "138.4004,313.8313",
                   "373.5996,313.8313",
-                  "468.2178,313.8313",
-                  "43.78223,313.8313"
+                  "410.5215,313.8313",
+                  "101.4785,313.8313"
                 ],
                 "MaterialIndex": [
                   0,
@@ -8189,7 +8214,7 @@
           "__version": 2,
           "Flags": 0,
           "Name": "Block",
-          "Position": "2073.518,6980.172,-2956.73",
+          "Position": "1814.177,6980.172,-2956.73",
           "Rotation": "0,0,0,1",
           "Scale": "1,1,1",
           "Tags": "",
@@ -8214,7 +8239,7 @@
               "IsTrigger": false,
               "Mesh": {
                 "Topology": "H4sIAAAAAAAACl2QCQ7CMAwEp4Qj3NBy/f+laMRGsohUVbFn1+t04ANs+Z0VsM69AwfgBFyAKZ9MPXdgk3qLnsI+Um/h/me9i2ZXfFvYOazafTJN0XRgKZmPyWtfXvYVL73PZRd52WdYPa7xtC8veys7u6t17/7t6Tn0ZtFjvIXZR895zjKjPWf4NiOrGt+ivpXZ3XnozaOndVn9vvVkkTjEAQAA",
-                "Position": "3573.123,4763.247,552.738",
+                "Position": "3313.782,4763.247,552.738",
                 "Rotation": "0,0,0,1",
                 "Positions": [
                   "-249.9851,-249.981,64",
@@ -8277,12 +8302,12 @@
                   "0.2499998,0.25"
                 ],
                 "TextureOffset": [
-                  "111.7471,398.916",
-                  "111.7471,398.916",
+                  "125.1133,398.916",
+                  "125.1133,398.916",
                   "398.916,313.8391",
                   "113.084,313.8391",
-                  "400.251,313.8391",
-                  "111.749,313.8391"
+                  "386.8857,313.8391",
+                  "125.1143,313.8391"
                 ],
                 "MaterialIndex": [
                   0,
@@ -8343,6 +8368,132 @@
           "Children": []
         }
       ]
+    },
+    {
+      "__guid": "2340fb1f-f522-44e6-9c66-cc89ae4b6c2b",
+      "__version": 2,
+      "Flags": 0,
+      "Name": "dragon keep wall",
+      "Position": "5257.5,3845.362,927.3774",
+      "Rotation": "0,0,0,1",
+      "Scale": "1,1,1",
+      "Tags": "",
+      "Enabled": true,
+      "NetworkMode": 2,
+      "NetworkFlags": 0,
+      "NetworkOrphaned": 0,
+      "NetworkTransmit": true,
+      "OwnerTransfer": 1,
+      "Components": [
+        {
+          "__type": "Sandbox.Prop",
+          "__guid": "046e8b9e-8a07-4cad-bed3-c196d6965349",
+          "__enabled": true,
+          "Flags": 0,
+          "BodyGroups": 18446744073709551615,
+          "Health": 0,
+          "IsStatic": false,
+          "MaterialGroup": null,
+          "Model": "scenes/dragon keep wall.vmdl",
+          "OnComponentDestroy": null,
+          "OnComponentDisabled": null,
+          "OnComponentEnabled": null,
+          "OnComponentFixedUpdate": null,
+          "OnComponentStart": null,
+          "OnComponentUpdate": null,
+          "OnPropBreak": null,
+          "OnPropTakeDamage": null,
+          "StartAsleep": false,
+          "Tint": "1,1,1,1"
+        },
+        {
+          "__type": "Sandbox.ModelRenderer",
+          "__guid": "6ffc0695-b495-41ce-92ec-04de09d62aac",
+          "__enabled": true,
+          "Flags": 0,
+          "BodyGroups": 18446744073709551615,
+          "CreateAttachments": false,
+          "LodOverride": null,
+          "MaterialGroup": null,
+          "MaterialOverride": null,
+          "Materials": null,
+          "Model": "scenes/dragon keep wall.vmdl",
+          "OnComponentDestroy": null,
+          "OnComponentDisabled": null,
+          "OnComponentEnabled": null,
+          "OnComponentFixedUpdate": null,
+          "OnComponentStart": null,
+          "OnComponentUpdate": null,
+          "RenderOptions": {
+            "GameLayer": true,
+            "OverlayLayer": false,
+            "BloomLayer": false,
+            "AfterUILayer": false
+          },
+          "RenderType": "On",
+          "Tint": "1,1,1,1"
+        },
+        {
+          "__type": "Sandbox.ModelCollider",
+          "__guid": "4318cf78-9343-4729-8391-cf9986d9748e",
+          "__enabled": true,
+          "Flags": 0,
+          "ColliderFlags": 0,
+          "Elasticity": null,
+          "Friction": null,
+          "IsTrigger": false,
+          "Model": "scenes/dragon keep wall.vmdl",
+          "OnComponentDestroy": null,
+          "OnComponentDisabled": null,
+          "OnComponentEnabled": null,
+          "OnComponentFixedUpdate": null,
+          "OnComponentStart": null,
+          "OnComponentUpdate": null,
+          "OnObjectTriggerEnter": null,
+          "OnObjectTriggerExit": null,
+          "OnTriggerEnter": null,
+          "OnTriggerExit": null,
+          "RollingResistance": null,
+          "Static": false,
+          "Surface": null,
+          "SurfaceVelocity": "0,0,0"
+        },
+        {
+          "__type": "Sandbox.Rigidbody",
+          "__guid": "fa40c1bd-7727-4fbb-8873-7107f46ffa8f",
+          "__enabled": true,
+          "Flags": 0,
+          "AngularDamping": 0,
+          "EnableImpactDamage": true,
+          "EnhancedCcd": false,
+          "Gravity": true,
+          "GravityScale": 1,
+          "ImpactDamage": 0,
+          "LinearDamping": 0,
+          "Locking": {
+            "X": false,
+            "Y": false,
+            "Z": false,
+            "Pitch": false,
+            "Yaw": false,
+            "Roll": false
+          },
+          "MassCenterOverride": "0,0,0",
+          "MassOverride": 0,
+          "MinImpactDamageSpeed": 500,
+          "MotionEnabled": true,
+          "OnComponentDestroy": null,
+          "OnComponentDisabled": null,
+          "OnComponentEnabled": null,
+          "OnComponentFixedUpdate": null,
+          "OnComponentStart": null,
+          "OnComponentUpdate": null,
+          "OverrideMassCenter": false,
+          "RigidbodyFlags": 0,
+          "StartAsleep": false
+        }
+      ],
+      "Children": []
     }
   ],
   "SceneProperties": {
