@@ -388,6 +388,21 @@ public class HomeWidget : Widget
 		creatorWindow.Show();
 	}
 
+	/// <summary>
+	/// Called after a game fork completes. Adds the new project to the list and opens it.
+	/// </summary>
+	public void AddForkedProject( string configPath )
+	{
+		var project = ProjectList.TryAddFromFile( configPath );
+		if ( project is null ) return;
+
+		project.LastOpened = DateTime.Now;
+		ProjectList.SaveList();
+		RefreshLocalProjects();
+
+		OpenProject( project );
+	}
+
 	public void OpenProject( Project project, string args = null )
 	{
 		ProcessStartInfo info = new ProcessStartInfo( "sbox-dev.exe", $"{Environment.CommandLine} -project \"{project.ConfigFilePath}\" {args ?? ""}" );

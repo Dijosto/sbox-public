@@ -1,4 +1,4 @@
-﻿using Editor;
+using Editor;
 
 namespace Sandbox;
 
@@ -9,6 +9,12 @@ public partial class StartupWindow : Window
 	private Layout Body { get; set; }
 
 	private Toggle CloseOnLaunch { get; set; }
+
+	private HomeWidget HomeView { get; set; }
+	private GameBrowserWidget BrowseView { get; set; }
+
+	private SidebarButton MyProjectsTab { get; set; }
+	private SidebarButton BrowseGamesTab { get; set; }
 
 	public StartupWindow()
 	{
@@ -66,6 +72,16 @@ public partial class StartupWindow : Window
 			sidebar.AddSpacer();
 
 			//
+			// Tab navigation
+			//
+			{
+				MyProjectsTab = sidebar.Add( new SidebarButton( "My Projects", "folder_open", () => ShowView( "home" ) ) );
+				BrowseGamesTab = sidebar.Add( new SidebarButton( "Browse Games", "travel_explore", () => ShowView( "browse" ) ) );
+			}
+
+			sidebar.AddSpacer();
+
+			//
 			// Links
 			//
 			{
@@ -101,8 +117,36 @@ public partial class StartupWindow : Window
 		//
 		{
 			Body = Canvas.Layout.AddColumn( 3 );
-			Body.Add( new HomeWidget( Canvas ), 1 );
+
+			HomeView = new HomeWidget( Canvas );
+			Body.Add( HomeView, 1 );
+
+			BrowseView = new GameBrowserWidget( Canvas );
+			BrowseView.Visible = false;
+			BrowseView.OnBackRequested = () => ShowView( "home" );
+			BrowseView.OnForkRequested = OnForkGameRequested;
+			Body.Add( BrowseView, 1 );
 		}
+	}
+
+	void ShowView( string view )
+	{
+		HomeView.Visible = view == "home";
+		BrowseView.Visible = view == "browse";
+	}
+
+	void OnForkGameRequested( Package game )
+	{
+		var dialog = new GameForkDialog( game );
+
+		dialog.OnProjectCreated = configPath =>
+		{
+			// Add to project list and open
+			HomeView.AddForkedProject( configPath );
+			ShowView( "home" );
+		};
+
+		dialog.Show();
 	}
 
 	public void OnSuccessfulLaunch()

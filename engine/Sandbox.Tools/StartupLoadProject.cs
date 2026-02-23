@@ -97,11 +97,12 @@ static class StartupLoadProject
 
 		// This kinda sucks but better than overcomplicating everything.. make sure to update the steps..
 		CurrentStep = 0;
-		TotalSteps = 16;
+		TotalSteps = 18; // 16 base + 2 for potential ForkedFrom (code extraction + asset loading)
 
 		// should never be one existing once we remove all this shit
 		Project project = Project.AddFromFile( path, false );
 		var parentPackage = project.Config.GetMetaOrDefault<string>( "ParentPackage", null );
+		var forkedFrom = project.Config.GetMetaOrDefault<string>( "ForkedFrom", null );
 
 		Step( "Initializing filesystem" );
 		using ( var _ = Bootstrap.StartupTiming?.ScopeTimer( $"Load Project: Init FileSystem" ) )
@@ -138,6 +139,27 @@ static class StartupLoadProject
 		using ( var _ = Bootstrap.StartupTiming?.ScopeTimer( $"Load Project: Builtin Projects" ) )
 		{
 			await PackageManager.InstallProjects( Project.All.Where( x => x.IsBuiltIn ).ToArray() );
+		}
+
+		//
+		// If this is a forked game, extract code from the source game's CLL archives
+		// on first open, then install the source game's assets as read-only.
+		//
+		if ( project.Config.Type == "game" && !string.IsNullOrWhiteSpace( forkedFrom ) )
+		{
+			Step( $"Extracting source code ({forkedFrom})" );
+			using ( var _ = Bootstrap.StartupTiming?.ScopeTimer( $"Load Project: ForkedFrom Extract" ) )
+			{
+				// Extract code from CLLs into Code/ directory (skips if already extracted)
+				await GameForker.ExtractCodeIfNeeded( project, forkedFrom, ct );
+			}
+
+			Step( $"Loading source game assets ({forkedFrom})" );
+			using ( var _ = Bootstrap.StartupTiming?.ScopeTimer( $"Load Project: ForkedFrom Assets" ) )
+			{
+				// Download and register the source game's assets (read-only, no code compilation)
+				await AssetSystem.InstallAsync( forkedFrom, false );
+			}
 		}
 
 		//
