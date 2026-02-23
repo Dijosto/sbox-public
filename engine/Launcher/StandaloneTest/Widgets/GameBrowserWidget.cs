@@ -13,6 +13,7 @@ public class GameBrowserWidget : Widget
 	private Layout GameGridLayout;
 	private Label StatusLabel;
 	private CancellationTokenSource _searchCts;
+	private bool _hasLoaded;
 
 	/// <summary>
 	/// Called when the user wants to fork a game. Provides the selected Package.
@@ -78,7 +79,19 @@ public class GameBrowserWidget : Widget
 			};
 		}
 
-		_ = RefreshGamesAsync();
+		// Don't load yet — wait until the tab is first shown to avoid a network
+		// request on every launcher start.
+	}
+
+	protected override void OnVisibilityChanged( bool visible )
+	{
+		base.OnVisibilityChanged( visible );
+
+		if ( visible && !_hasLoaded )
+		{
+			_hasLoaded = true;
+			_ = RefreshGamesAsync();
+		}
 	}
 
 	async Task RefreshGamesAsync()

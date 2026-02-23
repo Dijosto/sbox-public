@@ -151,14 +151,20 @@ static class StartupLoadProject
 			using ( var _ = Bootstrap.StartupTiming?.ScopeTimer( $"Load Project: ForkedFrom Extract" ) )
 			{
 				// Extract code from CLLs into Code/ directory (skips if already extracted)
-				await GameForker.ExtractCodeIfNeeded( project, forkedFrom, ct );
+				await GameForker.ExtractCodeIfNeeded( project, forkedFrom, ct,
+					onProgress: ( msg, frac ) =>
+					{
+						EditorSplashScreen.SetMessage( msg );
+						StepProgress( frac );
+					} );
 			}
 
 			Step( $"Loading source game assets ({forkedFrom})" );
 			using ( var _ = Bootstrap.StartupTiming?.ScopeTimer( $"Load Project: ForkedFrom Assets" ) )
 			{
-				// Download and register the source game's assets (read-only, no code compilation)
-				await AssetSystem.InstallAsync( forkedFrom, false );
+				// Download and register the source game's assets (read-only, no code compilation).
+				// skipIfInstalled=true: only re-download the manifest+files if they're not present.
+				await AssetSystem.InstallAsync( forkedFrom, true );
 			}
 		}
 

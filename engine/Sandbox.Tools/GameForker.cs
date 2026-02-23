@@ -57,7 +57,10 @@ public static class GameForker
 	/// project's Code/ directory. Library dependencies are installed with the "tools"
 	/// tag so they remain available for compilation after the source game is unmounted.
 	/// </summary>
-	internal static async Task ExtractCodeIfNeeded( Project project, string forkedFrom, CancellationToken ct )
+	/// <param name="onProgress">
+	/// Optional callback receiving (message, 0..1 fraction) for splash screen reporting.
+	/// </param>
+	internal static async Task ExtractCodeIfNeeded( Project project, string forkedFrom, CancellationToken ct, Action<string, float> onProgress = null )
 	{
 		var codeDir = Path.Combine( project.GetRootPath(), "Code" );
 
@@ -95,7 +98,7 @@ public static class GameForker
 
 		try
 		{
-			await ExtractCodeArchives( ap.FileSystem, project.GetRootPath() );
+			await ExtractCodeArchives( ap.FileSystem, project.GetRootPath(), onProgress );
 
 			// Install the source game's library dependencies with the "tools" tag so they
 			// remain mounted for compilation after we unmount the source game below.
@@ -121,7 +124,7 @@ public static class GameForker
 	/// Find all .cll files in the package filesystem, deserialize each CodeArchive,
 	/// and write the source files to the project's Code/ directory.
 	/// </summary>
-	static async Task ExtractCodeArchives( BaseFileSystem fs, string projectDir )
+	static async Task ExtractCodeArchives( BaseFileSystem fs, string projectDir, Action<string, float> onProgress )
 	{
 		var cllFiles = fs.FindFile( "/", "*.cll", true ).ToArray();
 		if ( cllFiles.Length == 0 )
@@ -130,8 +133,10 @@ public static class GameForker
 			return;
 		}
 
-		Log.Info( $"Found {cllFiles.Length} code archive(s)" );
-		int totalFiles = 0;
+		// First pass: count total files so we can report accurate progress
+		Log.Info( $"Found {cllFiles.Length} code archive(s), counting files..." );
+		int totalExpected = 0;
+		var archives = new List<(string Path, CodeArchive Archive)>();
 
 		foreach ( var cllPath in cllFiles )
 		{
@@ -143,7 +148,17 @@ public static class GameForker
 			}
 
 			var archive = new CodeArchive( bytes );
+			archives.Add( (cllPath, archive) );
 
+			totalExpected += archive.SyntaxTrees.Count( t => !Path.GetFileName( t.FilePath ).StartsWith( "__gen_" ) );
+			totalExpected += archive.AdditionalFiles.Count( a => !string.IsNullOrWhiteSpace( a.LocalPath ) );
+		}
+
+		Log.Info( $"Extracting {totalExpected} source file(s)..." );
+		int extracted = 0;
+
+		foreach ( var (_, archive) in archives )
+		{
 			// Extract C# source files from syntax trees
 			foreach ( var syntaxTree in archive.SyntaxTrees )
 			{
@@ -157,12 +172,15 @@ public static class GameForker
 				if ( Path.GetFileName( filePath ).StartsWith( "__gen_" ) )
 					continue;
 
+				var localPath = NormalizePath( filePath );
 				var sourceText = syntaxTree.GetText().ToString();
-				var outputPath = Path.Combine( projectDir, "Code", NormalizePath( filePath ) );
+				var outputPath = Path.Combine( projectDir, "Code", localPath );
 
 				Directory.CreateDirectory( Path.GetDirectoryName( outputPath ) );
 				await File.WriteAllTextAsync( outputPath, sourceText );
-				totalFiles++;
+
+				extracted++;
+				onProgress?.Invoke( $"Extracting {extracted}/{totalExpected}: {Path.GetFileName( localPath )}", (float)extracted / totalExpected );
 			}
 
 			// Extract additional files (Razor files, etc.)
@@ -171,15 +189,18 @@ public static class GameForker
 				if ( string.IsNullOrWhiteSpace( additional.LocalPath ) )
 					continue;
 
-				var outputPath = Path.Combine( projectDir, "Code", NormalizePath( additional.LocalPath ) );
+				var localPath = NormalizePath( additional.LocalPath );
+				var outputPath = Path.Combine( projectDir, "Code", localPath );
 
 				Directory.CreateDirectory( Path.GetDirectoryName( outputPath ) );
 				await File.WriteAllTextAsync( outputPath, additional.Text );
-				totalFiles++;
+
+				extracted++;
+				onProgress?.Invoke( $"Extracting {extracted}/{totalExpected}: {Path.GetFileName( localPath )}", (float)extracted / totalExpected );
 			}
 		}
 
-		Log.Info( $"Extracted {totalFiles} source file(s)" );
+		Log.Info( $"Extracted {extracted} source file(s)" );
 	}
 
 	/// <summary>
