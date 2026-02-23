@@ -1,5 +1,4 @@
 using Sandbox;
-using Sandbox.DataModel;
 using System.IO;
 
 namespace Editor;
@@ -192,7 +191,7 @@ public class GameForkDialog : Dialog
 			// Creates the .sbproj and directory structure. Code extraction and asset
 			// loading happen on first editor open via StartupLoadProject.
 			var configPath = await GameForker.CreateProject(
-				SourceGame.FullIdent,
+				SourceGame,
 				projectDir,
 				TitleEdit.Text,
 				IdentEdit.Text

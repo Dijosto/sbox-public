@@ -20,13 +20,9 @@ public static class GameForker
 	/// suitable for the launcher — it only creates files on disk, no package downloads.
 	/// The heavy work (CLL extraction, asset loading) happens on first editor open via StartupLoadProject.
 	/// </summary>
-	public static async Task<string> CreateProject( string sourceGameIdent, string projectDir, string title, string ident )
+	/// <param name="sourceGame">The already-fetched source Package (avoids a redundant API call)</param>
+	public static Task<string> CreateProject( Package sourceGame, string projectDir, string title, string ident )
 	{
-		// Verify the source game exists
-		var sourcePackage = await Package.Fetch( sourceGameIdent, false );
-		if ( sourcePackage is null )
-			throw new Exception( $"Could not find package '{sourceGameIdent}'" );
-
 		// Create directory structure
 		Directory.CreateDirectory( projectDir );
 		Directory.CreateDirectory( Path.Combine( projectDir, "Code" ) );
@@ -40,25 +36,32 @@ public static class GameForker
 		config.Type = "game";
 		config.Schema = 1;
 
+		// Copy PackageReferences from source game so library dependencies compile correctly
+		if ( sourceGame.PackageReferences is { Length: > 0 } refs )
+		{
+			config.PackageReferences = new List<string>( refs );
+		}
+
 		// Store the source game ident so StartupLoadProject knows to extract code and mount assets
-		config.SetMeta( "ForkedFrom", sourcePackage.FullIdent );
+		config.SetMeta( "ForkedFrom", sourceGame.FullIdent );
 
 		var configPath = Path.Combine( projectDir, $"{ident}.sbproj" );
 		File.WriteAllText( configPath, config.ToJson() );
 
-		return configPath;
+		return Task.FromResult( configPath );
 	}
 
 	/// <summary>
 	/// Called from StartupLoadProject on first editor open of a forked project.
 	/// Downloads the source game package, extracts code from CLL archives into the
-	/// project's Code/ directory, and installs assets.
+	/// project's Code/ directory. Library dependencies are installed with the "tools"
+	/// tag so they remain available for compilation after the source game is unmounted.
 	/// </summary>
 	internal static async Task ExtractCodeIfNeeded( Project project, string forkedFrom, CancellationToken ct )
 	{
 		var codeDir = Path.Combine( project.GetRootPath(), "Code" );
 
-		// Skip if Code/ already has files (already extracted)
+		// Skip if Code/ already has files (already extracted on a previous open)
 		if ( Directory.Exists( codeDir ) && Directory.EnumerateFiles( codeDir, "*", SearchOption.AllDirectories ).Any() )
 		{
 			Log.Info( "Code directory already has files, skipping extraction" );
@@ -67,16 +70,49 @@ public static class GameForker
 
 		Log.Info( $"Extracting code from '{forkedFrom}'" );
 
-		// Install the source package temporarily to access its filesystem
-		var loadOptions = new PackageLoadOptions( forkedFrom, "fork", ct );
-		var ap = await PackageManager.InstallAsync( loadOptions );
+		// Install the source game temporarily with a "fork" tag to get its filesystem.
+		// SkipAssetDownload=true: we handle asset downloading separately via AssetSystem,
+		// no need to pull all content files here too.
+		var loadOptions = new PackageLoadOptions( forkedFrom, "fork", ct )
+		{
+			SkipAssetDownload = true
+		};
+
+		PackageManager.ActivePackage ap;
+		try
+		{
+			ap = await PackageManager.InstallAsync( loadOptions );
+		}
+		catch ( Exception ex )
+		{
+			// If the source game fails to compile (e.g. has errors), log and continue.
+			// The user can still try to edit the empty Code/ directory manually.
+			Log.Warning( $"Could not install source game '{forkedFrom}': {ex.Message}" );
+			Log.Warning( "Code extraction skipped — Code/ directory will be empty." );
+			PackageManager.UnmountTagged( "fork" );
+			return;
+		}
 
 		try
 		{
 			await ExtractCodeArchives( ap.FileSystem, project.GetRootPath() );
+
+			// Install the source game's library dependencies with the "tools" tag so they
+			// remain mounted for compilation after we unmount the source game below.
+			// PackageManager.InstallAsync already tagged them "fork"; we just add "tools" to each.
+			foreach ( var dep in ap.Package.EnumeratePackageReferences() )
+			{
+				await PackageManager.InstallAsync( new PackageLoadOptions( dep, "tools", ct )
+				{
+					SkipAssetDownload = true
+				} );
+			}
 		}
 		finally
 		{
+			// Unmount the source game (removes "fork" tag, unmounts if no other tags remain).
+			// Library deps tagged "tools" stay mounted so our local Code/ can compile against them.
+			// Built-in packages (tagged "local") also keep their tag and stay mounted.
 			PackageManager.UnmountTagged( "fork" );
 		}
 	}
