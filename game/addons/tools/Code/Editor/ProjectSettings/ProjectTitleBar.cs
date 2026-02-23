@@ -36,8 +36,7 @@ file class ProjectTitleButton : Widget
 		}
 
 		var contentRect = LocalRect.Shrink( HorizontalPadding, 0 );
-
-		Package.TryGetCached( Project.Config.FullIdent, out var package );
+		var package = Project.Package;
 
 		// Calculate logo rect on the left side
 		var logoRect = contentRect;
@@ -48,7 +47,7 @@ file class ProjectTitleButton : Widget
 		if ( package?.Thumb != null )
 		{
 			Paint.SetPen( Color.White );
-			Paint.Draw( logoRect, package.Thumb );
+			Paint.Draw( logoRect, package.Thumb, borderRadius: 4 );
 		}
 		else
 		{
@@ -56,7 +55,7 @@ file class ProjectTitleButton : Widget
 
 			Paint.BilinearFiltering = true;
 			Paint.SetBrush( Color.White );
-			Paint.Draw( logoRect, _placeholderIcon );
+			Paint.Draw( logoRect, _placeholderIcon, borderRadius: 4 );
 			Paint.BilinearFiltering = false;
 		}
 
