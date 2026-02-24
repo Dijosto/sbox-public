@@ -2,7 +2,6 @@ using System;
 using Sandbox;
 using Sandbox.DataModel;
 using System.IO;
-using System.Threading;
 
 namespace Editor;
 
@@ -22,6 +21,9 @@ public static class GameForker
 	/// The heavy work (CLL extraction, asset loading) happens on first editor open via StartupLoadProject.
 	/// </summary>
 	/// <param name="sourceGame">The already-fetched source Package (avoids a redundant API call)</param>
+	/// <param name="projectDir">Directory path where the forked project will be created</param>
+	/// <param name="title">Display title for the new project</param>
+	/// <param name="ident">Unique identifier for the new project</param>
 	public static Task<string> CreateProject( Package sourceGame, string projectDir, string title, string ident )
 	{
 		// Create directory structure
@@ -54,11 +56,14 @@ public static class GameForker
 
 	/// <summary>
 	/// Called from StartupLoadProject on first editor open of a forked project.
-	/// Downloads the source game package, extracts code from CLL archives into the
-	/// project's Code/ directory. Library dependencies are installed with the "tools"
-	/// tag so they remain available for compilation after the source game is unmounted.
+	/// Extracts code from the already-mounted source game's CLL archives into
+	/// the project's Code/ directory. The source game should already be installed
+	/// via PackageManager with the "tools" tag before calling this.
 	/// </summary>
-	internal static async Task ExtractCodeIfNeeded( Project project, string forkedFrom, CancellationToken ct )
+	/// <param name="project">The forked project</param>
+	/// <param name="sourceFs">The source game's mounted filesystem (from PackageManager.ActivePackage)</param>
+	/// <param name="gameIdent">The source game's full ident (e.g. "org.game")</param>
+	internal static async Task ExtractCodeIfNeeded( Project project, BaseFileSystem sourceFs, string gameIdent )
 	{
 		var codeDir = Path.Combine( project.GetRootPath(), "Code" );
 
@@ -69,60 +74,75 @@ public static class GameForker
 			return;
 		}
 
-		Log.Info( $"Extracting code from '{forkedFrom}'" );
+		Log.Info( $"Extracting code from '{gameIdent}'" );
+		await ExtractCodeArchives( sourceFs, gameIdent, project.GetRootPath() );
+	}
 
-		// Install the source game temporarily with a "fork" tag to get its filesystem.
-		// SkipAssetDownload=true: we handle asset downloading separately via AssetSystem,
-		// no need to pull all content files here too.
-		var loadOptions = new PackageLoadOptions( forkedFrom, "fork", ct )
-		{
-			SkipAssetDownload = true
-		};
+	/// <summary>
+	/// Copy asset files from the source game's package filesystem into the project's
+	/// Assets/ directory. Skips code archives (.bin/), ProjectSettings, and localization.
+	/// Only runs on first open (skips if Assets/ already has files).
+	/// </summary>
+	internal static async Task ExtractAssetsIfNeeded( Project project, BaseFileSystem sourceFs )
+	{
+		var assetsDir = project.GetAssetsPath();
 
-		PackageManager.ActivePackage ap;
-		try
+		// Skip if Assets/ already has files (already extracted on a previous open)
+		if ( Directory.Exists( assetsDir ) && Directory.EnumerateFiles( assetsDir, "*", SearchOption.AllDirectories ).Any() )
 		{
-			ap = await PackageManager.InstallAsync( loadOptions );
-		}
-		catch ( Exception ex )
-		{
-			// If the source game fails to compile (e.g. has errors), log and continue.
-			// The user can still try to edit the empty Code/ directory manually.
-			Log.Warning( $"Could not install source game '{forkedFrom}': {ex.Message}" );
-			Log.Warning( "Code extraction skipped — Code/ directory will be empty." );
-			PackageManager.UnmountTagged( "fork" );
+			Log.Info( "Assets directory already has files, skipping extraction" );
 			return;
 		}
 
-		try
-		{
-			await ExtractCodeArchives( ap.FileSystem, project.GetRootPath() );
+		Directory.CreateDirectory( assetsDir );
 
-			// Install the source game's library dependencies with the "tools" tag so they
-			// remain mounted for compilation after we unmount the source game below.
-			// PackageManager.InstallAsync already tagged them "fork"; we just add "tools" to each.
-			foreach ( var dep in ap.Package.EnumeratePackageReferences() )
-			{
-				await PackageManager.InstallAsync( new PackageLoadOptions( dep, "tools", ct )
-				{
-					SkipAssetDownload = true
-				} );
-			}
-		}
-		finally
+		var allFiles = sourceFs.FindFile( "/", "*", true ).ToArray();
+		Log.Info( $"Found {allFiles.Length} total files in source package" );
+
+		int totalFiles = 0;
+
+		foreach ( var file in allFiles )
 		{
-			// Unmount the source game (removes "fork" tag, unmounts if no other tags remain).
-			// Library deps tagged "tools" stay mounted so our local Code/ can compile against them.
-			// Built-in packages (tagged "local") also keep their tag and stay mounted.
-			PackageManager.UnmountTagged( "fork" );
+			var normalized = file.Replace( '\\', '/' ).TrimStart( '/' );
+
+			// Skip code archives and binaries
+			if ( normalized.StartsWith( ".bin", StringComparison.OrdinalIgnoreCase ) )
+				continue;
+
+			// Skip project settings and localization (these are separate concerns)
+			if ( normalized.StartsWith( "ProjectSettings", StringComparison.OrdinalIgnoreCase ) )
+				continue;
+
+			if ( normalized.StartsWith( "localization", StringComparison.OrdinalIgnoreCase ) )
+				continue;
+
+			// Skip .meta files — they contain dependency checksums from the source package
+			// that won't match the freshly extracted files. The asset system will regenerate
+			// them with correct checksums on first scan.
+			if ( normalized.EndsWith( ".meta", StringComparison.OrdinalIgnoreCase ) )
+				continue;
+
+			var bytes = await sourceFs.ReadAllBytesAsync( file );
+			if ( bytes is null )
+				continue;
+
+			var outputPath = Path.Combine( assetsDir, normalized );
+			Directory.CreateDirectory( Path.GetDirectoryName( outputPath ) );
+			await File.WriteAllBytesAsync( outputPath, bytes.ToArray() );
+			totalFiles++;
 		}
+
+		Log.Info( $"Extracted {totalFiles} asset file(s) to Assets/" );
 	}
 
 	/// <summary>
 	/// Find all .cll files in the package filesystem, deserialize each CodeArchive,
 	/// and write the source files to the project's Code/ directory.
+	/// Each CLL belongs to a specific package (identified by CompilerName).
+	/// Only extracts the game's own CLL — library CLLs are skipped since they're
+	/// available via PackageReferences.
 	/// </summary>
-	static async Task ExtractCodeArchives( BaseFileSystem fs, string projectDir )
+	static async Task ExtractCodeArchives( BaseFileSystem fs, string gameIdent, string projectDir )
 	{
 		var cllFiles = fs.FindFile( "/", "*.cll", true ).ToArray();
 		if ( cllFiles.Length == 0 )
@@ -145,7 +165,21 @@ public static class GameForker
 
 			var archive = new CodeArchive( bytes );
 
-			// Extract C# source files from syntax trees
+			Log.Info( $"Archive '{cllPath}': compiler={archive.CompilerName}, {archive.SyntaxTrees.Count} source(s), {archive.AdditionalFiles.Count} additional(s)" );
+
+			// Only extract CLLs that belong to the game itself.
+			// Library CLLs (e.g. "base") are available via PackageReferences and
+			// should not be extracted as source to avoid duplicate definitions.
+			if ( !gameIdent.EndsWith( archive.CompilerName, StringComparison.OrdinalIgnoreCase ) )
+			{
+				Log.Info( $"Skipping library archive '{archive.CompilerName}' (not matching game '{gameIdent}')" );
+				continue;
+			}
+
+			// Extract C# source files from syntax trees.
+			// The CLL LocalPath is already a project-relative path (e.g. "MyFile.cs",
+			// "UI/MainMenu.cs"). We use the FileMap to resolve physical paths back
+			// to these local paths when needed.
 			foreach ( var syntaxTree in archive.SyntaxTrees )
 			{
 				var filePath = syntaxTree.FilePath;
@@ -154,12 +188,14 @@ public static class GameForker
 				if ( archive.FileMap.TryGetValue( filePath, out var mappedPath ) )
 					filePath = mappedPath;
 
-				// Skip generated files (they start with __gen_ or similar)
-				if ( Path.GetFileName( filePath ).StartsWith( "__gen_" ) )
+				var fileName = Path.GetFileName( filePath );
+
+				// Skip compiler-generated files (__gen_*, __compiler_extra, etc.)
+				if ( fileName.StartsWith( "__" ) )
 					continue;
 
 				var sourceText = syntaxTree.GetText().ToString();
-				var outputPath = Path.Combine( projectDir, "Code", NormalizePath( filePath ) );
+				var outputPath = Path.Combine( projectDir, "Code", filePath.Replace( '\\', '/' ).TrimStart( '/' ) );
 
 				Directory.CreateDirectory( Path.GetDirectoryName( outputPath ) );
 				await File.WriteAllTextAsync( outputPath, sourceText );
@@ -172,7 +208,7 @@ public static class GameForker
 				if ( string.IsNullOrWhiteSpace( additional.LocalPath ) )
 					continue;
 
-				var outputPath = Path.Combine( projectDir, "Code", NormalizePath( additional.LocalPath ) );
+				var outputPath = Path.Combine( projectDir, "Code", additional.LocalPath.Replace( '\\', '/' ).TrimStart( '/' ) );
 
 				Directory.CreateDirectory( Path.GetDirectoryName( outputPath ) );
 				await File.WriteAllTextAsync( outputPath, additional.Text );
@@ -181,28 +217,5 @@ public static class GameForker
 		}
 
 		Log.Info( $"Extracted {totalFiles} source file(s)" );
-	}
-
-	/// <summary>
-	/// Normalize a file path from the code archive to a safe relative path
-	/// </summary>
-	static string NormalizePath( string path )
-	{
-		// Remove any leading slashes or drive letters
-		path = path.Replace( '\\', '/' );
-
-		// Strip any absolute path prefix — keep only the relative part under Code/
-		var codeIndex = path.IndexOf( "/Code/", StringComparison.OrdinalIgnoreCase );
-		if ( codeIndex >= 0 )
-			path = path.Substring( codeIndex + 6 ); // skip "/Code/"
-
-		// Also handle "Code/" at the start
-		if ( path.StartsWith( "Code/", StringComparison.OrdinalIgnoreCase ) )
-			path = path.Substring( 5 );
-
-		// Strip leading slashes
-		path = path.TrimStart( '/' );
-
-		return path;
 	}
 }

@@ -1,4 +1,5 @@
 using Sandbox;
+using Sandbox.Diagnostics;
 using System.Threading;
 
 namespace Editor;
@@ -9,6 +10,8 @@ namespace Editor;
 /// </summary>
 public class GameBrowserWidget : Widget
 {
+	static Logger Log = new( "GameBrowser" );
+
 	private string _searchText = "";
 	private Layout GameGridLayout;
 	private Label StatusLabel;
@@ -39,7 +42,7 @@ public class GameBrowserWidget : Widget
 
 			var search = menuRow.Add( new LineEdit() { PlaceholderText = "\u2315  Search games..." }, 2 );
 			search.SetStyles( "border-radius: 3px;" );
-			search.TextChanged += _ =>
+			search.TextChanged += ( text ) =>
 			{
 				_searchText = search.Value;
 				search.Focus();
@@ -102,20 +105,29 @@ public class GameBrowserWidget : Widget
 			if ( token.IsCancellationRequested )
 				return;
 
-			var games = result.Packages
-				.Where( x => !x.Archived )
+			var games = (result?.Packages ?? Array.Empty<Package>())
+				.Where( x => x is not null && !x.Archived )
 				.ToArray();
 
-			if ( games.Length == 0 )
+			// Dispatch UI updates to the main thread (SyncContext is not
+			// initialized in the launcher, so MainThread.Queue is the
+			// only safe way to touch widgets from an async continuation).
+			MainThread.Queue( () =>
 			{
-				StatusLabel.Text = "No games found.";
-				StatusLabel.Visible = true;
-				GameGridLayout.Clear( true );
-				return;
-			}
+				if ( token.IsCancellationRequested )
+					return;
 
-			StatusLabel.Visible = false;
-			UpdateGameGrid( games );
+				if ( games.Length == 0 )
+				{
+					StatusLabel.Text = "No games found.";
+					StatusLabel.Visible = true;
+					GameGridLayout.Clear( true );
+					return;
+				}
+
+				StatusLabel.Visible = false;
+				UpdateGameGrid( games );
+			} );
 		}
 		catch ( OperationCanceledException )
 		{
@@ -123,8 +135,12 @@ public class GameBrowserWidget : Widget
 		}
 		catch ( Exception ex )
 		{
-			StatusLabel.Text = $"Error: {ex.Message}";
-			StatusLabel.Visible = true;
+			Log.Error( ex, $"Failed to refresh games" );
+			MainThread.Queue( () =>
+			{
+				StatusLabel.Text = $"Error: {ex.Message}";
+				StatusLabel.Visible = true;
+			} );
 		}
 	}
 

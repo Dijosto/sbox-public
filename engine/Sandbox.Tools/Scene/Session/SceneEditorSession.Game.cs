@@ -11,6 +11,12 @@ partial class SceneEditorSession
 
 	public void SetPlaying( Scene scene )
 	{
+		// Clean up any existing game session before creating a new one
+		if ( GameSession is not null )
+		{
+			StopPlaying();
+		}
+
 		GameSession = new GameEditorSession( this, scene );
 		GameSession.MakeActive();
 	}

@@ -12,7 +12,13 @@ public class GameEditorSession : SceneEditorSession
 	{
 		Parent = parent;
 
-		Assert.IsNull( Current, "Attempted to create new GameEditorSession when one already exists!" );
+		// If a previous session wasn't properly cleaned up, destroy it first
+		if ( Current is not null )
+		{
+			Log.Warning( "Destroying stale GameEditorSession before creating new one" );
+			Current.Destroy();
+		}
+
 		Current = this;
 	}
 
