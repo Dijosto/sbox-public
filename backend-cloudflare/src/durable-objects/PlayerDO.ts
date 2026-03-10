@@ -1,0 +1,2912 @@
+/**
+ * Player Durable Object - Enhanced Implementation
+ * Manages all player state with queue systems, timers, and alarms
+ */
+
+import { Env } from '../workers/index';
+import { getBuildingConfig, getBuildingLevelConfig, calculateBuildTime } from '../utils/buildings';
+import { getTroopConfig, calculateTrainingTime } from '../utils/troops';
+import { getResearchConfig, getResearchLevelConfig, checkResearchPrerequisites } from '../utils/research';
+import {
+  calculateProductionRates,
+  calculateGoldProduction,
+  calculateStorageCaps,
+  calculateHomeCapacity,
+  calculateAccumulatedResources,
+  hasEnoughResources,
+  deductResources,
+  Resources
+} from '../utils/resources';
+import {
+  calculateDistance,
+  calculateMarchTime,
+  calculateMarchCapacity,
+  validateMarch,
+  MarchTroops
+} from '../utils/marches';
+import { resolveCombat, calculateLoot, CombatSide, CombatTroop } from '../utils/combat';
+import { applySpeedMultiplier } from '../utils/timing';
+import { calculateNPCStrength, scaleNPCGarrison, scaleNPCResources, calculatePostBattleStrength } from '../utils/npcCamps';
+import { DragonInstance, getDragonConfig, calculateDragonBonus, canDragonFight, calculateHealthFightingMinimum, applyDragonHealing } from '../utils/dragons';
+
+interface PlayerState {
+  playerId: string;
+  playerName: string;
+  city: CityState;
+  resources: Resources;
+  research: Record<string, number>;
+  troops: TroopStack[];
+  dragons: DragonInstance[]; // Player's dragons
+  activeMarches: March[];
+  activeTradeOffers: TradeOffer[]; // Active sell offers on marketplace
+  taxRate: number;
+  wilderness: Record<string, number>; // Conquered wilderness by type
+  lastUpdateTimestamp: number;
+}
+
+interface CityState {
+  position: { x: number; y: number };
+  innerCity: Record<string, BuildingState>;
+  outerFields: Record<string, BuildingState>;
+  buildQueue: BuildQueueItem[];
+  trainQueue: TrainQueueItem[];
+  researchQueue: ResearchQueueItem[];
+  maxWorkers: number;
+}
+
+interface BuildingState {
+  buildingType: string;
+  level: number;
+}
+
+interface BuildQueueItem {
+  queueId: string;
+  buildingId: string; // Unique building instance ID (e.g., "farm_1")
+  buildingType: string;
+  zone: string;
+  toLevel: number;
+  startTime: number;
+  completionTime: number;
+}
+
+interface TrainQueueItem {
+  queueId: string;
+  troopType: string;
+  quantity: number;
+  startTime: number;
+  completionTime: number;
+}
+
+interface ResearchQueueItem {
+  queueId: string;
+  researchType: string;
+  toLevel: number;
+  startTime: number;
+  completionTime: number;
+}
+
+interface TroopStack {
+  troopType: string;
+  quantity: number;
+  location: string;
+}
+
+interface March {
+  marchId: string;
+  playerId: string;
+  playerName: string;
+  origin: { x: number; y: number };
+  destination: { x: number; y: number };
+  troops: MarchTroops[];
+  dragon?: DragonInstance; // Optional dragon accompanying the march
+  marchType: 'attack' | 'gather' | 'scout' | 'reinforce' | 'transport';
+  departureTime: number;
+  arrivalTime: number;
+  returnTime?: number;
+  resources?: {
+    food?: number;
+    wood?: number;
+    stone?: number;
+    metal?: number;
+    gold?: number;
+  };
+  status: 'outbound' | 'at_target' | 'returning' | 'completed';
+  targetType: 'player' | 'npc' | 'wilderness';
+  targetId?: string;
+}
+
+interface TradeOffer {
+  offerId: string;
+  resourceType: 'food' | 'wood' | 'stone' | 'metal' | 'gold';
+  quantity: number;
+  pricePerUnit: number; // gold per resource unit
+  totalPrice: number; // quantity * pricePerUnit
+  sellerFee: number; // gold fee (equal to quantity)
+  createdAt: number;
+  expiresAt: number;
+}
+
+export class PlayerDurableObject {
+  private state: DurableObjectState;
+  private env: Env;
+  private playerState: PlayerState | null = null;
+  private websocket: WebSocket | null = null;
+
+  constructor(state: DurableObjectState, env: Env) {
+    this.state = state;
+    this.env = env;
+  }
+
+  async fetch(request: Request): Promise<Response> {
+    const url = new URL(request.url);
+
+    // Handle WebSocket upgrade
+    if (request.headers.get('Upgrade') === 'websocket') {
+      return this.handleWebSocket(request);
+    }
+
+    // Load state if not loaded
+    if (!this.playerState) {
+      await this.loadState();
+    }
+
+    // Route requests
+    switch (url.pathname) {
+      case '/initialize':
+        return this.handleInitialize(request);
+
+      case '/api/player/state':
+        return this.handleGetState(request);
+
+      case '/api/player/buildings':
+        return this.handleGetBuildings(request);
+
+      // Building endpoints
+      case '/api/player/building/upgrade':
+        return this.handleBuildingUpgrade(request);
+
+      case '/api/player/building/cancel':
+        return this.handleBuildingCancel(request);
+
+      // Training endpoints
+      case '/api/player/troops/train':
+        return this.handleTrainTroops(request);
+
+      case '/api/player/troops/cancel':
+        return this.handleTrainCancel(request);
+
+      case '/api/player/troops/station':
+        return this.handleStationTroops(request);
+
+      case '/api/player/troops/unstation':
+        return this.handleUnstationTroops(request);
+
+      // Research endpoints
+      case '/api/player/research/start':
+        return this.handleStartResearch(request);
+
+      case '/api/player/research/cancel':
+        return this.handleResearchCancel(request);
+
+      // March endpoints
+      case '/api/player/march/send':
+        return this.handleSendMarch(request);
+
+      case '/api/player/march/recall':
+        return this.handleRecallMarch(request);
+
+      // Message endpoints
+      case '/api/player/messages':
+        return this.handleGetMessages(request);
+
+      case '/api/player/messages/read':
+        return this.handleMarkMessageRead(request);
+
+      // Trade endpoints
+      case '/api/player/trade/create':
+        return this.handleCreateTradeOffer(request);
+
+      case '/api/player/trade/cancel':
+        return this.handleCancelTradeOffer(request);
+
+      case '/api/player/trade/buy':
+        return this.handleBuyFromOffer(request);
+
+      case '/api/player/trade/search':
+        return this.handleSearchOffers(request);
+
+      case '/api/player/trade/my-offers':
+        return this.handleGetMyOffers(request);
+
+      // Tax endpoints
+      case '/api/player/tax/set':
+        return this.handleSetTaxRate(request);
+
+      // Test/Debug endpoints (development only)
+      case '/api/player/test/add-resources':
+        return this.handleTestAddResources(request);
+
+      // Internal completion handlers (called by alarms)
+      case '/internal/complete':
+        return this.handleCompletions(request);
+
+      case '/internal/plunder':
+        return this.handlePlunder(request);
+
+      case '/internal/trade-sold':
+        return this.handleTradeSold(request);
+
+      default:
+        return new Response('Not Found', { status: 404 });
+    }
+  }
+
+  /**
+   * Durable Object alarm handler
+   * Called automatically when alarm fires
+   */
+  async alarm(): Promise<void> {
+    console.log('[PlayerDO] Alarm fired, processing completions');
+
+    if (!this.playerState) {
+      await this.loadState();
+    }
+
+    if (!this.playerState) {
+      console.error('[PlayerDO] No state loaded on alarm');
+      return;
+    }
+
+    const now = Date.now();
+    let hasCompletions = false;
+
+    // Process completed buildings
+    const completedBuilds = this.playerState.city.buildQueue.filter(
+      item => item.completionTime <= now
+    );
+
+    for (const build of completedBuilds) {
+      await this.completeBuild(build);
+      hasCompletions = true;
+    }
+
+    // Process completed training
+    const completedTraining = this.playerState.city.trainQueue.filter(
+      item => item.completionTime <= now
+    );
+
+    for (const train of completedTraining) {
+      await this.completeTraining(train);
+      hasCompletions = true;
+    }
+
+    // Process completed research
+    const completedResearch = this.playerState.city.researchQueue.filter(
+      item => item.completionTime <= now
+    );
+
+    for (const research of completedResearch) {
+      await this.completeResearch(research);
+      hasCompletions = true;
+    }
+
+    // Process march arrivals
+    const arrivedMarches = this.playerState.activeMarches.filter(
+      march => march.status === 'outbound' && march.arrivalTime <= now
+    );
+
+    for (const march of arrivedMarches) {
+      await this.processMarchArrival(march);
+      hasCompletions = true;
+    }
+
+    // Process march returns
+    const returningMarches = this.playerState.activeMarches.filter(
+      march => march.status === 'returning' && march.returnTime && march.returnTime <= now
+    );
+
+    for (const march of returningMarches) {
+      await this.processMarchReturn(march);
+      hasCompletions = true;
+    }
+
+    // Process expired trade offers
+    const expiredOffers = this.playerState.activeTradeOffers.filter(
+      offer => offer.expiresAt <= now
+    );
+
+    for (const offer of expiredOffers) {
+      await this.expireTradeOffer(offer);
+      hasCompletions = true;
+    }
+
+    if (hasCompletions) {
+      await this.saveState();
+    }
+
+    // Schedule next alarm
+    await this.scheduleNextAlarm();
+  }
+
+  /**
+   * Load player state from storage
+   */
+  private async loadState(): Promise<void> {
+    const stored = await this.state.storage.get<PlayerState>('state');
+
+    if (stored) {
+      this.playerState = stored;
+      this.updateResources();
+    }
+  }
+
+  /**
+   * Save player state to storage
+   */
+  private async saveState(): Promise<void> {
+    if (this.playerState) {
+      this.playerState.lastUpdateTimestamp = Date.now();
+      await this.state.storage.put('state', this.playerState);
+    }
+  }
+
+  /**
+   * Update resources based on production rates
+   */
+  private updateResources(): void {
+    if (!this.playerState) return;
+
+    const now = Date.now();
+    const elapsed = (now - this.playerState.lastUpdateTimestamp) / (1000 * 60 * 60); // hours
+
+    // Calculate production rates
+    const allBuildings = {
+      ...this.playerState.city.innerCity,
+      ...this.playerState.city.outerFields
+    };
+
+    const rates = calculateProductionRates(
+      allBuildings,
+      this.playerState.research,
+      this.playerState.wilderness
+    );
+
+    // Add gold from taxation
+    const homeCapacity = calculateHomeCapacity(allBuildings);
+    const theaterLevel = allBuildings['theater']?.level || 0;
+    rates.goldRate = calculateGoldProduction(homeCapacity, this.playerState.taxRate, theaterLevel);
+
+    // Calculate storage caps
+    const caps = calculateStorageCaps(allBuildings);
+
+    // Update resources
+    this.playerState.resources = calculateAccumulatedResources(
+      this.playerState.resources,
+      rates,
+      caps,
+      elapsed
+    );
+
+    // Update production rates in state
+    this.playerState.resources.foodRate = rates.foodRate;
+    this.playerState.resources.woodRate = rates.woodRate;
+    this.playerState.resources.stoneRate = rates.stoneRate;
+    this.playerState.resources.metalRate = rates.metalRate;
+    this.playerState.resources.goldRate = rates.goldRate;
+
+    // Apply dragon healing over time
+    // Only heal dragons not currently on marches
+    const dragonsOnMarches = new Set(
+      this.playerState.activeMarches
+        .filter(m => m.dragon)
+        .map(m => m.dragon!.dragonId)
+    );
+
+    for (let i = 0; i < this.playerState.dragons.length; i++) {
+      const dragon = this.playerState.dragons[i];
+      if (!dragonsOnMarches.has(dragon.dragonId)) {
+        this.playerState.dragons[i] = applyDragonHealing(dragon, elapsed);
+      }
+    }
+  }
+
+  /**
+   * Initialize new player
+   */
+  private async handleInitialize(request: Request): Promise<Response> {
+    const body = await request.json() as any;
+
+    this.playerState = {
+      playerId: body.playerId,
+      playerName: body.playerName,
+      city: {
+        position: { x: body.cityX || 500, y: body.cityY || 500 }, // Use spawn coordinates from auth
+        innerCity: {
+          fortress_1: { buildingType: 'fortress', level: 1 },
+          home_1: { buildingType: 'home', level: 1 },
+        },
+        outerFields: {
+          farm_1: { buildingType: 'farm', level: 1 },
+          lumbermill_1: { buildingType: 'lumbermill', level: 1 },
+          quarry_1: { buildingType: 'quarry', level: 1 },
+          mine_1: { buildingType: 'mine', level: 1 },
+        },
+        buildQueue: [],
+        trainQueue: [],
+        researchQueue: [],
+        maxWorkers: 1,
+      },
+      resources: {
+        food: 10000,
+        wood: 10000,
+        stone: 10000,
+        metal: 10000,
+        gold: 1000,
+        premiumCurrency: 0,
+        foodRate: 100,
+        woodRate: 100,
+        stoneRate: 50,
+        metalRate: 25,
+        goldRate: 10,
+      },
+      research: {},
+      troops: [],
+      dragons: [
+        {
+          dragonId: crypto.randomUUID(),
+          dragonType: 'greatDragon',
+          level: 1, // Players start with level 1 (egg - 0 HP until level 3 hatch)
+          currentHealth: 0, // Level 1 is an egg with 0 HP
+          maxHealth: 0,
+          experience: 0
+        }
+      ],
+      activeMarches: [],
+      activeTradeOffers: [],
+      taxRate: 50, // Default 50% tax (optimal for most cities)
+      wilderness: {},
+      lastUpdateTimestamp: Date.now(),
+    };
+
+    await this.saveState();
+
+    return new Response(JSON.stringify({ success: true }), {
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  /**
+   * Get player state
+   */
+  private async handleGetState(request: Request): Promise<Response> {
+    if (!this.playerState) {
+      return new Response(JSON.stringify({ error: 'State not loaded' }), {
+        status: 500,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+
+    this.updateResources();
+    await this.saveState();
+
+    return new Response(JSON.stringify(this.playerState), {
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  /**
+   * Get all buildings with their exact IDs for client UI
+   */
+  private async handleGetBuildings(request: Request): Promise<Response> {
+    if (!this.playerState) {
+      return this.errorResponse('State not loaded', 500);
+    }
+
+    this.updateResources();
+
+    // Return all building slots with their IDs, types, and levels
+    const buildingsList = {
+      innerCity: Object.entries(this.playerState.city.innerCity).map(([id, building]) => ({
+        id,
+        buildingType: building.buildingType,
+        level: building.level,
+        zone: 'inner' as const
+      })),
+      outerFields: Object.entries(this.playerState.city.outerFields).map(([id, building]) => ({
+        id,
+        buildingType: building.buildingType,
+        level: building.level,
+        zone: 'outer' as const
+      }))
+    };
+
+    return new Response(JSON.stringify(buildingsList), {
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  /**
+   * Handle building upgrade request
+   */
+  private async handleBuildingUpgrade(request: Request): Promise<Response> {
+    if (!this.playerState) {
+      return this.errorResponse('State not loaded', 500);
+    }
+
+    const body = await request.json() as {
+      buildingId: string;
+      buildingType: string;
+      zone: 'inner' | 'outer';
+    };
+
+    // Update resources
+    this.updateResources();
+
+    // Get building config
+    const buildingConfig = getBuildingConfig(body.buildingType);
+    if (!buildingConfig) {
+      return this.errorResponse(`Unknown building type: ${body.buildingType}`);
+    }
+
+    // Check zone
+    const buildings = body.zone === 'inner'
+      ? this.playerState.city.innerCity
+      : this.playerState.city.outerFields;
+
+    // Find existing building by ID or by type
+    let currentBuilding = buildings[body.buildingId];
+
+    // If not found by ID, search by type (for unique buildings)
+    if (!currentBuilding) {
+      const existingKey = Object.keys(buildings).find(
+        key => buildings[key].buildingType === body.buildingType
+      );
+      if (existingKey) {
+        currentBuilding = buildings[existingKey];
+      }
+    }
+
+    const currentLevel = currentBuilding?.level || 0;
+    const targetLevel = currentLevel + 1;
+
+    // Check if building can be upgraded
+    if (targetLevel > buildingConfig.maxLevel) {
+      return this.errorResponse(`Building already at max level (${buildingConfig.maxLevel})`);
+    }
+
+    // Get level config
+    const levelConfig = getBuildingLevelConfig(body.buildingType, targetLevel);
+    if (!levelConfig) {
+      return this.errorResponse(`Level ${targetLevel} not found for ${body.buildingType}`);
+    }
+
+    // Check prerequisites
+    for (const prereq of levelConfig.prerequisites) {
+      if (prereq.type === 'building') {
+        const prereqBuilding = this.playerState.city.innerCity[prereq.id] ||
+                               this.playerState.city.outerFields[prereq.id];
+        if (!prereqBuilding || prereqBuilding.level < prereq.level) {
+          return this.errorResponse(`Requires ${prereq.id} level ${prereq.level}`);
+        }
+      } else if (prereq.type === 'research') {
+        const researchLevel = this.playerState.research[prereq.id] || 0;
+        if (researchLevel < prereq.level) {
+          return this.errorResponse(`Requires ${prereq.id} research level ${prereq.level}`);
+        }
+      }
+    }
+
+    // Check worker availability
+    const usedWorkers = this.playerState.city.buildQueue.length;
+    if (usedWorkers >= this.playerState.city.maxWorkers) {
+      return this.errorResponse(`All workers busy (${usedWorkers}/${this.playerState.city.maxWorkers})`);
+    }
+
+    // Check resources
+    const resourceCheck = hasEnoughResources(this.playerState.resources, levelConfig.cost);
+    if (!resourceCheck.valid) {
+      return this.errorResponse(`Insufficient ${resourceCheck.missing}`);
+    }
+
+    // Deduct resources
+    this.playerState.resources = deductResources(this.playerState.resources, levelConfig.cost);
+
+    // Calculate build time with Levitation research
+    const levitationLevel = this.playerState.research['levitation'] || 0;
+    const baseBuildTime = calculateBuildTime(levelConfig.buildTime, levitationLevel);
+    const buildTime = applySpeedMultiplier(baseBuildTime, this.env);
+
+    // Add to queue
+    const now = Date.now();
+    const queueItem: BuildQueueItem = {
+      queueId: crypto.randomUUID(),
+      buildingId: body.buildingId,
+      buildingType: body.buildingType,
+      zone: body.zone,
+      toLevel: targetLevel,
+      startTime: now,
+      completionTime: now + (buildTime * 1000)
+    };
+
+    this.playerState.city.buildQueue.push(queueItem);
+
+    // Save and schedule alarm
+    await this.saveState();
+    await this.scheduleNextAlarm();
+
+    return new Response(JSON.stringify({
+      success: true,
+      queueId: queueItem.queueId,
+      completionTime: queueItem.completionTime,
+      duration: buildTime
+    }), {
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  /**
+   * Cancel building upgrade
+   */
+  private async handleBuildingCancel(request: Request): Promise<Response> {
+    if (!this.playerState) {
+      return this.errorResponse('State not loaded', 500);
+    }
+
+    const body = await request.json() as { queueId: string };
+
+    const index = this.playerState.city.buildQueue.findIndex(item => item.queueId === body.queueId);
+    if (index === -1) {
+      return this.errorResponse('Queue item not found');
+    }
+
+    const item = this.playerState.city.buildQueue[index];
+
+    // Get refund amount (50% of cost)
+    const levelConfig = getBuildingLevelConfig(item.buildingType, item.toLevel);
+    if (levelConfig) {
+      this.playerState.resources.food += Math.floor((levelConfig.cost.food || 0) * 0.5);
+      this.playerState.resources.wood += Math.floor((levelConfig.cost.wood || 0) * 0.5);
+      this.playerState.resources.stone += Math.floor((levelConfig.cost.stone || 0) * 0.5);
+      this.playerState.resources.metal += Math.floor((levelConfig.cost.metal || 0) * 0.5);
+      this.playerState.resources.gold += Math.floor((levelConfig.cost.gold || 0) * 0.5);
+    }
+
+    // Remove from queue
+    this.playerState.city.buildQueue.splice(index, 1);
+
+    await this.saveState();
+    await this.scheduleNextAlarm();
+
+    this.pushEvent('building_cancelled', { queueId: body.queueId });
+
+    return new Response(JSON.stringify({ success: true }), {
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  /**
+   * Complete building upgrade
+   */
+  private async completeBuild(item: BuildQueueItem): Promise<void> {
+    if (!this.playerState) return;
+
+    const buildings = item.zone === 'inner'
+      ? this.playerState.city.innerCity
+      : this.playerState.city.outerFields;
+
+    // Find existing building by ID or by type (for unique buildings like fortress)
+    let actualBuildingKey = item.buildingId;
+
+    // If buildingId doesn't exist, search for existing building of same type
+    if (!buildings[item.buildingId]) {
+      // For unique buildings (fortress, science center, etc), find by type
+      const existingKey = Object.keys(buildings).find(
+        key => buildings[key].buildingType === item.buildingType
+      );
+
+      if (existingKey) {
+        actualBuildingKey = existingKey;
+      }
+    }
+
+    // Create or upgrade building
+    if (!buildings[actualBuildingKey]) {
+      buildings[actualBuildingKey] = {
+        buildingType: item.buildingType,
+        level: item.toLevel
+      };
+    } else {
+      buildings[actualBuildingKey].level = item.toLevel;
+    }
+
+    // Remove from queue
+    this.playerState.city.buildQueue = this.playerState.city.buildQueue.filter(
+      q => q.queueId !== item.queueId
+    );
+
+    // Update max workers if fortress upgraded
+    if (item.buildingType === 'fortress') {
+      this.playerState.city.maxWorkers = Math.floor(item.toLevel / 5) + 1;
+    }
+
+    // Recalculate production rates
+    this.updateResources();
+
+    // Notify client
+    this.pushEvent('building_complete', {
+      buildingId: actualBuildingKey,
+      buildingType: item.buildingType,
+      level: item.toLevel
+    });
+
+    console.log(`[PlayerDO] Completed build: ${item.buildingType} to level ${item.toLevel}`);
+  }
+
+  /**
+   * Schedule next alarm based on pending queues
+   */
+  private async scheduleNextAlarm(): Promise<void> {
+    if (!this.playerState) return;
+
+    const now = Date.now();
+    let nextCompletion: number | null = null;
+
+    // Find earliest completion time across all queues
+    for (const item of this.playerState.city.buildQueue) {
+      if (item.completionTime > now) {
+        if (!nextCompletion || item.completionTime < nextCompletion) {
+          nextCompletion = item.completionTime;
+        }
+      }
+    }
+
+    for (const item of this.playerState.city.trainQueue) {
+      if (item.completionTime > now) {
+        if (!nextCompletion || item.completionTime < nextCompletion) {
+          nextCompletion = item.completionTime;
+        }
+      }
+    }
+
+    for (const item of this.playerState.city.researchQueue) {
+      if (item.completionTime > now) {
+        if (!nextCompletion || item.completionTime < nextCompletion) {
+          nextCompletion = item.completionTime;
+        }
+      }
+    }
+
+    // Check marches (arrivals and returns)
+    for (const march of this.playerState.activeMarches) {
+      if (march.status === 'outbound' && march.arrivalTime > now) {
+        if (!nextCompletion || march.arrivalTime < nextCompletion) {
+          nextCompletion = march.arrivalTime;
+        }
+      }
+      if (march.status === 'returning' && march.returnTime && march.returnTime > now) {
+        if (!nextCompletion || march.returnTime < nextCompletion) {
+          nextCompletion = march.returnTime;
+        }
+      }
+    }
+
+    // Check trade offer expirations
+    for (const offer of this.playerState.activeTradeOffers) {
+      if (offer.expiresAt > now) {
+        if (!nextCompletion || offer.expiresAt < nextCompletion) {
+          nextCompletion = offer.expiresAt;
+        }
+      }
+    }
+
+    if (nextCompletion) {
+      await this.state.storage.setAlarm(nextCompletion);
+      console.log(`[PlayerDO] Scheduled alarm for ${new Date(nextCompletion).toISOString()}`);
+    }
+  }
+
+  /**
+   * Handle internal completion processing
+   */
+  private async handleCompletions(request: Request): Promise<Response> {
+    // Manually trigger completion check (for testing)
+    await this.alarm();
+    return new Response(JSON.stringify({ success: true }), {
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  /**
+   * Handle troop training request
+   */
+  private async handleTrainTroops(request: Request): Promise<Response> {
+    if (!this.playerState) {
+      return this.errorResponse('State not loaded', 500);
+    }
+
+    const body = await request.json() as {
+      troopType: string;
+      quantity: number;
+    };
+
+    // Update resources
+    this.updateResources();
+
+    // Get troop config
+    const troopConfig = getTroopConfig(body.troopType);
+    if (!troopConfig) {
+      return this.errorResponse(`Unknown troop type: ${body.troopType}`);
+    }
+
+    // Check prerequisites
+    for (const prereq of troopConfig.prerequisites) {
+      if (prereq.type === 'building') {
+        const building = this.playerState.city.innerCity[prereq.id] ||
+                        this.playerState.city.outerFields[prereq.id];
+        if (!building || building.level < prereq.level) {
+          return this.errorResponse(`Requires ${prereq.id} level ${prereq.level}`);
+        }
+      } else if (prereq.type === 'research') {
+        const researchLevel = this.playerState.research[prereq.id] || 0;
+        if (researchLevel < prereq.level) {
+          return this.errorResponse(`Requires ${prereq.id} research level ${prereq.level}`);
+        }
+      }
+    }
+
+    // Calculate total cost
+    const totalCost = {
+      food: (troopConfig.cost.food || 0) * body.quantity,
+      wood: (troopConfig.cost.wood || 0) * body.quantity,
+      stone: (troopConfig.cost.stone || 0) * body.quantity,
+      metal: (troopConfig.cost.metal || 0) * body.quantity
+    };
+
+    // Check resources
+    const resourceCheck = hasEnoughResources(this.playerState.resources, totalCost);
+    if (!resourceCheck.valid) {
+      return this.errorResponse(`Insufficient ${resourceCheck.missing}`);
+    }
+
+    // Deduct resources
+    this.playerState.resources = deductResources(this.playerState.resources, totalCost);
+
+    // Calculate training time - requires at least one garrison
+    const garrisonLevels: number[] = [];
+    let garrisonCount = 0;
+
+    for (const [id, building] of Object.entries(this.playerState.city.innerCity)) {
+      if (building.buildingType === 'garrison') {
+        garrisonLevels.push(building.level);
+        garrisonCount++;
+      }
+    }
+
+    // Cannot train troops without a garrison
+    if (garrisonCount === 0) {
+      return this.errorResponse('You must build a Garrison to train troops');
+    }
+
+    const baseTrainingTime = calculateTrainingTime(
+      troopConfig.trainingTime,
+      body.quantity,
+      garrisonLevels,
+      garrisonCount
+    );
+    const trainingTime = applySpeedMultiplier(baseTrainingTime, this.env);
+
+    // Add to queue
+    const now = Date.now();
+    const queueItem: TrainQueueItem = {
+      queueId: crypto.randomUUID(),
+      troopType: body.troopType,
+      quantity: body.quantity,
+      startTime: now,
+      completionTime: now + (trainingTime * 1000)
+    };
+
+    this.playerState.city.trainQueue.push(queueItem);
+
+    // Save and schedule alarm
+    await this.saveState();
+    await this.scheduleNextAlarm();
+
+    return new Response(JSON.stringify({
+      success: true,
+      queueId: queueItem.queueId,
+      completionTime: queueItem.completionTime,
+      duration: trainingTime
+    }), {
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  /**
+   * Cancel troop training
+   */
+  private async handleTrainCancel(request: Request): Promise<Response> {
+    if (!this.playerState) {
+      return this.errorResponse('State not loaded', 500);
+    }
+
+    const body = await request.json() as { queueId: string };
+
+    const index = this.playerState.city.trainQueue.findIndex(item => item.queueId === body.queueId);
+    if (index === -1) {
+      return this.errorResponse('Queue item not found');
+    }
+
+    const item = this.playerState.city.trainQueue[index];
+
+    // Get refund amount (50% of cost)
+    const troopConfig = getTroopConfig(item.troopType);
+    if (troopConfig) {
+      const refundMultiplier = 0.5;
+      this.playerState.resources.food += Math.floor((troopConfig.cost.food || 0) * item.quantity * refundMultiplier);
+      this.playerState.resources.wood += Math.floor((troopConfig.cost.wood || 0) * item.quantity * refundMultiplier);
+      this.playerState.resources.stone += Math.floor((troopConfig.cost.stone || 0) * item.quantity * refundMultiplier);
+      this.playerState.resources.metal += Math.floor((troopConfig.cost.metal || 0) * item.quantity * refundMultiplier);
+    }
+
+    // Remove from queue
+    this.playerState.city.trainQueue.splice(index, 1);
+
+    await this.saveState();
+    await this.scheduleNextAlarm();
+
+    this.pushEvent('training_cancelled', { queueId: body.queueId });
+
+    return new Response(JSON.stringify({ success: true }), {
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  /**
+   * Complete troop training
+   */
+  private async completeTraining(item: TrainQueueItem): Promise<void> {
+    if (!this.playerState) return;
+
+    // Add troops to player's army
+    const existingStack = this.playerState.troops.find(
+      t => t.troopType === item.troopType && t.location === 'city'
+    );
+
+    if (existingStack) {
+      existingStack.quantity += item.quantity;
+    } else {
+      this.playerState.troops.push({
+        troopType: item.troopType,
+        quantity: item.quantity,
+        location: 'city'
+      });
+    }
+
+    // Remove from queue
+    this.playerState.city.trainQueue = this.playerState.city.trainQueue.filter(
+      q => q.queueId !== item.queueId
+    );
+
+    // Notify client
+    this.pushEvent('training_complete', {
+      troopType: item.troopType,
+      quantity: item.quantity
+    });
+
+    console.log(`[PlayerDO] Completed training: ${item.quantity}x ${item.troopType}`);
+  }
+
+  /**
+   * Station troops on the wall for defense
+   */
+  private async handleStationTroops(request: Request): Promise<Response> {
+    if (!this.playerState) {
+      return this.errorResponse('State not loaded', 500);
+    }
+
+    const body = await request.json() as {
+      troopType: string;
+      quantity: number;
+    };
+
+    // Update resources
+    this.updateResources();
+
+    // Find troops in city
+    const cityStack = this.playerState.troops.find(
+      t => t.troopType === body.troopType && t.location === 'city'
+    );
+
+    if (!cityStack || cityStack.quantity < body.quantity) {
+      return this.errorResponse(`Insufficient ${body.troopType} in city (need ${body.quantity}, have ${cityStack?.quantity || 0})`);
+    }
+
+    // Remove from city
+    cityStack.quantity -= body.quantity;
+    if (cityStack.quantity === 0) {
+      this.playerState.troops = this.playerState.troops.filter(t => t !== cityStack);
+    }
+
+    // Add to wall
+    const wallStack = this.playerState.troops.find(
+      t => t.troopType === body.troopType && t.location === 'wall'
+    );
+
+    if (wallStack) {
+      wallStack.quantity += body.quantity;
+    } else {
+      this.playerState.troops.push({
+        troopType: body.troopType,
+        quantity: body.quantity,
+        location: 'wall'
+      });
+    }
+
+    await this.saveState();
+
+    this.pushEvent('troops_stationed', {
+      troopType: body.troopType,
+      quantity: body.quantity
+    });
+
+    return new Response(JSON.stringify({ success: true }), {
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  /**
+   * Unstation troops from the wall back to city
+   */
+  private async handleUnstationTroops(request: Request): Promise<Response> {
+    if (!this.playerState) {
+      return this.errorResponse('State not loaded', 500);
+    }
+
+    const body = await request.json() as {
+      troopType: string;
+      quantity: number;
+    };
+
+    // Update resources
+    this.updateResources();
+
+    // Find troops on wall
+    const wallStack = this.playerState.troops.find(
+      t => t.troopType === body.troopType && t.location === 'wall'
+    );
+
+    if (!wallStack || wallStack.quantity < body.quantity) {
+      return this.errorResponse(`Insufficient ${body.troopType} on wall (need ${body.quantity}, have ${wallStack?.quantity || 0})`);
+    }
+
+    // Remove from wall
+    wallStack.quantity -= body.quantity;
+    if (wallStack.quantity === 0) {
+      this.playerState.troops = this.playerState.troops.filter(t => t !== wallStack);
+    }
+
+    // Add to city
+    const cityStack = this.playerState.troops.find(
+      t => t.troopType === body.troopType && t.location === 'city'
+    );
+
+    if (cityStack) {
+      cityStack.quantity += body.quantity;
+    } else {
+      this.playerState.troops.push({
+        troopType: body.troopType,
+        quantity: body.quantity,
+        location: 'city'
+      });
+    }
+
+    await this.saveState();
+
+    this.pushEvent('troops_unstationed', {
+      troopType: body.troopType,
+      quantity: body.quantity
+    });
+
+    return new Response(JSON.stringify({ success: true }), {
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  /**
+   * Handle research start request
+   */
+  private async handleStartResearch(request: Request): Promise<Response> {
+    if (!this.playerState) {
+      return this.errorResponse('State not loaded', 500);
+    }
+
+    const body = await request.json() as {
+      researchType: string;
+    };
+
+    // Update resources
+    this.updateResources();
+
+    // Get research config
+    const researchConfig = getResearchConfig(body.researchType);
+    if (!researchConfig) {
+      return this.errorResponse(`Unknown research type: ${body.researchType}`);
+    }
+
+    // Check if already researching
+    if (this.playerState.city.researchQueue.length > 0) {
+      return this.errorResponse('Already researching');
+    }
+
+    // Get current level
+    const currentLevel = this.playerState.research[body.researchType] || 0;
+    const targetLevel = currentLevel + 1;
+
+    // Check max level
+    if (targetLevel > researchConfig.maxLevel) {
+      return this.errorResponse(`Research already at max level (${researchConfig.maxLevel})`);
+    }
+
+    // Get level config
+    const levelConfig = getResearchLevelConfig(body.researchType, targetLevel);
+    if (!levelConfig) {
+      return this.errorResponse(`Level ${targetLevel} not found for ${body.researchType}`);
+    }
+
+    // Check prerequisites
+    const prereqCheck = checkResearchPrerequisites(levelConfig, this.playerState);
+    if (!prereqCheck.valid) {
+      return this.errorResponse(prereqCheck.reason || 'Prerequisites not met');
+    }
+
+    // Check resources
+    const resourceCheck = hasEnoughResources(this.playerState.resources, levelConfig.cost);
+    if (!resourceCheck.valid) {
+      return this.errorResponse(`Insufficient ${resourceCheck.missing}`);
+    }
+
+    // Deduct resources
+    this.playerState.resources = deductResources(this.playerState.resources, levelConfig.cost);
+
+    // Apply speed multiplier to research time
+    const researchTime = applySpeedMultiplier(levelConfig.researchTime, this.env);
+
+    // Add to queue
+    const now = Date.now();
+    const queueItem: ResearchQueueItem = {
+      queueId: crypto.randomUUID(),
+      researchType: body.researchType,
+      toLevel: targetLevel,
+      startTime: now,
+      completionTime: now + (researchTime * 1000)
+    };
+
+    this.playerState.city.researchQueue.push(queueItem);
+
+    // Save and schedule alarm
+    await this.saveState();
+    await this.scheduleNextAlarm();
+
+    return new Response(JSON.stringify({
+      success: true,
+      queueId: queueItem.queueId,
+      completionTime: queueItem.completionTime,
+      duration: researchTime
+    }), {
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  /**
+   * Cancel research
+   */
+  private async handleResearchCancel(request: Request): Promise<Response> {
+    if (!this.playerState) {
+      return this.errorResponse('State not loaded', 500);
+    }
+
+    const body = await request.json() as { queueId: string };
+
+    const index = this.playerState.city.researchQueue.findIndex(item => item.queueId === body.queueId);
+    if (index === -1) {
+      return this.errorResponse('Queue item not found');
+    }
+
+    const item = this.playerState.city.researchQueue[index];
+
+    // Get refund amount (50% of cost)
+    const levelConfig = getResearchLevelConfig(item.researchType, item.toLevel);
+    if (levelConfig) {
+      this.playerState.resources.food += Math.floor((levelConfig.cost.food || 0) * 0.5);
+      this.playerState.resources.wood += Math.floor((levelConfig.cost.wood || 0) * 0.5);
+      this.playerState.resources.stone += Math.floor((levelConfig.cost.stone || 0) * 0.5);
+      this.playerState.resources.metal += Math.floor((levelConfig.cost.metal || 0) * 0.5);
+      this.playerState.resources.gold += Math.floor((levelConfig.cost.gold || 0) * 0.5);
+    }
+
+    // Remove from queue
+    this.playerState.city.researchQueue.splice(index, 1);
+
+    await this.saveState();
+    await this.scheduleNextAlarm();
+
+    this.pushEvent('research_cancelled', { queueId: body.queueId });
+
+    return new Response(JSON.stringify({ success: true }), {
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  /**
+   * Complete research
+   */
+  private async completeResearch(item: ResearchQueueItem): Promise<void> {
+    if (!this.playerState) return;
+
+    // Update research level
+    this.playerState.research[item.researchType] = item.toLevel;
+
+    // Remove from queue
+    this.playerState.city.researchQueue = this.playerState.city.researchQueue.filter(
+      q => q.queueId !== item.queueId
+    );
+
+    // Recalculate production rates (research may affect them)
+    this.updateResources();
+
+    // Notify client
+    this.pushEvent('research_complete', {
+      researchType: item.researchType,
+      level: item.toLevel
+    });
+
+    console.log(`[PlayerDO] Completed research: ${item.researchType} to level ${item.toLevel}`);
+  }
+
+  /**
+   * Send march (attack, gather, scout, etc.)
+   */
+  private async handleSendMarch(request: Request): Promise<Response> {
+    if (!this.playerState) {
+      return this.errorResponse('State not loaded', 500);
+    }
+
+    const body = await request.json() as {
+      destination: { x: number; y: number };
+      troops: MarchTroops[];
+      dragonId?: string; // Optional dragon to accompany the march
+      marchType: 'attack' | 'gather' | 'scout' | 'reinforce' | 'transport';
+      targetType: 'player' | 'npc' | 'wilderness';
+      targetId?: string;
+    };
+
+    // Update resources
+    this.updateResources();
+
+    // Check march slot limits based on Muster Point level
+    const musterPointLevel = this.playerState.city.innerCity['musterPoint_1']?.level || 0;
+    const maxMarchSlots = 1 + Math.floor(musterPointLevel / 5); // 1 base + 1 per 5 levels
+    const activeMarchCount = this.playerState.activeMarches.length;
+
+    if (activeMarchCount >= maxMarchSlots) {
+      return this.errorResponse(
+        `March limit reached (${activeMarchCount}/${maxMarchSlots}). Upgrade Muster Point for more march slots.`
+      );
+    }
+
+    // Validate march
+    const validation = validateMarch(
+      body.troops,
+      this.playerState.troops.map(t => ({ troopType: t.troopType, quantity: t.quantity })),
+      this.playerState.city.position,
+      body.destination
+    );
+
+    if (!validation.valid) {
+      return this.errorResponse(validation.error || 'Invalid march');
+    }
+
+    // Scout marches require Clairvoyance research and spy troops
+    if (body.marchType === 'scout') {
+      const clairvoyanceLevel = this.playerState.research['clairvoyance'] || 0;
+      if (clairvoyanceLevel === 0) {
+        return this.errorResponse('Scout missions require Clairvoyance research. Research Clairvoyance Level 1 to unlock scouting.');
+      }
+
+      // Check if march includes spy troops
+      const hasSpies = body.troops.some(t => t.troopType === 'spy');
+      if (!hasSpies) {
+        return this.errorResponse('Scout missions require spy troops. Train spies at the Training Grounds (requires Clairvoyance research).');
+      }
+    }
+
+    // Check if dragon is requested and available
+    let marchDragon: DragonInstance | undefined;
+    if (body.dragonId) {
+      const dragon = this.playerState.dragons.find(d => d.dragonId === body.dragonId);
+      if (!dragon) {
+        return this.errorResponse('Dragon not found');
+      }
+
+      // Check if dragon is already on a march
+      const dragonOnMarch = this.playerState.activeMarches.some(m => m.dragon?.dragonId === body.dragonId);
+      if (dragonOnMarch) {
+        return this.errorResponse('Dragon is already on a march');
+      }
+
+      // Check if dragon can fight (requires Aerial Combat research)
+      const aerialCombatLevel = this.playerState.research['aerialCombat'] || 0;
+
+      // Aerial Combat research is required to use dragons in combat
+      if (aerialCombatLevel === 0) {
+        return this.errorResponse(
+          'Aerial Combat research is required to use dragons in combat. Research Aerial Combat Level 1 to unlock dragon combat.'
+        );
+      }
+
+      const healthPercent = dragon.maxHealth > 0 ? (dragon.currentHealth / dragon.maxHealth) * 100 : 0;
+
+      if (!canDragonFight(healthPercent, aerialCombatLevel)) {
+        const minHealth = calculateHealthFightingMinimum(aerialCombatLevel);
+        return this.errorResponse(
+          `Dragon health too low (${healthPercent.toFixed(1)}%). Minimum: ${minHealth}% required (Aerial Combat Level ${aerialCombatLevel}). Wait for dragon to heal.`
+        );
+      }
+
+      marchDragon = { ...dragon }; // Clone dragon for march
+    }
+
+    // Calculate distance and travel time
+    const distance = calculateDistance(this.playerState.city.position, body.destination);
+    const marchSpeed = this.playerState.research['logistics'] || 0; // Speed research bonus
+    const baseTravelTime = calculateMarchTime(distance, body.troops, marchSpeed * 10);
+    const travelTime = applySpeedMultiplier(baseTravelTime, this.env);
+
+    // Deduct troops from player
+    for (const marchTroop of body.troops) {
+      const playerTroop = this.playerState.troops.find(t => t.troopType === marchTroop.troopType);
+      if (playerTroop) {
+        playerTroop.quantity -= marchTroop.quantity;
+        if (playerTroop.quantity <= 0) {
+          this.playerState.troops = this.playerState.troops.filter(t => t.troopType !== marchTroop.troopType);
+        }
+      }
+    }
+
+    // Create march
+    const now = Date.now();
+    const march: March = {
+      marchId: crypto.randomUUID(),
+      playerId: this.playerState.playerId,
+      playerName: this.playerState.playerName,
+      origin: this.playerState.city.position,
+      destination: body.destination,
+      troops: body.troops,
+      dragon: marchDragon, // Attach dragon if provided
+      marchType: body.marchType,
+      departureTime: now,
+      arrivalTime: now + (travelTime * 1000),
+      status: 'outbound',
+      targetType: body.targetType,
+      targetId: body.targetId
+    };
+
+    this.playerState.activeMarches.push(march);
+
+    // Save and schedule alarm
+    await this.saveState();
+    await this.scheduleNextAlarm();
+
+    this.pushEvent('march_sent', {
+      marchId: march.marchId,
+      arrivalTime: march.arrivalTime,
+      duration: travelTime
+    });
+
+    return new Response(JSON.stringify({
+      success: true,
+      marchId: march.marchId,
+      arrivalTime: march.arrivalTime,
+      duration: travelTime,
+      distance
+    }), {
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  /**
+   * Recall a march (only works if outbound or at target)
+   */
+  private async handleRecallMarch(request: Request): Promise<Response> {
+    if (!this.playerState) {
+      return this.errorResponse('State not loaded', 500);
+    }
+
+    const body = await request.json() as { marchId: string };
+
+    const march = this.playerState.activeMarches.find(m => m.marchId === body.marchId);
+    if (!march) {
+      return this.errorResponse('March not found');
+    }
+
+    if (march.status === 'returning' || march.status === 'completed') {
+      return this.errorResponse('March cannot be recalled');
+    }
+
+    const now = Date.now();
+
+    // If march hasn't arrived yet, recall from current position
+    if (march.status === 'outbound' && now < march.arrivalTime) {
+      // Calculate current position (for simplicity, just reverse from destination)
+      const marchSpeed = this.playerState.research['logistics'] || 0;
+      const returnTime = calculateMarchTime(
+        calculateDistance(march.destination, march.origin),
+        march.troops,
+        marchSpeed * 10
+      );
+
+      march.status = 'returning';
+      march.returnTime = now + (returnTime * 1000);
+
+      await this.saveState();
+      await this.scheduleNextAlarm();
+
+      this.pushEvent('march_recalled', { marchId: march.marchId });
+
+      return new Response(JSON.stringify({
+        success: true,
+        returnTime: march.returnTime
+      }), {
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+
+    // If at target, start return journey
+    if (march.status === 'at_target') {
+      const marchSpeed = this.playerState.research['logistics'] || 0;
+      const returnTime = calculateMarchTime(
+        calculateDistance(march.destination, march.origin),
+        march.troops,
+        marchSpeed * 10
+      );
+
+      march.status = 'returning';
+      march.returnTime = now + (returnTime * 1000);
+
+      await this.saveState();
+      await this.scheduleNextAlarm();
+
+      this.pushEvent('march_returning', { marchId: march.marchId });
+
+      return new Response(JSON.stringify({
+        success: true,
+        returnTime: march.returnTime
+      }), {
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+
+    return this.errorResponse('March cannot be recalled');
+  }
+
+  /**
+   * Process march arrival at target
+   */
+  private async processMarchArrival(march: March): Promise<void> {
+    if (!this.playerState) return;
+
+    console.log(`[PlayerDO] March ${march.marchId} arrived at target`);
+
+    // Handle different march types
+    if (march.marchType === 'attack' && march.targetType === 'npc') {
+      // Query NPC camp from database
+      const npcCamp = await this.env.DB.prepare(
+        'SELECT * FROM npc_camps WHERE x = ? AND y = ?'
+      ).bind(march.destination.x, march.destination.y).first();
+
+      if (!npcCamp) {
+        console.error(`[PlayerDO] NPC camp not found at ${march.destination.x},${march.destination.y}`);
+        march.status = 'returning';
+        march.returnTime = Date.now() + (applySpeedMultiplier(10, this.env) * 1000); // Return instantly
+        return;
+      }
+
+      // Parse NPC garrison and resources (full strength)
+      const fullGarrison = JSON.parse(npcCamp.garrison as string);
+      const fullResources = JSON.parse(npcCamp.resources as string);
+
+      // Calculate current strength based on regeneration
+      const currentStrength = calculateNPCStrength(
+        npcCamp.last_defeated as number | null,
+        npcCamp.current_strength_percent as number
+      );
+
+      // Scale garrison and resources based on current strength
+      const currentGarrison = scaleNPCGarrison(fullGarrison, currentStrength);
+      const currentResources = scaleNPCResources(fullResources, currentStrength);
+
+      console.log(`[PlayerDO] NPC camp at ${currentStrength}% strength`);
+
+      // Convert march troops to combat format
+      const attackerTroops: CombatTroop[] = march.troops.map(t => ({
+        troopType: t.troopType,
+        quantity: t.quantity
+      }));
+
+      // Convert NPC garrison to combat format
+      const defenderTroops: CombatTroop[] = Object.entries(currentGarrison).map(([type, data]: [string, any]) => ({
+        troopType: type,
+        quantity: data.quantity
+      }));
+
+      // Calculate dragon bonus if present
+      let attackerDragonBonus = 0;
+      if (march.dragon) {
+        const bonus = calculateDragonBonus(march.dragon.dragonType, march.dragon.level);
+        // Average attack and defense multipliers, convert to percentage bonus
+        const avgMultiplier = (bonus.attackMultiplier + bonus.defenseMultiplier) / 2;
+        attackerDragonBonus = (avgMultiplier - 1) * 100; // Convert to percentage (e.g., 1.55 -> 55%)
+      }
+
+      // Prepare combat sides
+      const attacker: CombatSide = {
+        playerId: this.playerState.playerId,
+        playerName: this.playerState.playerName,
+        troops: attackerTroops,
+        research: this.playerState.research,
+        dragonBonus: attackerDragonBonus
+      };
+
+      const defender: CombatSide = {
+        playerId: 'npc_' + npcCamp.camp_id,
+        playerName: `${npcCamp.camp_type} Camp Lv.${npcCamp.level}`,
+        troops: defenderTroops,
+        research: {}, // NPCs don't have research
+        dragonBonus: 0
+      };
+
+      // Resolve combat
+      const combatResult = resolveCombat(attacker, defender);
+
+      // Calculate loot if attacker won
+      let loot = null;
+      if (combatResult.winner === 'attacker') {
+        const capacity = calculateMarchCapacity(march.troops);
+        const victorySeverity = combatResult.defenderSurvivors.reduce((sum, t) => sum + t.quantity, 0) === 0 ? 1.0 : 0.7;
+        loot = calculateLoot(currentResources, capacity, victorySeverity);
+        march.resources = loot;
+      }
+
+      // Calculate post-battle strength
+      const survivingGarrison: Record<string, { quantity: number }> = {};
+      for (const survivor of combatResult.defenderSurvivors) {
+        survivingGarrison[survivor.troopType] = { quantity: survivor.quantity };
+      }
+      const newStrength = calculatePostBattleStrength(survivingGarrison, fullGarrison);
+
+      // Update NPC camp strength in database
+      const now = Date.now();
+      await this.env.DB.prepare(`
+        UPDATE npc_camps
+        SET current_strength_percent = ?,
+            last_defeated = ?
+        WHERE camp_id = ?
+      `).bind(
+        newStrength,
+        newStrength === 0 ? now : (npcCamp.last_defeated || null),
+        npcCamp.camp_id
+      ).run();
+
+      console.log(`[PlayerDO] NPC camp strength after battle: ${newStrength}%`);
+
+      // Update march with survivors
+      march.troops = combatResult.attackerSurvivors;
+
+      // Handle dragon damage if dragon was present
+      if (march.dragon) {
+        // Calculate dragon damage based on combat intensity
+        // Dragon takes damage proportional to troop losses
+        const totalAttackerTroops = attackerTroops.reduce((sum, t) => sum + t.quantity, 0);
+        const totalLosses = combatResult.attackerLosses.reduce((sum, t) => sum + t.quantity, 0);
+        const lossRate = totalAttackerTroops > 0 ? totalLosses / totalAttackerTroops : 0;
+
+        // Dragon takes 5-20% damage based on loss rate
+        const dragonDamagePercent = Math.min(20, 5 + (lossRate * 15));
+        const dragonDamage = Math.floor(march.dragon.maxHealth * (dragonDamagePercent / 100));
+        march.dragon.currentHealth = Math.max(0, march.dragon.currentHealth - dragonDamage);
+
+        console.log(`[PlayerDO] Dragon ${march.dragon.dragonType} took ${dragonDamage} damage (${dragonDamagePercent.toFixed(1)}%), health: ${march.dragon.currentHealth}/${march.dragon.maxHealth}`);
+      }
+
+      // Save battle report to database
+      const battleId = crypto.randomUUID();
+      await this.env.DB.prepare(`
+        INSERT INTO battle_reports (battle_id, attacker_id, defender_id, timestamp, winner, attacker_losses, defender_losses, loot, combat_log)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).bind(
+        battleId,
+        this.playerState.playerId,
+        'npc_' + npcCamp.camp_id,
+        Date.now(),
+        combatResult.winner,
+        JSON.stringify(combatResult.attackerLosses),
+        JSON.stringify(combatResult.defenderLosses),
+        loot ? JSON.stringify(loot) : null,
+        JSON.stringify(combatResult.rounds)
+      ).run();
+
+      // Send battle report message to player
+      await this.sendMessage({
+        recipient_id: this.playerState.playerId,
+        sender_id: null,
+        sender_name: 'Battle System',
+        message_type: 'battle_report',
+        subject: `Battle Report: ${npcCamp.camp_type} Camp Lv.${npcCamp.level}`,
+        body: `Your forces ${combatResult.winner === 'attacker' ? 'defeated' : 'were defeated by'} the ${npcCamp.camp_type} camp.`,
+        metadata: JSON.stringify({
+          battleId,
+          marchId: march.marchId,
+          winner: combatResult.winner,
+          loot: loot || null,
+          attackerLosses: combatResult.attackerLosses,
+          defenderLosses: combatResult.defenderLosses
+        })
+      });
+
+      march.status = 'returning';
+
+      // Calculate return time
+      const marchSpeed = this.playerState.research['logistics'] || 0;
+      const baseReturnTime = calculateMarchTime(
+        calculateDistance(march.destination, march.origin),
+        march.troops,
+        marchSpeed * 10
+      );
+      const returnTime = applySpeedMultiplier(baseReturnTime, this.env);
+
+      march.returnTime = Date.now() + (returnTime * 1000);
+
+      this.pushEvent('march_arrived', {
+        marchId: march.marchId,
+        combatResult: combatResult.winner,
+        loot,
+        returnTime: march.returnTime
+      });
+
+      console.log(`[PlayerDO] March ${march.marchId} ${combatResult.winner === 'attacker' ? 'won' : 'lost'} battle, returning`);
+    } else if (march.marchType === 'attack' && march.targetType === 'player') {
+      // PvP Combat
+      // Query target player's city tile
+      const targetTile = await this.env.DB.prepare(
+        'SELECT owner_id FROM world_tiles WHERE x = ? AND y = ? AND tile_type = ?'
+      ).bind(march.destination.x, march.destination.y, 'city').first();
+
+      if (!targetTile || !targetTile.owner_id) {
+        console.error(`[PlayerDO] No player city found at ${march.destination.x},${march.destination.y}`);
+        march.status = 'returning';
+        march.returnTime = Date.now() + (applySpeedMultiplier(10, this.env) * 1000);
+        return;
+      }
+
+      const targetPlayerId = targetTile.owner_id as string;
+
+      // Get target player's Durable Object
+      const targetPlayerDO = this.env.PLAYER_DO.get(this.env.PLAYER_DO.idFromName(targetPlayerId));
+      const targetStateResponse = await targetPlayerDO.fetch(new Request('https://fake/api/player/state'));
+      const targetState = await targetStateResponse.json() as any;
+
+      if (!targetState) {
+        console.error(`[PlayerDO] Could not load target player state for ${targetPlayerId}`);
+        march.status = 'returning';
+        march.returnTime = Date.now() + (applySpeedMultiplier(10, this.env) * 1000);
+        return;
+      }
+
+      // Convert march troops to combat format
+      const attackerTroops: CombatTroop[] = march.troops.map(t => ({
+        troopType: t.troopType,
+        quantity: t.quantity
+      }));
+
+      // Get defender's wall troops (only troops stationed on wall defend)
+      const defenderTroops: CombatTroop[] = (targetState.troops || [])
+        .filter((t: any) => t.location === 'wall')
+        .map((t: any) => ({
+          troopType: t.troopType,
+          quantity: t.quantity
+        }));
+
+      // Calculate attacker dragon bonus if present
+      let attackerDragonBonus = 0;
+      if (march.dragon) {
+        const bonus = calculateDragonBonus(march.dragon.dragonType, march.dragon.level);
+        const avgMultiplier = (bonus.attackMultiplier + bonus.defenseMultiplier) / 2;
+        attackerDragonBonus = (avgMultiplier - 1) * 100;
+      }
+
+      // Calculate defender dragon bonus (check if defender has a dragon stationed at city)
+      let defenderDragonBonus = 0;
+      // TODO: In future, defenders could have dragons defending their city
+      // For now, dragons only provide bonuses when on marches
+
+      // Prepare combat sides
+      const attacker: CombatSide = {
+        playerId: this.playerState.playerId,
+        playerName: this.playerState.playerName,
+        troops: attackerTroops,
+        research: this.playerState.research,
+        dragonBonus: attackerDragonBonus
+      };
+
+      const defender: CombatSide = {
+        playerId: targetPlayerId,
+        playerName: targetState.playerName || 'Unknown Player',
+        troops: defenderTroops,
+        research: targetState.research || {},
+        dragonBonus: defenderDragonBonus
+      };
+
+      // Resolve combat
+      const combatResult = resolveCombat(attacker, defender);
+
+      // Calculate plunder if attacker won
+      let loot = null;
+      if (combatResult.winner === 'attacker') {
+        const capacity = calculateMarchCapacity(march.troops);
+
+        // Get defender's Storage Vault level and calculate protected resources
+        const vaultLevel = targetState.city?.innerCity?.storageVault_1?.level || 0;
+        const vaultProtection = this.calculateVaultProtection(vaultLevel);
+
+        // Calculate total resources
+        const totalResources = {
+          food: targetState.resources?.food || 0,
+          wood: targetState.resources?.wood || 0,
+          stone: targetState.resources?.stone || 0,
+          metal: targetState.resources?.metal || 0,
+          gold: targetState.resources?.gold || 0
+        };
+
+        // Calculate unprotected resources (subtract vault protection)
+        const unprotectedResources = {
+          food: Math.max(0, totalResources.food - vaultProtection.food),
+          wood: Math.max(0, totalResources.wood - vaultProtection.wood),
+          stone: Math.max(0, totalResources.stone - vaultProtection.stone),
+          metal: Math.max(0, totalResources.metal - vaultProtection.metal),
+          gold: Math.max(0, totalResources.gold - vaultProtection.gold)
+        };
+
+        // Can plunder 10% of unprotected resources
+        const defenderResources = {
+          food: Math.floor(unprotectedResources.food * 0.1),
+          wood: Math.floor(unprotectedResources.wood * 0.1),
+          stone: Math.floor(unprotectedResources.stone * 0.1),
+          metal: Math.floor(unprotectedResources.metal * 0.1),
+          gold: Math.floor(unprotectedResources.gold * 0.1)
+        };
+
+        const victorySeverity = combatResult.defenderSurvivors.reduce((sum, t) => sum + t.quantity, 0) === 0 ? 1.0 : 0.7;
+        loot = calculateLoot(defenderResources, capacity, victorySeverity);
+        march.resources = loot;
+
+        // Deduct resources from defender (notify via their DO)
+        await targetPlayerDO.fetch(new Request('https://fake/internal/plunder', {
+          method: 'POST',
+          body: JSON.stringify({
+            loot,
+            attackerId: this.playerState.playerId,
+            losses: combatResult.defenderLosses
+          })
+        }));
+      }
+
+      // Update march with survivors
+      march.troops = combatResult.attackerSurvivors;
+
+      // Handle dragon damage if dragon was present
+      if (march.dragon) {
+        // Calculate dragon damage based on combat intensity
+        const totalAttackerTroops = attackerTroops.reduce((sum, t) => sum + t.quantity, 0);
+        const totalLosses = combatResult.attackerLosses.reduce((sum, t) => sum + t.quantity, 0);
+        const lossRate = totalAttackerTroops > 0 ? totalLosses / totalAttackerTroops : 0;
+
+        // Dragon takes 5-20% damage based on loss rate
+        const dragonDamagePercent = Math.min(20, 5 + (lossRate * 15));
+        const dragonDamage = Math.floor(march.dragon.maxHealth * (dragonDamagePercent / 100));
+        march.dragon.currentHealth = Math.max(0, march.dragon.currentHealth - dragonDamage);
+
+        console.log(`[PlayerDO] Dragon ${march.dragon.dragonType} took ${dragonDamage} damage (${dragonDamagePercent.toFixed(1)}%), health: ${march.dragon.currentHealth}/${march.dragon.maxHealth}`);
+      }
+
+      // Save battle report to database
+      const battleId = crypto.randomUUID();
+      await this.env.DB.prepare(`
+        INSERT INTO battle_reports (battle_id, attacker_id, defender_id, timestamp, winner, attacker_losses, defender_losses, loot, combat_log)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).bind(
+        battleId,
+        this.playerState.playerId,
+        targetPlayerId,
+        Date.now(),
+        combatResult.winner,
+        JSON.stringify(combatResult.attackerLosses),
+        JSON.stringify(combatResult.defenderLosses),
+        loot ? JSON.stringify(loot) : null,
+        JSON.stringify(combatResult.rounds)
+      ).run();
+
+      // Send battle report to attacker
+      await this.sendMessage({
+        recipient_id: this.playerState.playerId,
+        sender_id: null,
+        sender_name: 'Battle System',
+        message_type: 'battle_report',
+        subject: `Battle Report: Attack on ${targetState.playerName}`,
+        body: `Your forces ${combatResult.winner === 'attacker' ? 'defeated' : 'were defeated by'} ${targetState.playerName}.`,
+        metadata: JSON.stringify({
+          battleId,
+          marchId: march.marchId,
+          winner: combatResult.winner,
+          loot: loot || null,
+          attackerLosses: combatResult.attackerLosses,
+          defenderLosses: combatResult.defenderLosses,
+          isAttacker: true
+        })
+      });
+
+      // Send battle report to defender
+      await this.sendMessage({
+        recipient_id: targetPlayerId,
+        sender_id: null,
+        sender_name: 'Battle System',
+        message_type: 'battle_report',
+        subject: `Battle Report: Defended against ${this.playerState.playerName}`,
+        body: `${this.playerState.playerName} attacked your city. ${combatResult.winner === 'defender' ? 'Your defenses held!' : 'Your city was plundered!'}`,
+        metadata: JSON.stringify({
+          battleId,
+          winner: combatResult.winner,
+          attackerLosses: combatResult.attackerLosses,
+          defenderLosses: combatResult.defenderLosses,
+          isAttacker: false
+        })
+      });
+
+      march.status = 'returning';
+
+      // Calculate return time
+      const marchSpeed = this.playerState.research['logistics'] || 0;
+      const baseReturnTime = calculateMarchTime(
+        calculateDistance(march.destination, march.origin),
+        march.troops,
+        marchSpeed * 10
+      );
+      const returnTime = applySpeedMultiplier(baseReturnTime, this.env);
+
+      march.returnTime = Date.now() + (returnTime * 1000);
+
+      this.pushEvent('march_arrived', {
+        marchId: march.marchId,
+        combatResult: combatResult.winner,
+        loot,
+        returnTime: march.returnTime
+      });
+
+      console.log(`[PlayerDO] PvP March ${march.marchId} ${combatResult.winner === 'attacker' ? 'won' : 'lost'} battle against ${targetState.playerName}, returning`);
+    } else if (march.marchType === 'gather') {
+      // Gathering from wilderness
+      const capacity = calculateMarchCapacity(march.troops);
+
+      // Query wilderness tile to get resource type
+      const wildernessTile = await this.env.DB.prepare(
+        'SELECT resource_type, level FROM world_tiles WHERE x = ? AND y = ? AND tile_type = ?'
+      ).bind(march.destination.x, march.destination.y, 'wilderness').first();
+
+      // Calculate gather amount (50% of capacity)
+      const gatherAmount = Math.floor(capacity * 0.5);
+
+      // Allocate resources based on wilderness type
+      // Primary resource gets 70%, others split remaining 30%
+      march.resources = { food: 0, wood: 0, stone: 0, metal: 0 };
+
+      if (wildernessTile && wildernessTile.resource_type) {
+        const resourceType = wildernessTile.resource_type as string;
+        const primaryAmount = Math.floor(gatherAmount * 0.70);
+        const secondaryAmount = Math.floor(gatherAmount * 0.10);
+
+        switch (resourceType) {
+          case 'forest':
+            march.resources.wood = primaryAmount;
+            march.resources.food = secondaryAmount;
+            march.resources.stone = secondaryAmount;
+            march.resources.metal = secondaryAmount;
+            break;
+          case 'savanna':
+          case 'lakes':
+            march.resources.food = primaryAmount;
+            march.resources.wood = secondaryAmount;
+            march.resources.stone = secondaryAmount;
+            march.resources.metal = secondaryAmount;
+            break;
+          case 'hills':
+            march.resources.stone = primaryAmount;
+            march.resources.food = secondaryAmount;
+            march.resources.wood = secondaryAmount;
+            march.resources.metal = secondaryAmount;
+            break;
+          case 'mountains':
+            march.resources.metal = primaryAmount;
+            march.resources.food = secondaryAmount;
+            march.resources.wood = secondaryAmount;
+            march.resources.stone = secondaryAmount;
+            break;
+          case 'plains':
+            // Plains give food and some gold
+            march.resources.food = primaryAmount;
+            march.resources.wood = secondaryAmount;
+            march.resources.stone = secondaryAmount;
+            march.resources.metal = secondaryAmount;
+            march.resources.gold = Math.floor(gatherAmount * 0.05);
+            break;
+          default:
+            // Fallback to generic distribution
+            march.resources.food = Math.floor(gatherAmount * 0.4);
+            march.resources.wood = Math.floor(gatherAmount * 0.3);
+            march.resources.stone = Math.floor(gatherAmount * 0.2);
+            march.resources.metal = Math.floor(gatherAmount * 0.1);
+        }
+      } else {
+        // No wilderness tile found, use generic distribution
+        march.resources.food = Math.floor(gatherAmount * 0.4);
+        march.resources.wood = Math.floor(gatherAmount * 0.3);
+        march.resources.stone = Math.floor(gatherAmount * 0.2);
+        march.resources.metal = Math.floor(gatherAmount * 0.1);
+      }
+
+      march.status = 'returning';
+
+      const marchSpeed = this.playerState.research['logistics'] || 0;
+      const baseReturnTime = calculateMarchTime(
+        calculateDistance(march.destination, march.origin),
+        march.troops,
+        marchSpeed * 10
+      );
+      const returnTime = applySpeedMultiplier(baseReturnTime, this.env);
+
+      march.returnTime = Date.now() + (returnTime * 1000);
+
+      this.pushEvent('march_arrived', {
+        marchId: march.marchId,
+        resources: march.resources,
+        returnTime: march.returnTime
+      });
+    } else if (march.marchType === 'scout') {
+      // Scout/Spy march - gather intelligence
+
+      // Check if player has Clairvoyance research
+      const clairvoyanceLevel = this.playerState.research['clairvoyance'] || 0;
+      if (clairvoyanceLevel === 0) {
+        // No Clairvoyance research, scout fails
+        march.status = 'returning';
+        march.returnTime = Date.now() + (applySpeedMultiplier(10, this.env) * 1000);
+
+        this.pushEvent('scout_failed', {
+          marchId: march.marchId,
+          reason: 'Clairvoyance research required'
+        });
+        return;
+      }
+
+      let scoutReport: any = {
+        location: march.destination,
+        scoutedAt: Date.now()
+      };
+
+      if (march.targetType === 'player') {
+        // Scout player city
+        const targetTile = await this.env.DB.prepare(
+          'SELECT owner_id FROM world_tiles WHERE x = ? AND y = ? AND tile_type = ?'
+        ).bind(march.destination.x, march.destination.y, 'city').first();
+
+        if (targetTile && targetTile.owner_id) {
+          const targetPlayerId = targetTile.owner_id as string;
+
+          // Get target player's Durable Object
+          const targetPlayerDO = this.env.PLAYER_DO.get(this.env.PLAYER_DO.idFromName(targetPlayerId));
+          const targetStateResponse = await targetPlayerDO.fetch(new Request('https://fake/api/player/state'));
+          const targetState = await targetStateResponse.json() as any;
+
+          if (targetState) {
+            // Calculate scout success based on Clairvoyance vs Sentinel
+            const sentinelLevel = targetState.city?.innerCity?.sentinel_1?.level || 0;
+            const successChance = Math.min(95, 50 + (clairvoyanceLevel * 5) - (sentinelLevel * 3));
+            const scoutSucceeded = Math.random() * 100 < successChance;
+
+            if (scoutSucceeded) {
+              scoutReport.success = true;
+              scoutReport.targetPlayer = targetState.playerName;
+              scoutReport.targetAlliance = targetState.allianceId || null;
+
+              // Full intelligence if Clairvoyance is high enough
+              if (clairvoyanceLevel >= sentinelLevel) {
+                scoutReport.troops = targetState.troops?.filter((t: any) => t.location === 'wall') || [];
+                scoutReport.resources = {
+                  food: Math.floor(targetState.resources?.food || 0),
+                  wood: Math.floor(targetState.resources?.wood || 0),
+                  stone: Math.floor(targetState.resources?.stone || 0),
+                  metal: Math.floor(targetState.resources?.metal || 0)
+                };
+                scoutReport.wallLevel = targetState.city?.innerCity?.wall_1?.level || 0;
+              } else {
+                // Partial intelligence
+                scoutReport.approximate = true;
+                const totalTroops = targetState.troops?.reduce((sum: number, t: any) => sum + (t.location === 'wall' ? t.quantity : 0), 0) || 0;
+                scoutReport.approximateTroops = Math.floor(totalTroops / 1000) * 1000; // Round to nearest thousand
+              }
+            } else {
+              scoutReport.success = false;
+              scoutReport.detected = true;
+              scoutReport.reason = 'Scout detected by Sentinel';
+
+              // Notify defender
+              await this.sendMessage({
+                recipient_id: targetPlayerId,
+                sender_id: null,
+                sender_name: 'Intelligence Report',
+                message_type: 'scout_report',
+                subject: 'Enemy Scout Detected',
+                body: `An enemy scout from ${this.playerState.playerName} was detected approaching your city.`,
+                metadata: JSON.stringify({
+                  scouterId: this.playerState.playerId,
+                  location: march.destination
+                })
+              });
+            }
+          }
+        } else {
+          scoutReport.success = false;
+          scoutReport.reason = 'No city found at target location';
+        }
+      } else if (march.targetType === 'npc') {
+        // Scout NPC camp - always successful
+        const npcCamp = await this.env.DB.prepare(
+          'SELECT * FROM npc_camps WHERE x = ? AND y = ?'
+        ).bind(march.destination.x, march.destination.y).first();
+
+        if (npcCamp) {
+          const currentStrength = calculateNPCStrength(
+            npcCamp.last_defeated as number | null,
+            npcCamp.current_strength_percent as number
+          );
+
+          scoutReport.success = true;
+          scoutReport.targetType = 'npc_camp';
+          scoutReport.campType = npcCamp.camp_type;
+          scoutReport.level = npcCamp.level;
+          scoutReport.currentStrength = currentStrength;
+
+          if (clairvoyanceLevel >= 3) {
+            // Show garrison details at higher Clairvoyance levels
+            const fullGarrison = JSON.parse(npcCamp.garrison as string);
+            const currentGarrison = scaleNPCGarrison(fullGarrison, currentStrength);
+            scoutReport.garrison = currentGarrison;
+          }
+        } else {
+          scoutReport.success = false;
+          scoutReport.reason = 'No NPC camp found';
+        }
+      } else if (march.targetType === 'wilderness') {
+        // Scout wilderness - always successful
+        const wildernessTile = await this.env.DB.prepare(
+          'SELECT * FROM world_tiles WHERE x = ? AND y = ? AND tile_type = ?'
+        ).bind(march.destination.x, march.destination.y, 'wilderness').first();
+
+        if (wildernessTile) {
+          scoutReport.success = true;
+          scoutReport.targetType = 'wilderness';
+          scoutReport.resourceType = wildernessTile.resource_type;
+          scoutReport.level = wildernessTile.level;
+          scoutReport.resourceBonus = wildernessTile.resource_bonus;
+        } else {
+          scoutReport.success = false;
+          scoutReport.reason = 'No wilderness found';
+        }
+      }
+
+      // Send scout report message
+      await this.sendMessage({
+        recipient_id: this.playerState.playerId,
+        sender_id: null,
+        sender_name: 'Intelligence',
+        message_type: 'scout_report',
+        subject: `Scout Report: (${march.destination.x}, ${march.destination.y})`,
+        body: scoutReport.success ?
+          `Your scout successfully gathered intelligence.` :
+          `Scout mission failed: ${scoutReport.reason}`,
+        metadata: JSON.stringify({
+          marchId: march.marchId,
+          report: scoutReport
+        })
+      });
+
+      march.status = 'returning';
+      const marchSpeed = this.playerState.research['logistics'] || 0;
+      const baseReturnTime = calculateMarchTime(
+        calculateDistance(march.destination, march.origin),
+        march.troops,
+        marchSpeed * 10
+      );
+      const returnTime = applySpeedMultiplier(baseReturnTime, this.env);
+      march.returnTime = Date.now() + (returnTime * 1000);
+
+      this.pushEvent('scout_returned', {
+        marchId: march.marchId,
+        report: scoutReport,
+        returnTime: march.returnTime
+      });
+    } else {
+      // Other march types (reinforce, transport)
+      march.status = 'at_target';
+
+      this.pushEvent('march_arrived', {
+        marchId: march.marchId,
+        status: 'at_target'
+      });
+    }
+  }
+
+  /**
+   * Process march return to origin
+   */
+  private async processMarchReturn(march: March): Promise<void> {
+    if (!this.playerState) return;
+
+    console.log(`[PlayerDO] March ${march.marchId} returned home`);
+
+    // Return troops to player
+    for (const marchTroop of march.troops) {
+      const existingTroop = this.playerState.troops.find(t => t.troopType === marchTroop.troopType);
+      if (existingTroop) {
+        existingTroop.quantity += marchTroop.quantity;
+      } else {
+        this.playerState.troops.push({
+          troopType: marchTroop.troopType,
+          quantity: marchTroop.quantity,
+          location: 'home'
+        });
+      }
+    }
+
+    // Return dragon to player if present
+    if (march.dragon) {
+      const playerDragon = this.playerState.dragons.find(d => d.dragonId === march.dragon!.dragonId);
+      if (playerDragon) {
+        // Update dragon health from march
+        playerDragon.currentHealth = march.dragon.currentHealth;
+        console.log(`[PlayerDO] Dragon ${playerDragon.dragonType} returned with ${playerDragon.currentHealth}/${playerDragon.maxHealth} health`);
+      }
+    }
+
+    // Add resources if any
+    if (march.resources) {
+      this.playerState.resources.food += march.resources.food || 0;
+      this.playerState.resources.wood += march.resources.wood || 0;
+      this.playerState.resources.stone += march.resources.stone || 0;
+      this.playerState.resources.metal += march.resources.metal || 0;
+      this.playerState.resources.gold += march.resources.gold || 0;
+
+      this.pushEvent('march_returned', {
+        marchId: march.marchId,
+        troops: march.troops,
+        resources: march.resources
+      });
+    } else {
+      this.pushEvent('march_returned', {
+        marchId: march.marchId,
+        troops: march.troops
+      });
+    }
+
+    // Remove march from active marches
+    march.status = 'completed';
+    this.playerState.activeMarches = this.playerState.activeMarches.filter(
+      m => m.marchId !== march.marchId
+    );
+  }
+
+  /**
+   * Get player messages (inbox)
+   */
+  private async handleGetMessages(request: Request): Promise<Response> {
+    if (!this.playerState) {
+      return this.errorResponse('State not loaded', 500);
+    }
+
+    const url = new URL(request.url);
+    const limit = parseInt(url.searchParams.get('limit') || '20');
+    const offset = parseInt(url.searchParams.get('offset') || '0');
+    const unreadOnly = url.searchParams.get('unreadOnly') === 'true';
+
+    let query = 'SELECT * FROM messages WHERE recipient_id = ?';
+    const params: any[] = [this.playerState.playerId];
+
+    if (unreadOnly) {
+      query += ' AND is_read = 0';
+    }
+
+    query += ' ORDER BY timestamp DESC LIMIT ? OFFSET ?';
+    params.push(limit, offset);
+
+    const result = await this.env.DB.prepare(query)
+      .bind(...params)
+      .all();
+
+    return new Response(JSON.stringify({
+      messages: result.results,
+      total: result.results?.length || 0
+    }), {
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  /**
+   * Mark message as read
+   */
+  private async handleMarkMessageRead(request: Request): Promise<Response> {
+    if (!this.playerState) {
+      return this.errorResponse('State not loaded', 500);
+    }
+
+    const body = await request.json() as { messageId: string };
+
+    await this.env.DB.prepare(
+      'UPDATE messages SET is_read = 1 WHERE message_id = ? AND recipient_id = ?'
+    ).bind(body.messageId, this.playerState.playerId).run();
+
+    return new Response(JSON.stringify({ success: true }), {
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  /**
+   * Send message to player (battle reports, system messages, etc.)
+   */
+  private async sendMessage(message: {
+    recipient_id: string;
+    sender_id: string | null;
+    sender_name: string;
+    message_type: string;
+    subject: string;
+    body: string;
+    metadata: string;
+  }): Promise<void> {
+    const messageId = crypto.randomUUID();
+    const timestamp = Date.now();
+
+    await this.env.DB.prepare(`
+      INSERT INTO messages (message_id, recipient_id, sender_id, sender_name, message_type, subject, body, metadata, timestamp)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).bind(
+      messageId,
+      message.recipient_id,
+      message.sender_id,
+      message.sender_name,
+      message.message_type,
+      message.subject,
+      message.body,
+      message.metadata,
+      timestamp
+    ).run();
+
+    // Notify player via WebSocket
+    this.pushEvent('new_message', {
+      messageId,
+      messageType: message.message_type,
+      subject: message.subject
+    });
+  }
+
+  /**
+   * Handle plundering from PvP combat (called by attacker's DO)
+   */
+  private async handlePlunder(request: Request): Promise<Response> {
+    if (!this.playerState) {
+      return this.errorResponse('State not loaded', 500);
+    }
+
+    const body = await request.json() as {
+      loot: { food?: number; wood?: number; stone?: number; metal?: number; gold?: number };
+      attackerId: string;
+      losses: Array<{ troopType: string; quantity: number }>;
+    };
+
+    // Deduct resources
+    if (body.loot) {
+      this.playerState.resources.food = Math.max(0, this.playerState.resources.food - (body.loot.food || 0));
+      this.playerState.resources.wood = Math.max(0, this.playerState.resources.wood - (body.loot.wood || 0));
+      this.playerState.resources.stone = Math.max(0, this.playerState.resources.stone - (body.loot.stone || 0));
+      this.playerState.resources.metal = Math.max(0, this.playerState.resources.metal - (body.loot.metal || 0));
+      this.playerState.resources.gold = Math.max(0, this.playerState.resources.gold - (body.loot.gold || 0));
+    }
+
+    // Deduct troop losses (only from wall - city troops are safe)
+    for (const loss of body.losses) {
+      const wallTroop = this.playerState.troops.find(
+        t => t.troopType === loss.troopType && t.location === 'wall'
+      );
+      if (wallTroop) {
+        wallTroop.quantity = Math.max(0, wallTroop.quantity - loss.quantity);
+        if (wallTroop.quantity === 0) {
+          this.playerState.troops = this.playerState.troops.filter(t => t !== wallTroop);
+        }
+      }
+    }
+
+    await this.saveState();
+
+    // Notify player via WebSocket
+    this.pushEvent('plundered', {
+      attackerId: body.attackerId,
+      loot: body.loot,
+      losses: body.losses
+    });
+
+    return new Response(JSON.stringify({ success: true }), {
+      headers: { 'Content-Type': 'application/json' }
+    });
+  }
+
+  /**
+   * Create a trade offer (sell on marketplace)
+   */
+  private async handleCreateTradeOffer(request: Request): Promise<Response> {
+    if (!this.playerState) {
+      return this.errorResponse('State not loaded', 500);
+    }
+
+    const body = await request.json() as {
+      resourceType: 'food' | 'wood' | 'stone' | 'metal' | 'gold';
+      quantity: number;
+      pricePerUnit: number;
+    };
+
+    // Validate requirements: Factory L1, Levitation L1, Mercantilism L1
+    const factoryLevel = this.playerState.city.innerCity.factory_1?.level || 0;
+    const levitationLevel = this.playerState.research['levitation'] || 0;
+    const mercantilismLevel = this.playerState.research['mercantilism'] || 0;
+
+    if (factoryLevel < 1) {
+      return this.errorResponse('Trading requires Factory Level 1');
+    }
+    if (levitationLevel < 1) {
+      return this.errorResponse('Trading requires Levitation Level 1 research');
+    }
+    if (mercantilismLevel < 1) {
+      return this.errorResponse('Trading requires Mercantilism Level 1 research');
+    }
+
+    // Check trade slot limit (Mercantilism level = max concurrent trades)
+    if (this.playerState.activeTradeOffers.length >= mercantilismLevel) {
+      return this.errorResponse(`Trade limit reached (${this.playerState.activeTradeOffers.length}/${mercantilismLevel}). Research Mercantilism to unlock more slots.`);
+    }
+
+    // Validate inputs
+    if (!['food', 'wood', 'stone', 'metal', 'gold'].includes(body.resourceType)) {
+      return this.errorResponse('Invalid resource type');
+    }
+    if (body.quantity <= 0 || body.pricePerUnit <= 0) {
+      return this.errorResponse('Quantity and price must be positive');
+    }
+
+    // Calculate costs
+    const totalPrice = Math.floor(body.quantity * body.pricePerUnit);
+    const sellerFee = body.quantity; // Fee in gold equals quantity
+
+    // Check if player has enough resources
+    const currentResource = this.playerState.resources[body.resourceType] || 0;
+    const currentGold = this.playerState.resources.gold || 0;
+
+    if (currentResource < body.quantity) {
+      return this.errorResponse(`Insufficient ${body.resourceType}. Have: ${currentResource}, Need: ${body.quantity}`);
+    }
+    if (currentGold < sellerFee) {
+      return this.errorResponse(`Insufficient gold for seller fee. Have: ${currentGold}, Need: ${sellerFee}`);
+    }
+
+    // Deduct resources and fee
+    this.playerState.resources[body.resourceType] -= body.quantity;
+    this.playerState.resources.gold -= sellerFee;
+
+    // Create trade offer
+    const offerId = crypto.randomUUID();
+    const createdAt = Date.now();
+    const tradeDuration = 30 * 60; // 30 minutes
+    const expiresAt = createdAt + (applySpeedMultiplier(tradeDuration, this.env) * 1000);
+
+    const offer: TradeOffer = {
+      offerId,
+      resourceType: body.resourceType,
+      quantity: body.quantity,
+      pricePerUnit: body.pricePerUnit,
+      totalPrice,
+      sellerFee,
+      createdAt,
+      expiresAt
+    };
+
+    // Add to player state
+    this.playerState.activeTradeOffers.push(offer);
+
+    // Save to database
+    await this.env.DB.prepare(`
+      INSERT INTO trade_offers (offer_id, seller_id, resource_type, quantity, price_per_unit, total_price, seller_fee, created_at, expires_at, status)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'active')
+    `).bind(
+      offerId,
+      this.playerState.playerId,
+      body.resourceType,
+      body.quantity,
+      body.pricePerUnit,
+      totalPrice,
+      sellerFee,
+      createdAt,
+      expiresAt
+    ).run();
+
+    await this.saveState();
+
+    // Set alarm for expiry
+    const nextAlarm = await this.state.storage.getAlarm();
+    if (!nextAlarm || expiresAt < nextAlarm) {
+      await this.state.storage.setAlarm(expiresAt);
+    }
+
+    return new Response(JSON.stringify({
+      success: true,
+      offer: {
+        offerId,
+        resourceType: body.resourceType,
+        quantity: body.quantity,
+        pricePerUnit: body.pricePerUnit,
+        totalPrice,
+        expiresAt
+      }
+    }), {
+      headers: { 'Content-Type': 'application/json' }
+    });
+  }
+
+  /**
+   * Cancel a trade offer
+   */
+  private async handleCancelTradeOffer(request: Request): Promise<Response> {
+    if (!this.playerState) {
+      return this.errorResponse('State not loaded', 500);
+    }
+
+    const body = await request.json() as { offerId: string };
+
+    // Find offer in player state
+    const offerIndex = this.playerState.activeTradeOffers.findIndex(o => o.offerId === body.offerId);
+    if (offerIndex === -1) {
+      return this.errorResponse('Trade offer not found');
+    }
+
+    const offer = this.playerState.activeTradeOffers[offerIndex];
+
+    // Return resources to player (seller fee is not refunded)
+    this.playerState.resources[offer.resourceType] += offer.quantity;
+
+    // Remove from player state
+    this.playerState.activeTradeOffers.splice(offerIndex, 1);
+
+    // Update database
+    await this.env.DB.prepare(`
+      UPDATE trade_offers SET status = 'cancelled' WHERE offer_id = ?
+    `).bind(body.offerId).run();
+
+    await this.saveState();
+
+    return new Response(JSON.stringify({
+      success: true,
+      message: `Trade cancelled. ${offer.quantity} ${offer.resourceType} returned.`
+    }), {
+      headers: { 'Content-Type': 'application/json' }
+    });
+  }
+
+  /**
+   * Buy from a trade offer
+   */
+  private async handleBuyFromOffer(request: Request): Promise<Response> {
+    if (!this.playerState) {
+      return this.errorResponse('State not loaded', 500);
+    }
+
+    const body = await request.json() as { offerId: string };
+
+    // Get offer from database
+    const offerResult = await this.env.DB.prepare(`
+      SELECT * FROM trade_offers WHERE offer_id = ? AND status = 'active'
+    `).bind(body.offerId).first();
+
+    if (!offerResult) {
+      return this.errorResponse('Trade offer not found or expired');
+    }
+
+    const offer = offerResult as any;
+
+    // Cannot buy own offer
+    if (offer.seller_id === this.playerState.playerId) {
+      return this.errorResponse('Cannot buy your own trade offer');
+    }
+
+    // Check if buyer has enough gold
+    if (this.playerState.resources.gold < offer.total_price) {
+      return this.errorResponse(`Insufficient gold. Have: ${this.playerState.resources.gold}, Need: ${offer.total_price}`);
+    }
+
+    // Deduct gold from buyer
+    this.playerState.resources.gold -= offer.total_price;
+
+    // Add resources to buyer
+    this.playerState.resources[offer.resource_type as keyof Resources] += offer.quantity;
+
+    // Update database - mark as sold
+    await this.env.DB.prepare(`
+      UPDATE trade_offers SET status = 'sold', buyer_id = ?, completed_at = ? WHERE offer_id = ?
+    `).bind(this.playerState.playerId, Date.now(), body.offerId).run();
+
+    await this.saveState();
+
+    // Notify seller via their DO
+    const sellerDO = this.env.PLAYER_DO.get(this.env.PLAYER_DO.idFromName(offer.seller_id));
+    await sellerDO.fetch(new Request('https://fake/internal/trade-sold', {
+      method: 'POST',
+      body: JSON.stringify({
+        offerId: body.offerId,
+        buyerId: this.playerState.playerId,
+        buyerName: this.playerState.playerName,
+        resourceType: offer.resource_type,
+        quantity: offer.quantity,
+        totalPrice: offer.total_price
+      })
+    }));
+
+    return new Response(JSON.stringify({
+      success: true,
+      message: `Purchased ${offer.quantity} ${offer.resource_type} for ${offer.total_price} gold`,
+      trade: {
+        resourceType: offer.resource_type,
+        quantity: offer.quantity,
+        totalPrice: offer.total_price
+      }
+    }), {
+      headers: { 'Content-Type': 'application/json' }
+    });
+  }
+
+  /**
+   * Search marketplace offers
+   */
+  private async handleSearchOffers(request: Request): Promise<Response> {
+    const url = new URL(request.url);
+    const resourceType = url.searchParams.get('resourceType');
+    const minQuantity = parseInt(url.searchParams.get('minQuantity') || '0');
+    const maxPricePerUnit = parseFloat(url.searchParams.get('maxPrice') || '999999');
+    const limit = parseInt(url.searchParams.get('limit') || '50');
+
+    let query = `
+      SELECT offer_id, seller_id, resource_type, quantity, price_per_unit, total_price, created_at, expires_at
+      FROM trade_offers
+      WHERE status = 'active' AND expires_at > ?
+    `;
+    const params: any[] = [Date.now()];
+
+    if (resourceType) {
+      query += ` AND resource_type = ?`;
+      params.push(resourceType);
+    }
+
+    if (minQuantity > 0) {
+      query += ` AND quantity >= ?`;
+      params.push(minQuantity);
+    }
+
+    if (maxPricePerUnit < 999999) {
+      query += ` AND price_per_unit <= ?`;
+      params.push(maxPricePerUnit);
+    }
+
+    query += ` ORDER BY price_per_unit ASC LIMIT ?`;
+    params.push(limit);
+
+    const result = await this.env.DB.prepare(query).bind(...params).all();
+
+    return new Response(JSON.stringify({
+      success: true,
+      offers: result.results || []
+    }), {
+      headers: { 'Content-Type': 'application/json' }
+    });
+  }
+
+  /**
+   * Get player's active trade offers
+   */
+  private async handleGetMyOffers(request: Request): Promise<Response> {
+    if (!this.playerState) {
+      return this.errorResponse('State not loaded', 500);
+    }
+
+    return new Response(JSON.stringify({
+      success: true,
+      offers: this.playerState.activeTradeOffers
+    }), {
+      headers: { 'Content-Type': 'application/json' }
+    });
+  }
+
+  /**
+   * Handle trade sold notification (called by buyer's DO)
+   */
+  private async handleTradeSold(request: Request): Promise<Response> {
+    if (!this.playerState) {
+      return this.errorResponse('State not loaded', 500);
+    }
+
+    const body = await request.json() as {
+      offerId: string;
+      buyerId: string;
+      buyerName: string;
+      resourceType: string;
+      quantity: number;
+      totalPrice: number;
+    };
+
+    // Remove from activeTradeOffers
+    this.playerState.activeTradeOffers = this.playerState.activeTradeOffers.filter(
+      o => o.offerId !== body.offerId
+    );
+
+    // Add gold to seller
+    this.playerState.resources.gold += body.totalPrice;
+
+    await this.saveState();
+
+    // Send message to seller
+    await this.sendMessage({
+      recipient_id: this.playerState.playerId,
+      sender_id: null,
+      sender_name: 'Trade System',
+      message_type: 'trade',
+      subject: `Trade Completed: ${body.quantity} ${body.resourceType}`,
+      body: `${body.buyerName} purchased your ${body.quantity} ${body.resourceType} for ${body.totalPrice} gold.`,
+      metadata: JSON.stringify({
+        offerId: body.offerId,
+        buyerId: body.buyerId,
+        resourceType: body.resourceType,
+        quantity: body.quantity,
+        totalPrice: body.totalPrice
+      })
+    });
+
+    // Notify via WebSocket
+    this.pushEvent('trade_sold', {
+      offerId: body.offerId,
+      resourceType: body.resourceType,
+      quantity: body.quantity,
+      totalPrice: body.totalPrice
+    });
+
+    return new Response(JSON.stringify({ success: true }), {
+      headers: { 'Content-Type': 'application/json' }
+    });
+  }
+
+  /**
+   * Expire a trade offer (called by alarm when offer expires)
+   */
+  private async expireTradeOffer(offer: TradeOffer): Promise<void> {
+    if (!this.playerState) return;
+
+    // Return resources to seller (seller fee is not refunded)
+    this.playerState.resources[offer.resourceType] += offer.quantity;
+
+    // Remove from activeTradeOffers
+    this.playerState.activeTradeOffers = this.playerState.activeTradeOffers.filter(
+      o => o.offerId !== offer.offerId
+    );
+
+    // Update database
+    await this.env.DB.prepare(`
+      UPDATE trade_offers SET status = 'expired' WHERE offer_id = ?
+    `).bind(offer.offerId).run();
+
+    // Send message to seller
+    await this.sendMessage({
+      recipient_id: this.playerState.playerId,
+      sender_id: null,
+      sender_name: 'Trade System',
+      message_type: 'trade',
+      subject: `Trade Expired: ${offer.quantity} ${offer.resourceType}`,
+      body: `Your trade offer expired unsold. ${offer.quantity} ${offer.resourceType} returned to your city. Seller fee (${offer.sellerFee} gold) not refunded.`,
+      metadata: JSON.stringify({
+        offerId: offer.offerId,
+        resourceType: offer.resourceType,
+        quantity: offer.quantity,
+        sellerFee: offer.sellerFee
+      })
+    });
+
+    // Notify via WebSocket
+    this.pushEvent('trade_expired', {
+      offerId: offer.offerId,
+      resourceType: offer.resourceType,
+      quantity: offer.quantity
+    });
+
+    console.log(`[PlayerDO] Expired trade offer: ${offer.offerId}`);
+  }
+
+  /**
+   * Set tax rate (0-100%)
+   */
+  private async handleSetTaxRate(request: Request): Promise<Response> {
+    if (!this.playerState) {
+      return this.errorResponse('State not loaded', 500);
+    }
+
+    const body = await request.json() as { taxRate: number };
+
+    // Validate tax rate (0-100%)
+    if (body.taxRate < 0 || body.taxRate > 100) {
+      return this.errorResponse('Tax rate must be between 0 and 100');
+    }
+
+    // Update tax rate
+    this.playerState.taxRate = body.taxRate;
+
+    // Recalculate gold production rate
+    this.updateResources();
+
+    await this.saveState();
+
+    // Notify via WebSocket
+    this.pushEvent('tax_rate_changed', {
+      taxRate: body.taxRate,
+      newGoldRate: this.playerState.resources.goldRate
+    });
+
+    return new Response(JSON.stringify({
+      success: true,
+      taxRate: body.taxRate,
+      goldRate: this.playerState.resources.goldRate,
+      message: `Tax rate set to ${body.taxRate}%. Gold production: ${this.playerState.resources.goldRate}/hour`
+    }), {
+      headers: { 'Content-Type': 'application/json' }
+    });
+  }
+
+  /**
+   * Test/Debug endpoint to add resources (development only)
+   */
+  private async handleTestAddResources(request: Request): Promise<Response> {
+    // Only allow in development environment
+    if (this.env.ENVIRONMENT !== 'development') {
+      return this.errorResponse('Test endpoints only available in development', 403);
+    }
+
+    if (!this.playerState) {
+      return this.errorResponse('State not loaded', 500);
+    }
+
+    const body = await request.json() as {
+      food?: number;
+      wood?: number;
+      stone?: number;
+      metal?: number;
+      gold?: number;
+    };
+
+    // Add resources (default to 0 if not specified)
+    if (body.food) this.playerState.resources.food += body.food;
+    if (body.wood) this.playerState.resources.wood += body.wood;
+    if (body.stone) this.playerState.resources.stone += body.stone;
+    if (body.metal) this.playerState.resources.metal += body.metal;
+    if (body.gold) this.playerState.resources.gold += body.gold;
+
+    await this.saveState();
+
+    return new Response(JSON.stringify({
+      success: true,
+      resources: {
+        food: this.playerState.resources.food,
+        wood: this.playerState.resources.wood,
+        stone: this.playerState.resources.stone,
+        metal: this.playerState.resources.metal,
+        gold: this.playerState.resources.gold
+      }
+    }), {
+      headers: { 'Content-Type': 'application/json' }
+    });
+  }
+
+  /**
+   * WebSocket handling
+   */
+  private handleWebSocket(request: Request): Response {
+    const pair = new WebSocketPair();
+    const [client, server] = Object.values(pair);
+
+    this.state.acceptWebSocket(server);
+    this.websocket = server;
+
+    server.send(JSON.stringify({
+      type: 'connection',
+      timestamp: Date.now(),
+      data: JSON.stringify({ status: 'connected' }),
+    }));
+
+    return new Response(null, {
+      status: 101,
+      webSocket: client,
+    });
+  }
+
+  async webSocketMessage(ws: WebSocket, message: string | ArrayBuffer): Promise<void> {
+    console.log('[PlayerDO] WebSocket message:', message);
+  }
+
+  async webSocketClose(ws: WebSocket, code: number, reason: string, wasClean: boolean): Promise<void> {
+    this.websocket = null;
+    console.log('[PlayerDO] WebSocket closed:', code, reason);
+  }
+
+  private pushEvent(eventType: string, data: any): void {
+    if (this.websocket && this.websocket.readyState === 1) {
+      this.websocket.send(JSON.stringify({
+        type: eventType,
+        timestamp: Date.now(),
+        data: JSON.stringify(data),
+      }));
+    }
+  }
+
+  /**
+   * Calculate Storage Vault protection based on building level
+   * Formula: capacity = 5000 * 1.5^(level - 1)
+   * Level 1-10: Protects food, wood, stone, metal
+   * Level 11+: Also protects gold
+   */
+  private calculateVaultProtection(vaultLevel: number): {
+    food: number;
+    wood: number;
+    stone: number;
+    metal: number;
+    gold: number;
+  } {
+    if (vaultLevel === 0) {
+      return { food: 0, wood: 0, stone: 0, metal: 0, gold: 0 };
+    }
+
+    const capacity = Math.floor(5000 * Math.pow(1.5, vaultLevel - 1));
+
+    return {
+      food: capacity,
+      wood: capacity,
+      stone: capacity,
+      metal: capacity,
+      gold: vaultLevel >= 11 ? capacity : 0 // Gold protection starts at level 11
+    };
+  }
+
+  /**
+   * Helper for error responses
+   */
+  private errorResponse(error: string, status: number = 400): Response {
+    return new Response(JSON.stringify({ success: false, error }), {
+      status,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+}
