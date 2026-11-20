@@ -66,6 +66,15 @@ public partial class SceneViewWidget : Widget
 	public override void OnDestroyed()
 	{
 		SaveState();
+
+		if ( Current == this )
+			Current = null;
+
+		_externalChangesDialog?.Destroy();
+		_externalChangesDialog = null;
+
+		Tools.DisposeAll();
+
 		base.OnDestroyed();
 	}
 
@@ -110,7 +119,7 @@ public partial class SceneViewWidget : Widget
 			//
 			session.Tick();
 
-			bool shouldUpdate = Visible; // Update if the scene window is visible
+			bool shouldUpdate = Visible && session.ShouldUpdate; // Update if the scene window is visible
 
 			if ( !shouldUpdate )
 				return;
@@ -289,9 +298,12 @@ file class ViewportToolBar : Widget
 	Layout _sidebar;
 	Layout _toolbar;
 	Layout _footer;
+	readonly SceneViewWidget _sceneViewWidget;
 
-	public ViewportToolBar( Widget parent ) : base( parent )
+	public ViewportToolBar( SceneViewWidget parent ) : base( parent )
 	{
+		_sceneViewWidget = parent;
+
 		Layout = Layout.Column();
 		Layout.Margin = 0;
 		Layout.Spacing = 0;
@@ -309,15 +321,15 @@ file class ViewportToolBar : Widget
 		// Prevent flicker when changing tools
 		using var x = SuspendUpdates.For( this );
 
-		var rootTool = SceneViewWidget.Current?.Tools.CurrentTool;
-		var subTool = SceneViewWidget.Current?.Tools.CurrentSubTool;
+		var rootTool = _sceneViewWidget?.Tools?.CurrentTool;
+		var subTool = _sceneViewWidget?.Tools?.CurrentSubTool;
 
 		_toolbar?.Clear( true );
 		_sidebar?.Clear( true );
 		_footer?.Clear( true );
 
 		// Update toolbar contents
-		if ( rootTool.Tools?.Any() ?? false )
+		if ( rootTool?.Tools?.Any() ?? false )
 		{
 			var toolbar = new EditorSubToolBarWidget( rootTool );
 			toolbar.Build();
@@ -357,7 +369,7 @@ file class ViewportToolBar : Widget
 	[EditorEvent.Frame]
 	public void Frame()
 	{
-		var tool = SceneViewWidget.Current?.Tools.CurrentSubTool ?? SceneViewWidget.Current?.Tools.CurrentTool;
+		var tool = _sceneViewWidget?.Tools?.CurrentSubTool ?? _sceneViewWidget?.Tools?.CurrentTool;
 		var selectionHash = tool?.Selection?.GetHashCode() ?? 0;
 
 		if ( _activeTool != tool || (selectionHash != _selectionHash && (tool?.RebuildSidebarOnSelectionChange ?? false)) )
@@ -475,6 +487,6 @@ file class EditorSubToolButton : Widget
 			Paint.SetPen( Theme.TextLight );
 		}
 
-		Paint.DrawIcon( LocalRect, Type.Icon, HeaderBarStyle.IconSize, TextFlag.Center );
+		Paint.DrawIcon( LocalRect, Type.Icon, HeaderBarStyle.LargeIconSize, TextFlag.Center );
 	}
 }

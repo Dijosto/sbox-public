@@ -3,13 +3,17 @@ using System.Runtime.InteropServices;
 
 namespace Sandbox
 {
-	public struct Texture2DBuilder
+	/// <summary>
+	/// Configures and creates a two-dimensional texture.
+	/// </summary>
+	[Expose]
+	public partial struct Texture2DBuilder
 	{
 		internal TextureBuilder config = new();
 		internal int Width { set => config._config.m_nWidth = (short)value; }
 		internal int Height { set => config._config.m_nHeight = (short)value; }
 		internal int Depth { set => config._config.m_nDepth = (short)value; }
-		internal ImageFormat Format { set => config._config.m_nImageFormat = value; }
+		internal ImageFormat Format { set => config.WithFormat( value ); }
 
 
 		internal string _name = null;
@@ -17,6 +21,7 @@ namespace Sandbox
 		internal int _dataLength = 0;
 		internal IntPtr _dataPtr = IntPtr.Zero;
 		internal bool _asAnonymous = true;
+		private Sequence[] _sequences;
 
 		internal bool HasData
 		{
@@ -144,7 +149,7 @@ namespace Sandbox
 
 
 		/// <summary>
-		/// Provide a name to identify the texture by
+		/// Provide a name to identify the texture by, allowing it to be retrieved with <see cref="Texture.Load(string, bool)"/>.
 		/// </summary>
 		/// <param name="name">Desired texture name</param>
 		public Texture2DBuilder WithName( string name )
@@ -250,12 +255,15 @@ namespace Sandbox
 				}
 			}
 
+			if ( _sequences is not null )
+				return FinishWithSequences();
+
 			if ( _dataPtr != IntPtr.Zero )
 			{
-				return Texture.Create( string.IsNullOrEmpty( _name ) ? "texture2d_dynamic" : _name, _asAnonymous, config, _dataPtr, _dataLength );
+				return Texture.Create( _name, _asAnonymous, config, _dataPtr, _dataLength );
 			}
 
-			return config.Create( string.IsNullOrEmpty( _name ) ? "texture2d_dynamic" : _name, _asAnonymous, _data, _dataLength );
+			return config.Create( _name, _asAnonymous, _data, _dataLength );
 		}
 
 		/// Custom methods

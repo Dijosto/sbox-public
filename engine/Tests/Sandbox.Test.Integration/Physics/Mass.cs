@@ -1,0 +1,215 @@
+
+using System;
+
+namespace PhysicsTests;
+
+[TestClass]
+public class MassTest
+{
+	[DataTestMethod]
+	[DataRow( false )]
+	[DataRow( true )]
+	public void RotationLocksPreserveMassProperties( bool customInertia )
+	{
+		var world = new PhysicsWorld();
+		try
+		{
+			var body = new PhysicsBody( world ) { BodyType = PhysicsBodyType.Dynamic };
+			body.AddSphereShape( new Vector3( 10, 20, 0 ), 4 );
+			var autoMass = body.Mass;
+			var autoCenter = body.LocalMassCenter;
+			var autoInertia = body.Inertia;
+
+			body.Mass = 1500;
+			body.OverrideMassCenter = true;
+			body.LocalMassCenter = new Vector3( 3, 4, 0 );
+			body.ScaleInertia( 2 );
+			if ( customInertia )
+				body.SetInertiaTensor( new Vector3( 100, 200, 300 ), Rotation.Identity );
+			var inertia = body.Inertia;
+
+			for ( var i = 0; i < 2; i++ )
+			{
+				body.Locking = new PhysicsLock { Pitch = true, Yaw = true, Roll = true };
+				Assert.AreEqual( 1500f, body.Mass, 0.01f, "locking rotation must preserve the mass override" );
+				Assert.IsTrue( body.LocalMassCenter.Distance( new Vector3( 3, 4, 0 ) ) < 0.001f );
+				body.ApplyAngularImpulse( Vector3.Up * 300 );
+				Assert.IsTrue( body.AngularVelocity.Length < 0.001f );
+
+				body.Locking = default;
+				Assert.AreEqual( 1500f, body.Mass, 0.01f, "unlocking rotation must preserve the mass override" );
+				Assert.IsTrue( body.LocalMassCenter.Distance( new Vector3( 3, 4, 0 ) ) < 0.001f );
+				Assert.IsTrue( body.Inertia.Distance( inertia ) < inertia.Length * 0.001f, "unlocking must restore the authored inertia" );
+				body.ApplyImpulse( Vector3.Forward * 1500 );
+				Assert.AreEqual( i + 1f, body.Velocity.x, 0.001f );
+			}
+
+			body.ResetInertiaTensor();
+			body.ScaleInertia( 1 );
+			body.OverrideMassCenter = false;
+			body.Mass = 0;
+			Assert.AreEqual( autoMass, body.Mass, autoMass * 0.001f );
+			Assert.IsTrue( body.LocalMassCenter.Distance( autoCenter ) < 0.001f );
+			Assert.IsTrue( body.Inertia.Distance( autoInertia ) < autoInertia.Length * 0.001f );
+		}
+		finally
+		{
+			world.Delete();
+		}
+	}
+
+	[TestMethod]
+	public void TranslationLocksPreserveMassAndUnlockLinearResponse()
+	{
+		var world = new PhysicsWorld();
+		try
+		{
+			world.Gravity = Vector3.Zero;
+			var body = new PhysicsBody( world )
+			{
+				BodyType = PhysicsBodyType.Dynamic,
+				Mass = 50,
+				Locking = new PhysicsLock { X = true, Y = true, Z = true }
+			};
+			var center = new Vector3( 10, 20, 30 );
+			body.AddSphereShape( center, 4 );
+			body.RebuildMass();
+			Assert.AreEqual( 50f, body.Mass );
+			Assert.IsTrue( body.LocalMassCenter.Distance( center ) < 0.001f );
+
+			body.Mass = 100;
+			body.ApplyImpulse( Vector3.Forward * 1000 );
+			Assert.IsTrue( body.Velocity.Length < 0.001f );
+			body.ApplyAngularImpulse( Vector3.Up * 1000 );
+			Assert.IsTrue( body.AngularVelocity.Length > 0 );
+
+			body.Locking = new PhysicsLock { Y = true, Z = true };
+			body.ApplyImpulse( Vector3.Forward * 1000 );
+			Assert.AreEqual( 10f, body.Velocity.x, 0.001f );
+			Assert.AreEqual( 100f, body.Mass );
+
+			body.Locking = new PhysicsLock { X = true, Y = true, Z = true };
+			body.RebuildMass();
+			body.ApplyImpulse( Vector3.Forward * 1000 );
+			Assert.IsTrue( body.Velocity.Length < 0.001f );
+			Assert.AreEqual( 100f, body.Mass );
+			Assert.IsTrue( body.LocalMassCenter.Distance( center ) < 0.001f );
+		}
+		finally
+		{
+			world.Delete();
+		}
+	}
+
+	[TestMethod]
+	public void InertiaImplementationIsInternal()
+	{
+		Assert.IsNull( typeof( PhysicsBody ).GetMethod( "ScaleInertia" ) );
+		Assert.IsNull( typeof( PhysicsGroupDescription.BodyPart ).GetProperty( "InertiaScale" ) );
+		Assert.IsNotNull( typeof( Rigidbody ).GetProperty( "InertiaScale" ) );
+		Assert.IsNotNull( typeof( PhysicsBodyBuilder ).GetProperty( "InertiaScale" ) );
+	}
+
+	[DataTestMethod]
+	[DataRow( false )]
+	[DataRow( true )]
+	public void InertiaScalePersistsWithoutCompounding( bool twoDimensional )
+	{
+		var world = twoDimensional ? new PhysicsWorld( new PhysicsWorld2d() ) : new PhysicsWorld();
+		try
+		{
+			var body = new PhysicsBody( world ) { BodyType = PhysicsBodyType.Dynamic, Mass = 1 };
+			body.AddSphereShape( Vector3.Zero, 1 );
+			var initial = body.Inertia;
+			body.ScaleInertia( 10 );
+			Assert.IsTrue( body.Inertia.Distance( initial * 10 ) < 0.001f );
+			body.ScaleInertia( 10 );
+			Assert.IsTrue( body.Inertia.Distance( initial * 10 ) < 0.001f );
+			body.Mass = 2;
+			Assert.IsTrue( body.Inertia.Distance( initial * 20 ) < 0.001f );
+			body.RebuildMass();
+			Assert.IsTrue( body.Inertia.Distance( initial * 20 ) < 0.001f );
+			body.BodyType = PhysicsBodyType.Static;
+			body.BodyType = PhysicsBodyType.Dynamic;
+			Assert.IsTrue( body.Inertia.Distance( initial * 20 ) < 0.001f );
+			body.SetInertiaTensor( initial * 3, Rotation.Identity );
+			body.ScaleInertia( 0.5f );
+			Assert.IsTrue( body.Inertia.Distance( initial * 3 ) < 0.001f );
+			body.ResetInertiaTensor();
+			Assert.IsTrue( body.Inertia.Distance( initial ) < 0.001f );
+			body.ScaleInertia( 1 );
+			Assert.IsTrue( body.Inertia.Distance( initial * 2 ) < 0.001f );
+			Assert.ThrowsException<ArgumentOutOfRangeException>( () => body.ScaleInertia( 0 ) );
+			Assert.ThrowsException<ArgumentOutOfRangeException>( () => body.ScaleInertia( float.NaN ) );
+		}
+		finally
+		{
+			world.Delete();
+		}
+	}
+
+	[DataTestMethod]
+	[DataRow( false )]
+	[DataRow( true )]
+	public void AuthoredDampingReducesVelocity( bool twoDimensional )
+	{
+		var world = twoDimensional ? new PhysicsWorld( new PhysicsWorld2d() ) : new PhysicsWorld();
+		try
+		{
+			world.Gravity = Vector3.Zero;
+			world.SleepingEnabled = false;
+			var body = new PhysicsBody( world )
+			{
+				BodyType = PhysicsBodyType.Dynamic,
+				Mass = 1,
+				LinearDamping = 0.01f,
+				AngularDamping = 1.5f
+			};
+			body.AddSphereShape( Vector3.Zero, 1 );
+			body.Velocity = Vector3.Forward * 100;
+			body.AngularVelocity = Vector3.Up;
+			for ( var i = 0; i < 120; i++ )
+				world.Step( 1.0f / 120.0f );
+			Assert.AreEqual( 100 * MathF.Exp( -0.01f ), body.Velocity.Length, 0.02f );
+			Assert.AreEqual( MathF.Exp( -1.5f ), body.AngularVelocity.Length, 0.005f );
+		}
+		finally
+		{
+			world.Delete();
+		}
+	}
+
+	/// <summary>
+	/// Tests to ensure mass override doesn't get reset
+	/// </summary>
+	[TestMethod]
+	public void MassOverride()
+	{
+		var world = new PhysicsWorld();
+
+		var body = new PhysicsBody( world );
+
+		var massOverride = 10.0f;
+		body.Mass = massOverride;
+		body.BodyType = PhysicsBodyType.Dynamic;
+		body.AddSphereShape( 0, 100 );
+
+		Assert.AreEqual( massOverride, body.Mass );
+
+		massOverride = 1234.0f;
+		body.Mass = 0;
+		var massComputed = body.Mass;
+		body.Mass = massOverride;
+
+		Assert.AreEqual( massOverride, body.Mass );
+
+		body.Mass = 0;
+
+		Assert.AreEqual( massComputed, body.Mass );
+
+		body.Mass = massOverride;
+		body.LocalMassCenter = Vector3.Up * 100;
+
+		Assert.AreEqual( massOverride, body.Mass );
+	}
+}

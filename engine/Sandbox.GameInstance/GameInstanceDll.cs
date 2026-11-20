@@ -1,8 +1,8 @@
-﻿using Microsoft.CodeAnalysis.CSharp;
-using Sandbox.ActionGraphs;
+using Microsoft.CodeAnalysis.CSharp;
 using Sandbox.Audio;
 using Sandbox.Diagnostics;
 using Sandbox.Internal;
+using Sandbox.Modals;
 using Sandbox.UI;
 using Sandbox.Utility;
 using Sandbox.VR;
@@ -20,11 +20,26 @@ internal partial class GameInstanceDll : Engine.IGameInstanceDll
 	public static PackageLoader PackageLoader { get; set; }
 	PackageLoader.Enroller AssemblyEnroller { get; set; }
 
+	/// <summary>
+	/// A game has started loading since the environment was last reset - even one that was cancelled part way through
+	/// can have mounted and loaded things
+	/// </summary>
+	bool gameLoadStarted;
+
 	private bool _isAssemblyLoadingPaused;
+
+	// Nothing but the engine has been added to the type library since it was last built
+	bool typeLibraryEngineOnly;
+
+	// PackageManager.MountGeneration when the last reset finished
+	int resetMountGeneration = -1;
+	private CancellationTokenSource _loadGameCts;
+	private Task<bool> _loadGameTask;
 
 	public void Bootstrap()
 	{
 		Current = this;
+		Sandbox.WorkshopItems.Current = WorkshopItems;
 
 		GlobalContext.Current.Reset();
 		GlobalContext.Current.LocalAssembly = GetType().Assembly;
@@ -51,35 +66,37 @@ internal partial class GameInstanceDll : Engine.IGameInstanceDll
 				FileSystem.Mounted.Mount( EngineFileSystem.LibraryContent );
 			}
 
-			if ( Application.IsStandalone )
+			FileSystem.Mounted.CreateAndMount( EngineFileSystem.Root, "/core/" );
+
+			if ( !Application.IsStandalone )
 			{
-				// In standalone, we don't ship code - only assets
-				FileSystem.Mounted.CreateAndMount( EngineFileSystem.Addons, $"/base/assets" );
-				FileSystem.Mounted.CreateAndMount( EngineFileSystem.Root, "/core/" );
+				FileSystem.Mounted.CreateAndMount( EngineFileSystem.Root, "/addons/citizen/Assets/" );
+				FileSystem.Mounted.CreateAndMount( EngineFileSystem.Root, "/addons/content/Assets/" );
 			}
-			else
-			{
-				FileSystem.Mounted.CreateAndMount( EngineFileSystem.Addons, "/base/assets/" );
-				FileSystem.Mounted.CreateAndMount( EngineFileSystem.Addons, "/base/code/" );
-				FileSystem.Mounted.CreateAndMount( EngineFileSystem.Root, "/core/" );
-				FileSystem.Mounted.CreateAndMount( EngineFileSystem.Addons, "/citizen/assets/" );
-			}
+
+			// The editor's UI assets - stylesheets and the like - are visible while editing
+			if ( Application.IsEditor )
+				FileSystem.Mounted.CreateAndMount( EngineFileSystem.Root, "/addons/editor/assets/" );
 		}
 
 		PackageLoader?.Dispose();
 		PackageLoader = new PackageLoader( "GameMenu", typeof( GameInstanceDll ).Assembly );
+		GlobalContext.Current.ReplaceScriptAssembly = PackageLoader.ReplaceScriptAssembly;
 		PackageLoader.HotloadWatch( Game.GameAssembly ); // Sandbox.Game is per instance
 		PackageLoader.OnAfterHotload = OnAfterHotload;
 
 		ConVarSystem.AddAssembly( Game.GameAssembly, "game" );
 	}
 
-	public Task Initialize()
+	public async Task Initialize()
 	{
 		ResetEnvironment();
 		Networking.StartThread();
 
-		return Task.CompletedTask;
+		if ( !Application.IsStandalone && !Application.IsEditor )
+		{
+			await Mounting.Directory.MountFromConfig();
+		}
 	}
 
 	public void Exiting()
@@ -89,6 +106,15 @@ internal partial class GameInstanceDll : Engine.IGameInstanceDll
 
 		Event.Run( "app.exit" );
 		Game.Cookies?.Save();
+
+		// Release InputContext references so the UISystem
+		// chain (and any RenderAttributes it holds) can be collected.
+		if ( InputContext is not null )
+		{
+			InputContext.KeyboardFocusPanel = null;
+			InputContext.MouseFocusPanel = null;
+			InputContext = null;
+		}
 	}
 
 	static int Counter;
@@ -115,7 +141,21 @@ internal partial class GameInstanceDll : Engine.IGameInstanceDll
 	/// </summary>
 	public void ResetEnvironment()
 	{
+		var hadPreviousEnvironment = gameLoadStarted || gameInstance is not null || DidMountNetworkedFiles
+			|| AssemblyEnroller?.GetLoadedAssemblies().Length > 0;
+		gameLoadStarted = false;
+
+		// The menu loaded its resources moments ago during startup, so there is nothing to reset yet. Nor when no package
+		// has been mounted or unmounted since the last reset: closing a game resets and starting the next one does again.
+		var menuResourcesCurrent = !Application.IsEditor && (!hadPreviousEnvironment
+			|| (!DidMountNetworkedFiles && PackageManager.MountGeneration == resetMountGeneration));
+		// Bootstrap and the menu just built their type libraries, so the first game start has none to rebuild.
+		var firstStartup = !hadPreviousEnvironment && !Application.IsEditor;
+
+		using var scope = GlobalContext.GameScope();
+
 		Log.Trace( "Game Menu - ResetEnvironment" );
+
 
 		// Use a new package loader for every game if we're not in editor
 		// The editor is only going to load 1 game and ToolsDll has a reference to it
@@ -125,27 +165,36 @@ internal partial class GameInstanceDll : Engine.IGameInstanceDll
 			PackageLoader = null;
 
 			PackageLoader = new PackageLoader( "GameMenu", typeof( GameInstanceDll ).Assembly );
+			GlobalContext.Current.ReplaceScriptAssembly = PackageLoader.ReplaceScriptAssembly;
 			PackageLoader.HotloadWatch( Game.GameAssembly ); // Sandbox.Game is per instance
 			PackageLoader.OnAfterHotload = OnAfterHotload;
 		}
+
+		if ( !menuResourcesCurrent ) ResourceLoader.Clear();
+		WorkshopItems.Clear();
 
 		if ( DidMountNetworkedFiles )
 		{
 			EngineFileSystem.Mounted.UnMount( NetworkedLargeFiles.Files );
 			EngineFileSystem.Mounted.UnMount( NetworkedSmallFiles.Files );
 			EngineFileSystem.ProjectSettings.UnMount( NetworkedConfigFiles.Files );
+			Game.Language?.FileSystem.UnMount( NetworkedLangFiles.Files );
 			DidMountNetworkedFiles = false;
 		}
 
-		FontManager.Instance.Reset();
+		FontManager.Instance.Clear( false );
 		FontManager.Instance.LoadAll( FileSystem.Mounted );
 
 		AssemblyEnroller?.Dispose();
 		AssemblyEnroller = null;
 
 		CodeArchiveTable.Reset();
+		ScriptTable.Reset();
+		NetworkScriptsReady = false;
+		DidLoadNetworkedResources = false;
 		NetworkedSmallFiles.Reset();
 		NetworkedConfigFiles.Reset();
+		NetworkedLangFiles.Reset();
 		NetworkedLargeFiles.Reset();
 		ReplicatedConvars.Reset();
 		ServerPackages.Clear();
@@ -153,18 +202,34 @@ internal partial class GameInstanceDll : Engine.IGameInstanceDll
 		FileWatchers.ForEach( w => w.Dispose() );
 		FileWatchers.Clear();
 
+		NetworkedFileSystem?.Dispose();
+		NetworkedFileSystem = null;
+
 		Screen.UpdateFromEngine();
 
-		Game.InitTypeLibrary();
+		// Closing a game resets, and so does starting the next one: the second finds the type library as the first left it,
+		// with nothing but the engine in it, and building that again is a third of a second and 100 MB of garbage.
+		var typeLibraryCurrent = typeLibraryEngineOnly && !Application.IsEditor;
+
+		if ( !firstStartup && !typeLibraryCurrent )
+		{
+			Game.InitTypeLibrary();
+
+			// The upgraders are the last game's until an assembly loads, and they hold on to its whole type library.
+			JsonUpgrader.UpdateUpgraders( TypeLibrary );
+		}
+
+		typeLibraryEngineOnly = true;
 
 		UserPermission.Load();
 
 		Input.ReadConfig( null );
-		StyleSheet.InitStyleSheets();
+		StyleSheet.ResetStyleSheets();
 		Networking.Reset();
 		Connection.Reset();
 		GlobalContext.Current.Reset();
-		NativeResourceCache.Clear();
+		PartyRoom.Current?.ClearCallbacks();
+		NativeResourceCache.ClearCache();
 		Speech.Recognition.Reset();
 		Json.Initialize();
 		VRSystem.Reset();
@@ -194,11 +259,11 @@ internal partial class GameInstanceDll : Engine.IGameInstanceDll
 			if ( a.IsEditorAssembly )
 				return;
 
+			typeLibraryEngineOnly = false;
 			Game.TypeLibrary.AddAssembly( a.Assembly, true );
-			Game.NodeLibrary.AddAssembly( a.Assembly );
+			GlobalContext.Current.AddNodeAssemblyLater( a.Assembly, logErrors: false );
 			ConVarSystem.AddAssembly( a.Assembly, "game" );
 			Cloud.UpdateTypes( a.Assembly );
-			Json.Initialize();
 			JsonUpgrader.UpdateUpgraders( TypeLibrary );
 
 			if ( !a.IsEditorAssembly && a.CodeArchiveBytes is not null )
@@ -216,12 +281,14 @@ internal partial class GameInstanceDll : Engine.IGameInstanceDll
 
 			Assert.NotNull( a.Assembly );
 
-			Game.NodeLibrary.RemoveAssembly( a.Assembly );
+			GlobalContext.Current.RemoveNodeAssembly( a.Assembly );
 			Game.TypeLibrary.RemoveAssembly( a.Assembly );
 			ConVarSystem.RemoveAssembly( a.Assembly );
 			JsonUpgrader.UpdateUpgraders( TypeLibrary );
 
-			CodeArchiveTable.Remove( a.Name );
+			// Replacing the client's local assembly can trigger this callback. Keep the archive received from the host.
+			if ( !Networking.IsClient )
+				CodeArchiveTable.Remove( a.Name );
 		};
 
 		AssemblyEnroller.OnAssemblyFastHotload += ( a ) =>
@@ -232,14 +299,19 @@ internal partial class GameInstanceDll : Engine.IGameInstanceDll
 			}
 		};
 
-		IMenuDll.Current?.Reset();
+		if ( !menuResourcesCurrent ) IMenuDll.Current?.Reset();
+		resetMountGeneration = PackageManager.MountGeneration;
 
-		// Run GC and finalizers to clear any native resources held
-		GC.Collect();
-		GC.WaitForPendingFinalizers();
+		if ( hadPreviousEnvironment )
+		{
+			// Its type library's strings needn't be kept around for the next game
+			StringPool.Clear();
 
-		// Run the queue one more time, since some finalizers queue tasks
-		MainThread.RunQueues();
+			// Start collecting what the last game left, in the background: a blocking collection of the whole heap freezes
+			// every managed thread, the audio mixer included, for a third of a second. It returns at once, so the last
+			// game's finalizers run during the next load and the native releases they queue run between its frames.
+			GC.Collect( GC.MaxGeneration, GCCollectionMode.Forced, blocking: false );
+		}
 	}
 
 	/// <summary>
@@ -249,7 +321,7 @@ internal partial class GameInstanceDll : Engine.IGameInstanceDll
 	/// <param name="a"></param>
 	private void AddArchiveToCodeArchiveTable( LoadedAssembly a )
 	{
-		if ( a?.CodeArchiveBytes is null )
+		if ( Networking.IsClient || a?.CodeArchiveBytes is null )
 			return;
 
 		//
@@ -357,31 +429,56 @@ internal partial class GameInstanceDll : Engine.IGameInstanceDll
 
 	public void CloseGame()
 	{
+		Api.Activity.LoadAbandoned( null );
+		CancelLoad();
+
 		if ( gameInstance is null ) return;
 
-		ConVarSystem.SaveAll();
+		using var scope = GlobalContext.GameScope();
 
-		// Scope disconnect so we can shutdown game before disconnect and stop game objects from sending network destroy,
-		// orphaned action should take care of it.
-		using ( Networking.DisconnectScope() )
-		{
-			gameInstance.Shutdown();
-			gameInstance = null;
-			IGameInstance.Current = null;
-		}
-
-		Application.ClearGame();
+		LeaveGame( disconnect: true );
 
 		LoadingScreen.IsVisible = false;
 		LoadingScreen.Media = null;
 
-		Sound.StopAll( 0.2f );
-
 		ResetEnvironment();
 
-		IMenuDll.Current?.OnGameExited();
-
 		Mounting.MountUtility.TickPreviewRenders();
+	}
+
+	/// <summary>
+	/// Shut the running game down so nothing of it carries over: its scene, its sounds, its settings and,
+	/// unless we're joining a session that's already open, its network session.
+	/// </summary>
+	private void LeaveGame( bool disconnect )
+	{
+		Analytics.GameClosed();
+		using var scope = GlobalContext.GameScope();
+
+		// A capture the game left armed - the pause menu took escape, or we got dropped
+		InputContext?.ResetTrapping();
+
+		if ( gameInstance is not null )
+		{
+			ConVarSystem.SaveAll();
+
+			// Scope disconnect so we can shutdown game before disconnect and stop game objects from sending network destroy,
+			// orphaned action should take care of it.
+			using ( disconnect ? Networking.DisconnectScope() : null )
+			{
+				gameInstance.Shutdown();
+				gameInstance = null;
+				IGameInstance.Current = null;
+			}
+
+			Sound.StopAll( 0.2f );
+		}
+		else if ( disconnect )
+		{
+			Networking.Disconnect();
+		}
+
+		Application.ClearGame();
 	}
 
 	internal Input.Context _perFrameInput = Input.Context.Create( "ClientPerFrame" );
@@ -390,7 +487,7 @@ internal partial class GameInstanceDll : Engine.IGameInstanceDll
 	{
 		var scene = Game.ActiveScene;
 
-		using var sceneScope = scene?.Push();
+		using var sceneScope = new ScenePushScope( scene );
 
 		if ( scene is not null )
 		{
@@ -465,6 +562,7 @@ internal partial class GameInstanceDll : Engine.IGameInstanceDll
 		// Run any pending queue'd mainthread tasks here
 		// so they're in the same scene scope
 		MainThread.RunQueues();
+		GlobalContext.Current.TickScripting();
 	}
 
 	private void RunGameFrame( Scene activeScene )
@@ -472,8 +570,6 @@ internal partial class GameInstanceDll : Engine.IGameInstanceDll
 		if ( !Game.IsPlaying ) return;
 		if ( activeScene is null ) return;
 		if ( Networking.IsConnecting ) return;
-
-		LoadingScreen.IsVisible = activeScene.IsLoading;
 
 		activeScene.GameTick( 0 ); // we already advanced time 
 
@@ -490,7 +586,7 @@ internal partial class GameInstanceDll : Engine.IGameInstanceDll
 			mouseIsAllowed = !IMenuDll.Current.HasOverlayMouseInput();
 		}
 
-		using ( Game.ActiveScene?.Push() )
+		using ( new ScenePushScope( Game.ActiveScene ) )
 		{
 			Game.Language?.Tick();
 			GlobalContext.Current.UISystem.Simulate( mouseIsAllowed );
@@ -501,65 +597,162 @@ internal partial class GameInstanceDll : Engine.IGameInstanceDll
 
 	public void ClosePopups( object panelClickedOn )
 	{
+		using var scope = GlobalContext.GameScope();
 		BasePopup.CloseAll( panelClickedOn as Panel );
 	}
 
-	public void Disconnect()
+	public void Disconnect( string message = null )
 	{
-		Game.Close();
+		if ( !string.IsNullOrEmpty( message ) )
+		{
+			if ( Networking.System is { } system ) system.FailureReason ??= message;
+			Log.Warning( $"Disconnected: {message.Replace( "\n", "" )}" );
+		}
+
+		if ( Networking.IsMatchmaking )
+		{
+			// don't want any disconnection popups, or to close the game or loading ui - matchmaking should handle all that
+			return;
+		}
+
+		Api.Activity.SetExitReason( string.IsNullOrEmpty( message ) ? "leave" : "disconnect", message );
+		Api.Activity.CancelRequest( Api.Activity.PendingRequest );
+		Api.Activity.LoadAbandoned( string.IsNullOrEmpty( message ) ? null : message );
+
+		// cancel any in-progress load right now instead of waiting for tick
+		CancelLoad();
+		Game.CloseGame();
+
+		if ( !string.IsNullOrEmpty( message ) )
+		{
+			using var scope = GlobalContext.MenuScope();
+			IModalSystem.Current?.Notice( "Disconnected", message, "wifi_off" );
+		}
+
+		LoadingScreen.IsVisible = false;
+	}
+
+	private void CancelLoad()
+	{
+		_loadGameCts?.Cancel();
+		_loadGameCts?.Dispose();
+		_loadGameCts = null;
 	}
 
 	/// <summary>
-	/// Loads the game asynchronously
+	/// Loads the game asynchronously. Only one game loads at a time: any load still in
+	/// flight is cancelled, and this one waits for it to finish tearing down before it starts.
 	/// </summary>
-	public async Task LoadGamePackageAsync( string ident, GameLoadingFlags flags, CancellationToken ct )
+	public async Task<bool> LoadGamePackageAsync( string ident, GameLoadingFlags flags, CancellationToken ct )
 	{
+		ThreadSafe.AssertIsMainThread();
+
+		var previous = _loadGameTask;
+
+		CancelLoad();
+		_loadGameCts = CancellationTokenSource.CreateLinkedTokenSource( ct );
+
+		_loadGameTask = LoadGamePackageInternalAsync( previous, ident, flags, _loadGameCts.Token );
+		return await _loadGameTask;
+	}
+
+	/// <summary>
+	/// Waits for any previous load to finish tearing down, then runs the load and handles its failure.
+	/// </summary>
+	private async Task<bool> LoadGamePackageInternalAsync( Task previous, string ident, GameLoadingFlags flags, CancellationToken token )
+	{
+		if ( previous is { IsCompleted: false } )
+		{
+			try
+			{
+				await previous;
+			}
+			catch ( System.Exception )
+			{
+				// The previous load reports its own failures
+			}
+		}
+
+		// We may have been superseded ourselves while waiting
+		if ( token.IsCancellationRequested )
+			return false;
+
+		// The previous load hid the loading screen on its way out, it's ours now
+		LoadingScreen.IsVisible = true;
+
+		var launch = Api.Activity.LoadBegin( ident, flags.Contains( GameLoadingFlags.Remote ) );
+
 		try
 		{
-			ThreadSafe.AssertIsMainThread();
-			await LoadGamePackageAsyncInternal( ident, flags, ct );
+			await DoLoadGamePackageAsync( ident, flags, token );
+
+			if ( token.IsCancellationRequested )
+			{
+				launch.End( "cancel" );
+				return false;
+			}
+
+			// Hosts finish when the startup scene has loaded, clients when the server lets them in
+			launch.Stage( flags.Contains( GameLoadingFlags.Host ) ? "scene" : "join" );
+			return true;
 		}
 		catch ( System.Exception e )
 		{
-			LoadingScreen.IsVisible = false;
-			LoadingScreen.Media = null;
+			var cancelled = e is OperationCanceledException;
+			string message = null;
 
-			using ( IMenuDll.Current?.PushScope() )
+			if ( !cancelled )
 			{
-				IMenuSystem.Current?.Popup( "error", "Loading Error", $"There was an error when loading this game. {e.Message}" );
+				try { message = e.Message; }
+				catch { message = e.GetType().FullName; }
 			}
 
-			Log.Warning( e, e.Message );
+			launch.End( cancelled ? "cancel" : "fail", message );
+
+			ResetEnvironment();
+
+			if ( !cancelled )
+			{
+				using ( IMenuDll.Current?.PushScope() )
+				{
+					IModalSystem.Current?.Notice( "Loading Error", $"An error occurred when loading this game.\n\n{message}", "error" );
+				}
+
+				Log.Warning( e, message );
+
+				if ( Application.IsEditor )
+				{
+					// raise in editor, load has failed and we should alert the user
+					throw;
+				}
+			}
+
+			LoadingScreen.IsVisible = false;
+			LoadingScreen.Media = null;
 		}
+
+		return false;
 	}
 
-	public async Task LoadGamePackageAsyncInternal( string ident, GameLoadingFlags flags, CancellationToken ct )
+	private async Task DoLoadGamePackageAsync( string ident, GameLoadingFlags flags, CancellationToken ct )
 	{
 		//
 		// We might not need to reload if this is the same package.
-		// Bit of extra dancing here because we want #local to be treated as released
 		//
 		if ( gameInstance is not null && !flags.Contains( GameLoadingFlags.Reload ) )
 		{
-			Package.TryParseIdent( ident, out var iparts );
-			Package.TryParseIdent( gameInstance?.Ident, out var oparts );
+			Package.TryParseIdentParts( ident, out var iparts );
+			Package.TryParseIdentParts( gameInstance?.Ident, out var oparts );
 
 			// No need to recreate - this is the same package (and the same version)
 			if ( iparts.package == oparts.package && iparts.org == oparts.org && iparts.version == oparts.version )
 				return;
 		}
 
-		gameInstance?.Shutdown();
-
-		//
-		// If this isn't part of a remote connection, leave any active network session
-		//
-		if ( !flags.Contains( GameLoadingFlags.Remote ) )
-		{
-			Networking.Disconnect();
-		}
-
-		Application.ClearGame();
+		// Leave the current game first, fully. If this is part of a remote connection the
+		// session we're on is the one we're joining, so that stays.
+		Api.Activity.LoadStage( "teardown" );
+		LeaveGame( disconnect: !flags.Contains( GameLoadingFlags.Remote ) );
 
 		if ( !Application.IsDedicatedServer && !Application.IsStandalone )
 		{
@@ -577,8 +770,21 @@ internal partial class GameInstanceDll : Engine.IGameInstanceDll
 				_ = playerStats.Refresh();
 			}
 
-			await Task.Delay( 10 );
+			await Task.Yield();
 			LoadingScreen.Title ??= "Loading..";
+
+			// Let the loading screen and the game's art come in before the main thread starts blocking
+			if ( !Application.IsEditor )
+			{
+				if ( await Package.FetchAsync( ident, false ) is { TypeName: "game" } package && !ct.IsCancellationRequested )
+				{
+					LoadingScreen.Media = package.LoadingScreen.MediaUrl;
+					LoadingScreen.Package = package;
+				}
+
+				await LoadingScreen.WaitForIntro( ct );
+				if ( ct.IsCancellationRequested ) return;
+			}
 		}
 
 		GameInstance newInstance = default;
@@ -596,7 +802,9 @@ internal partial class GameInstanceDll : Engine.IGameInstanceDll
 
 			using var _ = GlobalContext.GameScope();
 
+			Api.Activity.LoadStage( "reset" );
 			ResetEnvironment();
+			gameLoadStarted = true;
 
 			NativeErrorReporter.Breadcrumb( true, "game", $"Loading game package {ident}" );
 			NativeErrorReporter.SetTag( "game", ident );
@@ -604,36 +812,39 @@ internal partial class GameInstanceDll : Engine.IGameInstanceDll
 
 			if ( !Application.IsDedicatedServer && !Application.IsStandalone )
 			{
-				await Task.Delay( 10 );
+				await Task.Yield();
 			}
 
 			if ( !await newInstance.LoadAsync( AssemblyEnroller, ct ) )
 			{
-				ResetEnvironment();
-				newInstance.Close();
-				newInstance.Shutdown();
-				newInstance = default;
+				if ( ct.IsCancellationRequested )
+					return;
 
-				throw new System.Exception( "Loading failed." );
+				throw new Exception( "GameInstance load failed" );
 			}
+
+			Json.PopulateReflectionCache( Game.TypeLibrary );
 
 			if ( ct.IsCancellationRequested )
 				return;
 
-			await Task.Delay( 10 );
+			await Task.Yield();
 			GC.Collect( GC.MaxGeneration, GCCollectionMode.Optimized, false, false );
-			await Task.Delay( 10 );
+			await Task.Yield();
 
-			if ( Package.TryParseIdent( ident, out var parsed ) )
+			if ( Package.TryParseIdentParts( ident, out var parsed ) )
 			{
 				EngineFileSystem.Data.CreateDirectory( parsed.org );
 
-				var package = parsed.local ? $"{parsed.package}#local" : parsed.package;
-
 				GlobalContext.Current.FileOrg = EngineFileSystem.Data.CreateSubSystem( parsed.org );
-				GlobalContext.Current.FileOrg.CreateDirectory( package );
+				GlobalContext.Current.FileOrg.CreateDirectory( parsed.package );
 
-				GlobalContext.Current.FileData = FileSystem.OrganizationData.CreateSubSystem( package );
+				GlobalContext.Current.FileData = FileSystem.OrganizationData.CreateSubSystem( parsed.package );
+			}
+			else if ( Application.IsStandalone && ident == Standalone.Manifest.Ident )
+			{
+				GlobalContext.Current.FileOrg = EngineFileSystem.Data;
+				GlobalContext.Current.FileData = EngineFileSystem.Data;
 			}
 			else
 			{
@@ -656,12 +867,15 @@ internal partial class GameInstanceDll : Engine.IGameInstanceDll
 			//
 			if ( flags.Contains( GameLoadingFlags.Host ) )
 			{
+				Api.Activity.LoadStage( "scene" );
+
+				// The scene loads synchronously, so the title shown until it returns is whatever the last frame drew
+				LoadingScreen.Title = "Loading Scene";
+				await Task.Yield();
+
 				if ( !gameInstance.OpenStartupScene() )
 				{
-					ResetEnvironment();
-					LoadingScreen.IsVisible = false;
-					LoadingScreen.Media = null;
-					return;
+					throw new Exception( "Failed to load startup scene" );
 				}
 			}
 
@@ -678,7 +892,8 @@ internal partial class GameInstanceDll : Engine.IGameInstanceDll
 			{
 				Game.IsPlaying = true;
 
-				IMenuDll.Current?.OnGameEntered();
+				LoadingScreen.Title = flags.Contains( GameLoadingFlags.Host ) ? "Starting Game" : "Joining Game..";
+				await Task.Yield();
 			}
 		}
 		finally
@@ -686,6 +901,8 @@ internal partial class GameInstanceDll : Engine.IGameInstanceDll
 			// Loading failed
 			if ( newInstance is not null )
 			{
+				using var _ = GlobalContext.GameScope();
+
 				newInstance.Close();
 				newInstance.Shutdown();
 				newInstance = default;
@@ -695,17 +912,11 @@ internal partial class GameInstanceDll : Engine.IGameInstanceDll
 
 	private void OnPackageInstalled( PackageManager.ActivePackage package, string context )
 	{
+		if ( context != "game" ) return;
 		Log.Trace( $"OnPackageInstalled: {package.Package.FullIdent} {context}" );
 
-		// only load if a game context (tools can install packages)
-		if ( context != "game" ) return;
-
-		// Load all the GameResources and fonts in the package
-		if ( package.FileSystem is not null )
-		{
-			ResourceLoader.LoadAllGameResource( package.FileSystem );
-			FontManager.Instance.LoadAll( package.FileSystem );
-		}
+		// Register assemblies from this package so types are available immediately.
+		AssemblyEnroller?.LoadPackage( package.Package.FullIdent, true );
 	}
 
 	/// <summary>
@@ -730,12 +941,12 @@ internal partial class GameInstanceDll : Engine.IGameInstanceDll
 	/// <summary>
 	/// The play button was pressed in the editor
 	/// </summary>
-	public void EditorPlay()
+	public bool EditorPlay()
 	{
 		if ( gameInstance is null )
 		{
 			Log.Warning( "Tried to editor play but we don't have a game instance" );
-			return;
+			return false;
 		}
 
 		Game.IsPlaying = true;
@@ -743,8 +954,13 @@ internal partial class GameInstanceDll : Engine.IGameInstanceDll
 		if ( !gameInstance.OpenStartupScene() )
 		{
 			Log.Warning( "There was a problem opening the StartupScene" );
-			return;
+			Game.ActiveScene?.Destroy();
+			Game.ActiveScene = null;
+			Game.IsPlaying = false;
+			return false;
 		}
+
+		return true;
 	}
 
 	public TypeLibrary TypeLibrary => Sandbox.Internal.GlobalGameNamespace.TypeLibrary;
@@ -752,9 +968,9 @@ internal partial class GameInstanceDll : Engine.IGameInstanceDll
 	/// <summary>
 	/// Pushes the game scope. This will push the active scene and the right time.
 	/// </summary>
-	public IDisposable PushScope()
+	public ScenePushScope PushScope()
 	{
-		return Game.ActiveScene?.Push();
+		return new ScenePushScope( Game.ActiveScene );
 	}
 
 	/// <summary>
@@ -763,15 +979,21 @@ internal partial class GameInstanceDll : Engine.IGameInstanceDll
 	void TickSceneStats( Scene scene )
 	{
 		var sceneValid = scene.IsValid();
+
+		// Counted with direct queries, this runs every frame
+		int cameraCount = 0, particleCount = 0;
+		if ( sceneValid )
+		{
+			foreach ( var _ in scene.Query<CameraComponent>() ) cameraCount++;
+			foreach ( var effect in scene.Query<ParticleEffect>() ) particleCount += effect.Particles.Count;
+		}
+
 		Api.Performance.CollectStat( "GameObjectCount", sceneValid ? scene.Directory.GameObjectCount : 0 );
 		Api.Performance.CollectStat( "ComponentCount", sceneValid ? scene.Directory.ComponentCount : 0 );
 		Api.Performance.CollectStat( "RootGameObjects", sceneValid ? scene.Children.Count : 0 );
-		Api.Performance.CollectStat( "CameraCount", sceneValid ? scene.GetAllComponents<CameraComponent>().Count() : 0 );
-		Api.Performance.CollectStat( "ColliderCount", sceneValid ? scene.PhysicsWorld.Bodies.Count() : 0 );
-		Api.Performance.CollectStat( "DynamicBodyCount", sceneValid ? scene.PhysicsWorld.Bodies.Where( x => x.BodyType == PhysicsBodyType.Dynamic ).Count() : 0 );
-		Api.Performance.CollectStat( "KeyframeBodyCount", sceneValid ? scene.PhysicsWorld.Bodies.Where( x => x.BodyType == PhysicsBodyType.Keyframed ).Count() : 0 );
-		Api.Performance.CollectStat( "StaticBodyCount", sceneValid ? scene.PhysicsWorld.Bodies.Where( x => x.BodyType == PhysicsBodyType.Static ).Count() : 0 );
-		Api.Performance.CollectStat( "Particles", sceneValid ? scene.GetAllComponents<ParticleEffect>().Sum( x => x.Particles.Count ) : 0 );
+		Api.Performance.CollectStat( "CameraCount", cameraCount );
+		Api.Performance.CollectStat( "ColliderCount", sceneValid ? scene.PhysicsWorld.BodyCount : 0 );
+		Api.Performance.CollectStat( "Particles", particleCount );
 
 		Api.Performance.CollectStat( "GameObjectsDestroyed", SceneMetrics.GameObjectsDestroyed );
 		Api.Performance.CollectStat( "ParticlesCreated", SceneMetrics.ParticlesCreated );
@@ -803,31 +1025,17 @@ internal partial class GameInstanceDll : Engine.IGameInstanceDll
 		if ( Application.IsEditor )
 			return;
 
-		// We can load and run projects if we're a Dedicated Server.
-		if ( Application.IsDedicatedServer && gameIdent.ToLower().Contains( ".sbproj" ) )
+		Api.Activity.GameRequested( new( "console", gameIdent ), replace: false );
+
+		// Local automation can launch a project directly, just like a dedicated server.
+		if ( (Application.IsDedicatedServer || Sandbox.Utility.CommandLine.HasSwitch( "-mcp" ))
+			&& gameIdent.EndsWith( ".sbproj", StringComparison.OrdinalIgnoreCase ) )
 		{
 			await Project.InitializeBuiltIn( false );
 
-			var project = Project.AddFromFile( gameIdent );
+			var project = await Project.AddGameFromFile( gameIdent );
 
-			NativeEngine.FullFileSystem.AddProjectPath( gameIdent, project.GetAssetsPath().ToLowerInvariant() );
-
-			var libraries = Path.Combine( project.RootDirectory.FullName, "Libraries" );
-
-			// We should iterate all available libraries and add their projects
-			foreach ( var folder in Directory.EnumerateDirectories( libraries ) )
-			{
-				var configs = Directory.EnumerateFiles( folder, "*.sbproj" ).ToArray();
-				if ( configs.Length != 1 ) continue;
-				Project.AddFromFile( configs[0] );
-			}
-
-			// We need to reload the project since we may have had a bunch of libraries added
-			project.Load();
-
-			await Project.CompileAsync();
-
-			if ( !project.Active )
+			if ( project is null )
 			{
 				Log.Error( $"Unable to load {gameIdent}" );
 				return;
@@ -845,35 +1053,21 @@ internal partial class GameInstanceDll : Engine.IGameInstanceDll
 			Log.Info( $" with map: '{LaunchArguments.Map}'" );
 		}
 
-		await IGameInstanceDll.Current.LoadGamePackageAsync( gameIdent, GameLoadingFlags.Host, default );
-		Log.Info( $"Load Complete" );
+		LoadingScreen.IsVisible = true;
+		LoadingScreen.Media = null;
+		LoadingScreen.Title = null;
+
+		await Current.LoadGamePackageAsync( gameIdent, GameLoadingFlags.Host, default );
 	}
 
 	public static void Create()
 	{
 		IGameInstanceDll.Current = new GameInstanceDll();
 
-		// PreJIT the methods in these dlls to avoid doing it during the game
-		{
-			var e = new Api.Events.EventRecord( "PreJIT.Game" );
-
-			using ( e.ScopeTimer( "Sandbox.GameInstance" ) )
-			{
-				Sandbox.ReflectionUtility.PreJIT( typeof( GameInstanceDll ).Assembly );
-			}
-
-			using ( e.ScopeTimer( "Sandbox.System" ) )
-			{
-				Sandbox.ReflectionUtility.PreJIT( typeof( Vector3 ).Assembly );
-			}
-
-			using ( e.ScopeTimer( "Sandbox.Engine" ) )
-			{
-				Sandbox.ReflectionUtility.PreJIT( typeof( Bootstrap ).Assembly );
-			}
-
-			e.Submit();
-		}
+		// PreJIT the methods in these dlls on background threads to avoid stalls during gameplay
+		_ = Sandbox.ReflectionUtility.PreJITAsync( typeof( GameInstanceDll ).Assembly );
+		_ = Sandbox.ReflectionUtility.PreJITAsync( typeof( Vector3 ).Assembly );
+		_ = Sandbox.ReflectionUtility.PreJITAsync( typeof( Bootstrap ).Assembly );
 	}
 
 	/// <summary>

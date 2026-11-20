@@ -1,6 +1,6 @@
+﻿using Sandbox.Network;
 using System.Runtime.CompilerServices;
 using System.Threading;
-using Sandbox.Network;
 
 namespace Sandbox;
 
@@ -8,9 +8,26 @@ namespace Sandbox;
 /// A connection, usually to a server or a client.
 /// </summary>
 [Expose, ActionGraphIgnore]
-public abstract partial class Connection
+public abstract partial class Connection : BytePack.ISerializer
 {
-	internal abstract void InternalSend( ByteStream stream, NetFlags flags );
+	/// <summary>
+	/// Travels as its id and resolves to the receiver's connection object.
+	/// </summary>
+	static void BytePack.ISerializer.BytePackWrite( object value, ref ByteStream bs )
+	{
+		bs.Write( value is Connection connection ? connection.Id : Guid.Empty );
+	}
+
+	static object BytePack.ISerializer.BytePackRead( ref ByteStream bs, Type targetType )
+	{
+		var id = bs.Read<Guid>();
+		return id == Guid.Empty ? null : Find( id );
+	}
+
+	/// <summary>
+	/// Send one wire packet. A transport that sends it later than this call takes a reference to it, see <see cref="NetPacket"/>.
+	/// </summary>
+	internal abstract void InternalSend( NetPacket packet, NetFlags flags );
 	internal abstract void InternalRecv( NetworkSystem.MessageHandler handler );
 	internal abstract void InternalClose( int closeCode, string closeReason );
 
@@ -30,8 +47,12 @@ public abstract partial class Connection
 	/// </summary>
 	/// <param name="info"></param>
 	/// <returns>Whether or not we want to allow this connection</returns>
-	internal virtual bool OnReceiveUserInfo( UserInfo info )
+	internal virtual async Task<bool> OnReceiveUserInfo( UserInfo info )
 	{
+		// Wait for inventory verification before connection completes
+		if ( info.InventoryBlob?.Length > 0 )
+			await ProcessInventoryBlobAsync( info.InventoryBlob );
+
 		return true;
 	}
 
@@ -165,10 +186,21 @@ public abstract partial class Connection
 		}
 	}
 
+	/// <summary>
+	/// Can this connection send ActionGraph / Doo scripts?
+	/// </summary>
+	internal bool CanSendScripts => IsHost;
+
 	public virtual float Latency => 0;
 
+	/// <summary>
+	/// The player's name.
+	/// </summary>
+	/// <seealso cref="DisplayName"/>
 	[ActionGraphInclude]
-	public virtual string Name => "Unnammed";
+	public string Name => Preferences.StreamerMode
+		? Utility.Steam.GetAnonymousName( SteamId )
+		: Info?.Name ?? "Unknown Player";
 
 	[ActionGraphInclude]
 	public virtual float Time => 0.0f;
@@ -177,7 +209,12 @@ public abstract partial class Connection
 	public virtual string Address => "unknown";
 
 	[ActionGraphInclude]
-	public virtual bool IsHost => false;
+	public virtual bool IsHost => System is not null && System.HostConnection == this;
+
+	/// <summary>
+	/// True if this connection was established and has since dropped.
+	/// </summary>
+	internal virtual bool IsConnectionLost => false;
 
 	/// <summary>
 	/// True if this channel is still currently connecting.
@@ -276,7 +313,7 @@ public abstract partial class Connection
 
 		System.Serialize( t, ref msg );
 
-		SendRawMessage( msg );
+		SendStream( msg );
 		msg.Dispose();
 	}
 
@@ -303,44 +340,77 @@ public abstract partial class Connection
 
 		System.Serialize( t, ref msg );
 
-		SendRawMessage( msg, flags );
+		SendStream( msg, flags );
 		msg.Dispose();
 	}
 
-	internal virtual void SendRawMessage( ByteStream stream, NetFlags flags = NetFlags.Reliable )
+	/// <summary>
+	/// Encode and send a message. Peers behind the host get it through the host before it's encoded.
+	/// All other code should prefer calling <see cref="Send(NetPacket, NetFlags)"/> with an already-encoded packet.
+	/// </summary>
+	internal void SendStream( ByteStream stream, NetFlags flags = NetFlags.Reliable )
 	{
-		// Note: this is basically quater of k_cbMaxSteamNetworkingSocketsMessageSizeSend
-		var maxChunkSize = 128 * 1024;
-		var isReliableMessage = (flags & NetFlags.Reliable) != 0;
-
-		if ( !isReliableMessage || stream.Length < maxChunkSize )
+		if ( RelayFor( flags ) && (!HasPendingSends || (flags & NetFlags.Reliable) == 0) )
 		{
-			InternalSend( stream, flags );
+			System?.SendMulticast( [Id], stream.ToSpan(), flags );
 			return;
 		}
 
-		//
-		// Split messages into multiple parts, this should hardly ever happen.
-		//
+		var packet = EncodePacket( stream );
+		Send( packet, flags );
+		packet.Release();
+	}
 
-		var chunkHeader = 32;
-		var chunks = (stream.Length / (float)maxChunkSize).CeilToInt();
+	/// <summary>
+	/// Send an already wire-encoded payload. Chunks it into <see cref="MaxChunkSize"/> packets
+	/// if the payload exceeds the threshold and the message is reliable.
+	/// </summary>
+	internal const int MaxChunkSize = 128 * 1024; // ~quarter of Steam's k_cbMaxSteamNetworkingSocketsMessageSizeSend
 
-		Log.Trace( $"splitting {stream.Length} bytes into {chunks} {maxChunkSize}b chunks" );
+	internal void Send( NetPacket encoded, NetFlags flags )
+	{
+		byte[][] packets = null;
+		Send( encoded, flags, ref packets );
+	}
 
-		for ( int i = 0; i < chunks; i++ )
+	/// <summary>
+	/// Like <see cref="Send(NetPacket, NetFlags)"/>, but any chunks built for <paramref name="encoded"/> are kept in
+	/// <paramref name="packets"/> so a broadcast can hand the same ones to every recipient. The caller still owns
+	/// <paramref name="encoded"/>.
+	/// </summary>
+	internal void Send( NetPacket encoded, NetFlags flags, ref byte[][] packets )
+	{
+		if ( sendsClosed )
 		{
-			using ByteStream chunkMessage = ByteStream.Create( maxChunkSize + chunkHeader );
-			chunkMessage.Write( InternalMessageType.Chunk );
-			chunkMessage.Write( (uint)i );
-			chunkMessage.Write( (uint)chunks );
-			chunkMessage.Write( stream, i * maxChunkSize, maxChunkSize );
+			return;
+		}
+		if ( RelayFor( flags ) && (!HasPendingSends || (flags & NetFlags.Reliable) == 0) )
+		{
+			System?.SendMulticast( [Id], Decode( encoded.Span ), flags );
+			return;
+		}
+		if ( HasPendingSends )
+		{
+			// Keep the complete message so it can be sent through either route when drained.
+			QueueSend( Task.FromResult<byte[][]>( [encoded.Span.ToArray()] ), flags );
+			return;
+		}
 
-			Log.Trace( $"Chunk {i + 1} is {chunkMessage.Length}b" );
+		var isReliable = (flags & NetFlags.Reliable) != 0;
 
-			InternalSend( chunkMessage, flags );
+		if ( !isReliable || encoded.Length <= MaxChunkSize )
+		{
+			InternalSend( encoded, flags );
+			return;
+		}
 
-			chunkMessage.Dispose();
+		packets ??= CreatePackets( encoded.Span, flags );
+
+		foreach ( var chunk in packets )
+		{
+			var packet = NetPacket.Wrap( chunk );
+			InternalSend( packet, flags );
+			packet.Release();
 		}
 	}
 
@@ -359,6 +429,16 @@ public abstract partial class Connection
 
 	internal void Close( int reasonCode, string reasonString )
 	{
+		if ( sendsClosed )
+		{
+			return;
+		}
+		sendsClosed = true;
+		snapshotCancellation?.Cancel();
+		snapshotCancellation?.Dispose();
+		snapshotCancellation = null;
+		pendingSends.Clear();
+		_chunkBufferLength = -1;
 		InternalClose( reasonCode, reasonString );
 	}
 
@@ -386,6 +466,11 @@ public abstract partial class Connection
 		}
 	}
 
+	/// <summary>
+	/// Connection progress serialized by the connection-info string table.
+	/// Explicit registration is required because this is an internal nested type.
+	/// </summary>
+	[Expose]
 	internal enum ChannelState
 	{
 		Unconnected,
@@ -446,11 +531,99 @@ public abstract partial class Connection
 	/// </summary>
 	internal ConnectionInfo PreInfo { get; set; }
 
-	[ActionGraphInclude]
-	public string DisplayName => Info?.DisplayName ?? "Unknown Player";
+	/// <summary>
+	/// Last <see cref="DisplayName"/> source and its filtered result. Steam's text filter is a native call,
+	/// and UI like nameplates and scoreboards reads the display name of every player every frame.
+	/// </summary>
+	sealed record FilteredName( string Source, ulong SteamId, string Value );
+	FilteredName _filteredName;
 
+	/// <summary>
+	/// The player's name but with any potential nicknames or naughty words filtered out.
+	/// You don't want to be using this in serverside logic really.
+	/// </summary>
+	/// <seealso cref="Name"/>
 	[ActionGraphInclude]
-	public SteamId SteamId => Info?.SteamId ?? default;
+	public string DisplayName
+	{
+		get
+		{
+			string source = null;
+			if ( Steamworks.SteamFriends.IsInstalled )
+			{
+				var personaName = FriendInfo.DisplayName;
+				if ( !string.IsNullOrWhiteSpace( personaName ) )
+					source = personaName;
+			}
+
+			source ??= Name;
+			var steamId = SteamId;
+
+			// Filter again only when the name or account changes
+			var cached = _filteredName;
+			if ( cached is not null && cached.SteamId == steamId.ValueUnsigned && string.Equals( cached.Source, source, StringComparison.Ordinal ) )
+				return cached.Value;
+
+			var filtered = Utility.Steam.FilterName( source, steamId );
+			_filteredName = new FilteredName( source, steamId.ValueUnsigned, filtered );
+			return filtered;
+		}
+	}
+
+	/// <summary>
+	/// The Steam Id of this connection. For a dedicated server this is the game server's Steam Id.
+	/// Clients get the host's Steam Id from the host itself, so it isn't verified on IP connections.
+	/// </summary>
+	[ActionGraphInclude]
+	public SteamId SteamId => Info?.SteamId ?? FallbackSteamId;
+
+	/// <summary>
+	/// The Steam Id the host sent us in its <see cref="ServerInfo"/>. Dedicated servers have no
+	/// <see cref="ConnectionInfo"/>, so this is the only place clients get their Steam Id from.
+	/// </summary>
+	internal SteamId HostSteamId { get; set; }
+
+	SteamId FallbackSteamId
+	{
+		get
+		{
+			if ( this is LocalConnection && Application.IsDedicatedServer )
+			{
+				// Still the uninitialized default until the game server has logged on
+				var steamId = Utility.Steam.SteamId;
+				return steamId.AccountType == SteamId.AccountTypes.Invalid ? default : steamId;
+			}
+
+			return HostSteamId;
+		}
+	}
+
+	/// <summary>
+	/// Steam friend information for this connection.
+	/// This is not available on the dedicated server.
+	/// </summary>
+	public Friend FriendInfo
+	{
+		get
+		{
+			if ( SteamId.ValueUnsigned == 0 )
+				return default;
+
+			if ( field.Id != SteamId.ValueUnsigned )
+				field = new( SteamId.ValueUnsigned );
+
+			return field;
+		}
+	}
+
+	/// <summary>
+	/// The SteamID of the account that actually owns the game in a Steam Family.
+	/// If not in a Steam Family this is the same as <see cref="SteamId"/>
+	/// </summary>
+	/// <remarks>
+	/// This is only valid on the host.
+	/// </remarks>
+	public SteamId OwnerSteamId { get; internal set; }
 
 	/// <summary>
 	/// The Id of the party that this user is a part of. This can be used to compare to other users to 
@@ -463,6 +636,61 @@ public abstract partial class Connection
 
 	[ActionGraphInclude]
 	public string GetUserData( string key ) => Info?.GetUserData( key ) ?? default;
+
+	private HashSet<int> _verifiedInventoryItems;
+
+	/// <summary>
+	/// Check if this connection has a specific inventory item in their Steam Inventory
+	/// </summary>
+	public bool HasInventoryItem( int definitionId )
+	{
+		if ( this == Local )
+			return Services.Inventory.HasItem( definitionId );
+
+		return _verifiedInventoryItems?.Contains( definitionId ) ?? false;
+	}
+
+	private async Task ProcessInventoryBlobAsync( byte[] blob )
+	{
+		CSteamInventoryResult result;
+		unsafe
+		{
+			fixed ( byte* ptr = blob )
+			{
+				result = NativeEngine.SteamInventory.Deserialize( ptr, (uint)blob.Length );
+			}
+		}
+
+		if ( result.IsNull )
+		{
+			Log.Warning( $"Connection {Name}: inventory blob deserialization failed" );
+			return;
+		}
+
+		// Steam might take a sec to verify the inventory proof...
+		var deadline = global::System.DateTime.UtcNow.AddSeconds( 5 );
+		while ( result.IsPending() && global::System.DateTime.UtcNow < deadline )
+		{
+			await Task.Delay( 10 );
+		}
+
+		if ( !result.IsOk() )
+		{
+			Log.Warning( $"Connection {Name}: inventory result not OK after deserialization" );
+			result.Destroy();
+			return;
+		}
+
+		var items = new HashSet<int>();
+		for ( var i = 0; i < result.Count(); i++ )
+		{
+			var item = result.Get( i );
+			items.Add( (int)item.DefinitionId() );
+		}
+
+		_verifiedInventoryItems = items;
+		result.Destroy();
+	}
 
 	/// <summary>
 	/// New, updated UserInfo data arrived. Replace our old data with this.

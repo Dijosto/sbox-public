@@ -7,7 +7,7 @@
 public sealed class TriggerHurt : Component
 {
 	/// <summary>
-	/// If not empty, the target must have one of these tags
+	/// These tags will be applied to the emitted <see cref="DamageInfo"/>
 	/// </summary>
 	[Property, Group( "Damage" )] public TagSet DamageTags { get; set; } = new();
 
@@ -40,14 +40,16 @@ public sealed class TriggerHurt : Component
 		if ( timeSinceDamage < Rate ) return;
 		if ( !Collider.IsValid() ) return;
 
-		timeSinceDamage = 0;
+		bool hasHurt = false;
 
-		foreach ( var touching in Collider.Touching.SelectMany( x => x.GetComponentsInParent<IDamageable>().Distinct() ) )
+		foreach ( var touching in Collider.Touching.SelectMany( x => x.GetComponentsInParent<IDamageable>() ).Distinct() )
 		{
 			if ( touching is not Component target ) continue;
 
 			if ( !Exclude.IsEmpty && target.GameObject.Tags.HasAny( Exclude ) ) continue;
 			if ( !Include.IsEmpty && !target.GameObject.Tags.HasAny( Include ) ) continue;
+
+			hasHurt = true;
 
 			var damage = new DamageInfo();
 			damage.Tags.Add( DamageTags );
@@ -58,5 +60,7 @@ public sealed class TriggerHurt : Component
 
 			touching.OnDamage( damage );
 		}
+
+		if ( hasHurt ) timeSinceDamage = 0;
 	}
 }

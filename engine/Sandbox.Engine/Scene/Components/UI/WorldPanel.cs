@@ -1,4 +1,5 @@
 using Sandbox.UI;
+
 namespace Sandbox;
 
 /// <summary>
@@ -16,6 +17,12 @@ public sealed class WorldPanel : Renderer, IRootPanelComponent
 	[Property] public bool LookAtCamera { get; set; }
 	[Property] public Vector2 PanelSize { get; set; } = new Vector2( 512 );
 
+	/// <summary>
+	/// Whether the panel is affected by lighting.
+	/// </summary>
+	[Property]
+	public bool Lighting { get; set; }
+
 	// todo: show these as group buttons
 
 	[Property] public HAlignment HorizontalAlign { get; set; } = HAlignment.Center;
@@ -24,7 +31,23 @@ public sealed class WorldPanel : Renderer, IRootPanelComponent
 	/// <summary>
 	/// How far can we interact with this world panel?
 	/// </summary>
-	[Property, MakeDirty] public float InteractionRange { get; set; } = 1000.0f;
+	[Property]
+	public float InteractionRange
+	{
+		get;
+		set
+		{
+			if ( field == value )
+				return;
+
+			field = value;
+
+			if ( worldPanel.IsValid() )
+			{
+				worldPanel.MaxInteractionDistance = value;
+			}
+		}
+	} = 1000.0f;
 
 	public enum HAlignment
 	{
@@ -60,26 +83,12 @@ public sealed class WorldPanel : Renderer, IRootPanelComponent
 		if ( VerticalAlign == VAlignment.Center ) r.Position -= new Vector2( 0, PanelSize.y * 0.5f );
 		if ( VerticalAlign == VAlignment.Bottom ) r.Position -= new Vector2( 0, PanelSize.y );
 
-
 		return r;
-	}
-
-	protected override void OnDirty()
-	{
-		if ( !worldPanel.IsValid() )
-			return;
-
-		worldPanel.MaxInteractionDistance = InteractionRange;
-
-		if ( worldPanel.SceneObject.IsValid() )
-		{
-			RenderOptions.Apply( worldPanel.SceneObject );
-		}
 	}
 
 	protected override void DrawGizmos()
 	{
-		using ( Gizmo.Scope( null, new Transform( 0, Rotation.From( 0, 90, -90 ), Sandbox.UI.WorldPanel.ScreenToWorldScale ) ) )
+		using ( Gizmo.PushScope( null, new Transform( 0, Rotation.From( 0, 90, -90 ), Sandbox.UI.WorldPanel.ScreenToWorldScale ) ) )
 		{
 			var r = CalculateRect();
 
@@ -101,6 +110,7 @@ public sealed class WorldPanel : Renderer, IRootPanelComponent
 		worldPanel.Transform = WorldTransform;
 		worldPanel.Tags.SetFrom( GameObject.Tags );
 		worldPanel.MaxInteractionDistance = InteractionRange;
+		worldPanel.Lighting = Lighting;
 
 		OnSceneObjectCreated( worldPanel.SceneObject );
 		OnRenderOptionsChanged();
@@ -139,6 +149,7 @@ public sealed class WorldPanel : Renderer, IRootPanelComponent
 		}
 
 		worldPanel.Transform = WorldTransform.WithRotation( currentRot ).WithScale( currentScale * RenderScale );
+		worldPanel.Lighting = Lighting;
 
 		var rect = CalculateRect();
 
@@ -163,7 +174,7 @@ public sealed class WorldPanel : Renderer, IRootPanelComponent
 		if ( !worldPanel.IsValid() )
 			return;
 
-		worldPanel?.Tags.SetFrom( Tags );
+		worldPanel.Tags.SetFrom( Tags );
 	}
 
 	protected override void OnRenderOptionsChanged()
@@ -173,5 +184,4 @@ public sealed class WorldPanel : Renderer, IRootPanelComponent
 			RenderOptions.Apply( worldPanel.SceneObject );
 		}
 	}
-
 }

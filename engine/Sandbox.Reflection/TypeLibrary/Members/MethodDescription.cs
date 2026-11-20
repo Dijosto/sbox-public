@@ -1,11 +1,13 @@
-﻿namespace Sandbox;
+﻿using Sandbox.Internal;
+
+namespace Sandbox;
 
 /// <summary>
 /// Describes a method. We use this class to wrap and return <see cref="MethodInfo">MethodInfo</see>'s that are safe to interact with.
 ///
 /// Returned by <see cref="Internal.TypeLibrary"/> and <see cref="Sandbox.TypeDescription"/>.
 /// </summary>
-public sealed class MethodDescription : MemberDescription
+public sealed partial class MethodDescription : MemberDescription
 {
 	/// <summary>
 	/// Returns true - because this is a method
@@ -36,28 +38,28 @@ public sealed class MethodDescription : MemberDescription
 	{
 		MethodDescription o = previous as MethodDescription;
 
-		o ??= new MethodDescription( td );
+		o ??= new MethodDescription( td.library );
 		o.TypeDescription = td;
 		o.InitMethod( i );
 
 		return o;
 	}
 
-	internal MethodDescription( TypeDescription td )
+	internal MethodDescription( TypeLibrary tl ) : base( tl )
 	{
 	}
 
 	private void InitMethod( MethodInfo x )
 	{
-		base.Init( x );
-
 		IsStatic = x.IsStatic;
 		IsPublic = x.IsPublic;
 		IsFamily = x.IsFamily;
 		IsVirtual = x.IsVirtual;
 		IsSpecialName = x.IsSpecialName;
+		OperatorKind = ClassifyOperator( x );
+		parameters = x.GetParameters();
 
-		parameters = methodInfo.GetParameters();
+		base.Init( x );
 	}
 
 	internal override void Dispose()
@@ -76,8 +78,7 @@ public sealed class MethodDescription : MemberDescription
 		var returnTypeName = ReturnType.Name.Split( "`" ).FirstOrDefault();
 		var declaringTypeName = TypeDescription?.FullName.Split( "`" ).FirstOrDefault()?.Replace( "+", "." );
 		var methodName = Name;
-		var parameterTypes = string.Join( ",", methodInfo.GetParameters()
-			.Select( p => p.ParameterType.Name.Split( "`" ).FirstOrDefault() ) );
+		var parameterTypes = string.Join( ",", Parameters.Select( p => p.ParameterType.Name.Split( "`" ).FirstOrDefault() ) );
 
 		return $"{returnTypeName}.{declaringTypeName}.{methodName}.{parameterTypes}";
 	}
@@ -93,22 +94,20 @@ public sealed class MethodDescription : MemberDescription
 	/// </summary>
 	/// <param name="targetObject">Should be null if this is static, otherwise should be the object this is a member of.</param>
 	/// <param name="parameters">An array of parameters to pass. Should be the same length as Parameters</param>
-	public void Invoke( object targetObject, object[] parameters = null )
+	public object Invoke( object targetObject, object[] parameters = null )
 	{
-		var methodParameters = methodInfo.GetParameters();
-		var args = new object[methodParameters.Length];
+		var args = new object[Parameters.Length];
 
-		for ( var i = 0; i < methodParameters.Length; i++ )
+		for ( var i = 0; i < Parameters.Length; i++ )
 		{
 			args[i] = (parameters != null && i < parameters.Length)
 				? parameters[i]
-				: methodParameters[i].HasDefaultValue
-					? methodParameters[i].DefaultValue
-					: throw new ArgumentException(
-						$"No value provided for parameter '{methodParameters[i].Name}' and it has no default value." );
+				: Parameters[i].HasDefaultValue
+					? Parameters[i].DefaultValue
+					: throw new ArgumentException( $"No value provided for parameter '{Parameters[i].Name}' and it has no default value." );
 		}
 
-		methodInfo.Invoke( targetObject, args );
+		return methodInfo.Invoke( targetObject, args );
 	}
 
 	/// <summary>
@@ -118,17 +117,17 @@ public sealed class MethodDescription : MemberDescription
 	/// <param name="parameters">An array of parameters to pass. Should be the same length as Parameters</param>
 	public T InvokeWithReturn<T>( object targetObject, object[] parameters = null )
 	{
-		return (T)methodInfo.Invoke( targetObject, parameters );
+		return (T)Invoke( targetObject, parameters );
 	}
 
 	/// <summary>
 	/// Creates a delegate bound to this method.
 	/// </summary>
 	/// <typeparam name="T">Delegate type</typeparam>
-	public T CreateDelegate<T>()
-		where T : Delegate
+	public T CreateDelegate<T>() where T : Delegate
 	{
-		return (T)Delegate.CreateDelegate( typeof( T ), methodInfo, true );
+		ValidateDelegateSignature( typeof( T ), methodInfo );
+		return methodInfo.CreateDelegate<T>();
 	}
 
 	/// <summary>
@@ -136,10 +135,10 @@ public sealed class MethodDescription : MemberDescription
 	/// </summary>
 	/// <typeparam name="T">Delegate type</typeparam>
 	/// <param name="target">Value for the first parameter / target object</param>
-	public T CreateDelegate<T>( object target )
-		where T : Delegate
+	public T CreateDelegate<T>( object target ) where T : Delegate
 	{
-		return (T)Delegate.CreateDelegate( typeof( T ), target, methodInfo, true );
+		ValidateDelegateSignature( typeof( T ), methodInfo );
+		return methodInfo.CreateDelegate<T>( target );
 	}
 
 	/// <summary>
@@ -148,7 +147,8 @@ public sealed class MethodDescription : MemberDescription
 	/// <param name="delegateType">Delegate type to create</param>
 	public Delegate CreateDelegate( Type delegateType )
 	{
-		return Delegate.CreateDelegate( delegateType, methodInfo, true );
+		ValidateDelegateSignature( delegateType, methodInfo );
+		return methodInfo.CreateDelegate( delegateType );
 	}
 
 	/// <summary>
@@ -158,6 +158,94 @@ public sealed class MethodDescription : MemberDescription
 	/// <param name="target">Value for the first parameter / target object</param>
 	public Delegate CreateDelegate( Type delegateType, object target )
 	{
-		return Delegate.CreateDelegate( delegateType, target, methodInfo, true );
+		ValidateDelegateSignature( delegateType, methodInfo );
+		return methodInfo.CreateDelegate( delegateType, target );
+	}
+
+	// The runtime only matches T& types, so ref kinds and lifetime annotations must agree exactly.
+	private static void ValidateDelegateSignature( Type delegateType, MethodInfo method )
+	{
+		if ( delegateType is null || method is null || !delegateType.IsSubclassOf( typeof( Delegate ) ) )
+			return;
+
+		var invoke = delegateType.GetMethod( "Invoke" );
+		if ( invoke is null )
+			return;
+
+		var delegateParams = invoke.GetParameters();
+		var methodParams = method.GetParameters();
+		var thisCount = method.IsStatic ? 0 : 1;
+		var skip = methodParams.Length + thisCount - delegateParams.Length;
+
+		if ( skip is not (0 or 1) )
+			throw new ArgumentException( $"Delegate {delegateType} does not match the parameters of {method.Name}" );
+
+		var usesRefs = IsRefLike( invoke.ReturnType ) || IsRefLike( method.ReturnType );
+
+		if ( GetRefKind( invoke.ReturnParameter ) != GetRefKind( method.ReturnParameter ) )
+			throw new ArgumentException( $"Delegate {delegateType} return ref kind does not match {method.Name}" );
+
+		for ( var i = 0; i < delegateParams.Length; i++ )
+		{
+			var delegateParam = delegateParams[i];
+			var index = i + skip - thisCount;
+			usesRefs |= IsRefLike( delegateParam.ParameterType );
+
+			if ( index < 0 )
+			{
+				var thisByRef = method.DeclaringType.IsValueType;
+				usesRefs |= thisByRef;
+
+				if ( GetRefKind( delegateParam ) != (thisByRef, false, false, false, false, false, false) )
+					throw new ArgumentException( $"Delegate {delegateType} instance parameter ref kind does not match {method.Name}" );
+
+				continue;
+			}
+
+			var methodParam = methodParams[index];
+			usesRefs |= IsRefLike( methodParam.ParameterType );
+
+			if ( GetRefKind( delegateParam ) != GetRefKind( methodParam ) )
+				throw new ArgumentException( $"Delegate {delegateType} parameter '{delegateParam.Name}' ref kind does not match {method.Name}" );
+		}
+
+		if ( usesRefs && GetRefSafetyRules( invoke.Module ) != GetRefSafetyRules( method.Module ) )
+			throw new ArgumentException( $"Delegate {delegateType} was compiled with different ref safety rules than {method.Name}" );
+	}
+
+	private static bool IsRefLike( Type type ) => type.IsByRef || type.IsByRefLike;
+
+	private static (bool ByRef, bool In, bool Out, bool ReadOnly, bool RequiresLocation, bool Scoped, bool Unscoped) GetRefKind( ParameterInfo parameter )
+	{
+		var byRef = parameter.ParameterType.IsByRef;
+		bool readOnly = false, requiresLocation = false, scoped = false, unscoped = false;
+
+		foreach ( var attribute in parameter.CustomAttributes )
+		{
+			switch ( attribute.AttributeType.FullName )
+			{
+				case "System.Runtime.CompilerServices.IsReadOnlyAttribute": readOnly = true; break;
+				case "System.Runtime.CompilerServices.RequiresLocationAttribute": requiresLocation = true; break;
+				case "System.Runtime.CompilerServices.ScopedRefAttribute": scoped = true; break;
+				case "System.Diagnostics.CodeAnalysis.UnscopedRefAttribute": unscoped = true; break;
+			}
+		}
+
+		return (byRef, byRef && parameter.IsIn, byRef && parameter.IsOut, readOnly, requiresLocation, scoped, unscoped);
+	}
+
+	private static int GetRefSafetyRules( Module module )
+	{
+		foreach ( var attribute in module.CustomAttributes )
+		{
+			if ( attribute.AttributeType.FullName == "System.Runtime.CompilerServices.RefSafetyRulesAttribute"
+				&& attribute.ConstructorArguments.Count == 1
+				&& attribute.ConstructorArguments[0].Value is int version )
+			{
+				return version;
+			}
+		}
+
+		return 0;
 	}
 }

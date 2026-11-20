@@ -7,7 +7,7 @@ namespace Sandbox;
 /// </summary>
 [Expose]
 [Title( "Particle Light Renderer" )]
-[Category( "Particles" )]
+[Category( "Effects" )]
 [Icon( "tips_and_updates" )]
 public sealed class ParticleLightRenderer : ParticleController
 {
@@ -44,7 +44,7 @@ public sealed class ParticleLightRenderer : ParticleController
 
 	protected override void OnParticleCreated( Particle p )
 	{
-		if ( Random.Shared.Float( 0, 1 ) > Ratio )
+		if ( ParticleRandom.Shared.Float( 0, 1 ) > Ratio )
 			return;
 
 		if ( currentLightCount > MaximumLights )
@@ -60,7 +60,7 @@ public sealed class ParticleLightRenderer : ParticleController
 class ParticleLight : Particle.BaseListener
 {
 	public ParticleLightRenderer Renderer;
-	SceneLight so;
+	ScenePointLight so;
 
 	public ParticleLight( ParticleLightRenderer particleLightRenderer )
 	{
@@ -69,7 +69,8 @@ class ParticleLight : Particle.BaseListener
 
 	public override void OnEnabled( Particle p )
 	{
-		so = new SceneLight( Renderer.Scene.SceneWorld, p.Position, 100, Color.Red );
+		so = new ScenePointLight( Renderer.Scene.SceneWorld, p.Position, 100, Color.Red );
+		so.Tags.SetFrom( Renderer.GameObject.Tags );
 	}
 
 	public override void OnDisabled( Particle p )
@@ -86,6 +87,7 @@ class ParticleLight : Particle.BaseListener
 		if ( !so.IsValid() ) return;
 
 		float brightness = Renderer.Brightness.Evaluate( p, 2346 );
+		so.Tags.SetFrom( Renderer.GameObject.Tags );
 		Color color = Renderer.LightColor.Evaluate( p, 6342 );
 		color = color.WithAlpha( 1 ) * color.a * brightness;
 

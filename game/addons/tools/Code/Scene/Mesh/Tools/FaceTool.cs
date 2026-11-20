@@ -7,29 +7,54 @@ namespace Editor.MeshEditor;
 /// Select and edit face geometry.
 /// </summary>
 [Title( "Face Tool" )]
-[Icon( "change_history" )]
+[Icon( "meshtools/sub-tools/face_tool.png" )]
 [Alias( "tools.face-tool" )]
 [Group( "3" )]
 public sealed partial class FaceTool( MeshTool tool ) : SelectionTool<MeshFace>( tool )
 {
 	MeshFace _hoverFace;
 	SceneDynamicObject _faceObject;
+	protected override bool ShowSelectionBoundsDefault => true;
 
 	//Selection
 	public bool SelectByMaterial { get; set; } = false;
 	public bool SelectByNormal { get; set; } = true;
 	public float NormalThreshold { get; set; } = 12f;
 
+	Vector2Int _numCuts = 1;
+	private bool _showCuts = false;
+
+	[Range( 0, 64, slider: false ), Step( 1 ), WideMode]
+	public Vector2Int NumCuts
+	{
+		get => _numCuts;
+		set
+		{
+			if ( _numCuts == value )
+				return;
+
+			_numCuts = value;
+			_showCuts = true;
+		}
+	}
+
+	void ResetNumCuts()
+	{
+		_numCuts = 1;
+		_showCuts = false;
+	}
+
 	public override void OnEnabled()
 	{
 		base.OnEnabled();
 
 		CreateFaceObject();
+		ResetNumCuts();
 	}
 
 	private void CreateFaceObject()
 	{
-		_faceObject = new SceneDynamicObject( Scene.SceneWorld );
+		_faceObject = new SceneDynamicObject( Scene.DebugSceneWorld );
 		_faceObject.Material = Material.Load( "materials/tools/vertex_color_translucent.vmat" );
 		_faceObject.Attributes.SetCombo( "D_DEPTH_BIAS", 1 );
 		_faceObject.Attributes.SetCombo( "D_NO_CULLING", 1 );
@@ -44,6 +69,8 @@ public sealed partial class FaceTool( MeshTool tool ) : SelectionTool<MeshFace>(
 		_faceObject = null;
 
 		_hoverFace = default;
+
+		ResetNumCuts();
 	}
 
 	public override void OnUpdate()
@@ -52,11 +79,7 @@ public sealed partial class FaceTool( MeshTool tool ) : SelectionTool<MeshFace>(
 
 		using var scope = Gizmo.Scope( "FaceTool" );
 
-		var result = MeshTrace.Run();
-		if ( result.Hit && result.Component is MeshComponent )
-			Gizmo.Hitbox.TrySetHovered( result.EndPosition );
-
-		if ( _faceObject.IsValid() && _faceObject.World != Scene.SceneWorld )
+		if ( _faceObject.IsValid() && _faceObject.World != Scene.DebugSceneWorld )
 		{
 			_hoverFace = default;
 			_faceObject.Delete();
@@ -64,13 +87,16 @@ public sealed partial class FaceTool( MeshTool tool ) : SelectionTool<MeshFace>(
 			CreateFaceObject();
 		}
 
+		_hoverFace = MeshTrace.TraceFace( out var hitPosition );
+		if ( _hoverFace.IsValid() )
+			Gizmo.Hitbox.TrySetHovered( hitPosition );
+
 		if ( Gizmo.IsHovered && Tool.MoveMode.AllowSceneSelection && !IsLassoSelecting )
 		{
 			SelectFace();
-
-			if ( Gizmo.IsDoubleClicked )
-				SelectContiguousFaces();
 		}
+
+		UpdateMoveMode();
 
 		_faceObject.Init( Graphics.PrimitiveType.Triangles );
 
@@ -98,12 +124,55 @@ public sealed partial class FaceTool( MeshTool tool ) : SelectionTool<MeshFace>(
 			var vertices = mesh.CreateFace( face.Handle, face.Transform, selectionColor );
 			if ( vertices is not null )
 			{
-				foreach ( var vertex in vertices )
-					_faceObject.AddVertex( vertex );
+				_faceObject.AddVertex( vertices.AsSpan() );
 			}
 		}
 
-		DrawBounds();
+		if ( ShowSelectionBounds )
+			DrawBounds();
+
+		RenderSubdivisionPreview();
+	}
+
+	public override void BuildSceneContextMenu( Menu menu, Ray ray, SceneTraceResult? trace )
+	{
+		base.BuildSceneContextMenu( menu, ray, trace );
+
+		AddMenuOption( menu, "Find / Replace Material", "find_replace", "mesh.find-replace-material-tool", true );
+		AddMenuOption( menu, "Unhide All Faces", "visibility", "mesh.unhide-faces",
+			Scene.GetAllComponents<MeshComponent>().Any( x => x.Mesh?.HasHiddenFaces is true ) );
+
+		bool any = Selection.OfType<MeshFace>().Any( x => x.IsValid() );
+		if ( !any ) return;
+
+		menu.AddSeparator();
+
+		var ops = menu.AddMenu( "Face Operations", "build" );
+		AddMenuOption( ops, "Inset Faces", "meshtools/face_tool/insert_face.png", "mesh.inset-tool", true );
+		AddMenuOption( ops, "Bridge Faces", "meshtools/face_tool/bridge_1.png", "mesh.bridge-tool", true );
+		AddMenuOption( ops, "Thicken Faces", "meshtools/face_tool/thicken_faces.png", "mesh.thicken-faces", true );
+		AddMenuOption( ops, "Combine Faces", "meshtools/face_tool/combine_faces.png", "mesh.combine-faces", true );
+		AddMenuOption( ops, "Collapse Faces", "meshtools/face_tool/collapse_faces.png", "mesh.collapse", true );
+		AddMenuOption( ops, "Detach Faces", "meshtools/face_tool/detach_faces.png", "mesh.detach-faces", true );
+		AddMenuOption( ops, "Extract Faces", "meshtools/face_tool/extract_faces.png", "mesh.extract-faces", true );
+		AddMenuOption( ops, "Merge Meshes", "meshtools/object_selection_buttons/merge_meshes.png", "mesh.merge-meshes", true );
+		AddMenuOption( ops, "Apply Material", "format_color_fill", "mesh.apply-material", true );
+
+		var tex = menu.AddMenu( "Texture Operations", "gradient" );
+		AddMenuOption( tex, "Apply Material", "format_color_fill", "mesh.apply-material", true );
+		AddMenuOption( tex, "Apply by Hotspot", "meshtools/texture_tool_buttons/apply_by_hotspot.png", "mesh.apply-hotspot", true );
+		AddMenuOption( tex, "Apply by Hotspot (Per Face)", "meshtools/texture_tool_buttons/apply_by_hotspot_(per_face).png", "mesh.apply-hotspot-per-face", true );
+		AddMenuOption( tex, "Fast Texture Tool", "meshtools/texture_tool_buttons/fast_texture_tool.png", "mesh.fast-texture-tool", true );
+
+		var sel = menu.AddMenu( "Face Selection", "select_all" );
+		AddMenuOption( sel, "Select Loop", "all_out", "mesh.select-loop", true );
+		AddMenuOption( sel, "Invert Selection", "swap_vert", InvertCurrentSelection, "mesh.invert-selection", true );
+		sel.AddOption( "Select All", "select_all", () => InvokeShortcut( "mesh.select-all" ), "mesh.select-all" );
+		AddMenuOption( sel, "Hide Faces", "visibility_off", "mesh.hide-faces", true );
+
+		var util = menu.AddMenu( "Face Tools", "tune" );
+		AddMenuOption( util, "Invert Mesh", "meshtools/face_tool/flip_all_faces.png", "mesh.flip-all-faces", true );
+		AddMenuOption( util, "Remove Bad Faces", "meshtools/face_tool/remove_bad_faces.png", "mesh.remove-bad-faces", true );
 	}
 
 	protected override IEnumerable<MeshFace> ConvertSelectionToCurrentType()
@@ -150,6 +219,9 @@ public sealed partial class FaceTool( MeshTool tool ) : SelectionTool<MeshFace>(
 
 			var mesh = face.Component.Mesh;
 
+			if ( mesh.IsFaceHidden( face.Handle ) )
+				continue;
+
 			if ( selectedEdges.Count > 0 )
 			{
 				var faceEdges = mesh.GetFaceEdges( face.Handle );
@@ -181,141 +253,52 @@ public sealed partial class FaceTool( MeshTool tool ) : SelectionTool<MeshFace>(
 
 	protected override IEnumerable<IMeshElement> GetAllSelectedElements()
 	{
-		foreach ( var group in Selection.OfType<MeshFace>()
-			.GroupBy( x => x.Component ) )
+		foreach ( var component in SelectedMeshes )
 		{
-			var component = group.Key;
 			foreach ( var hFace in component.Mesh.FaceHandles )
+			{
+				if ( component.Mesh.IsFaceHidden( hFace ) )
+					continue;
+
 				yield return new MeshFace( component, hFace );
+			}
 		}
 	}
 
 	private void SelectFace()
 	{
-		_hoverFace = TraceFace();
 		UpdateSelection( _hoverFace );
 
 		if ( Gizmo.IsAltPressed && Gizmo.WasRightMousePressed )
 		{
 			if ( Gizmo.IsShiftPressed )
 			{
-				WrapTextureToSelection();
+				WrapTextureToSelection( _hoverFace );
 			}
 			else
 			{
-				WrapTexture();
+				WrapTexture( _hoverFace );
 			}
 		}
 	}
 
-	private void WrapTextureToSelection()
+	protected override bool OnDoubleClick( IMeshElement element )
 	{
-		foreach ( var face in Selection.OfType<MeshFace>() )
-		{
-			WrapTexture( _hoverFace, face );
-		}
-	}
-
-	private void WrapTexture()
-	{
-		if ( !_hoverFace.IsValid() || Selection.LastOrDefault() is not MeshFace face )
-			return;
-
-		WrapTexture( face, _hoverFace );
-	}
-
-	private static void WrapTexture( MeshFace sourceFace, MeshFace targetFace )
-	{
-		if ( !sourceFace.IsValid() )
-			return;
-
+		var targetFace = element is MeshFace face ? face : default;
 		if ( !targetFace.IsValid() )
-			return;
+			return false;
 
-		var sourceMesh = sourceFace.Component.Mesh;
-		var targetMesh = targetFace.Component.Mesh;
-
-		targetFace.Material = sourceFace.Material;
-		sourceMesh.GetFaceTextureParameters( sourceFace.Handle, out var vAxisU, out var vAxisV, out var vScale );
-
-		PolygonMesh.GetBestPlanesForEdgeBetweenFaces( sourceMesh, sourceFace.Handle, sourceFace.Transform,
-			targetMesh, targetFace.Handle, targetFace.Transform,
-			out var fromPlane, out var toPlane );
-
-		RotateTextureCoordinatesAroundEdge( fromPlane, toPlane, ref vAxisU, ref vAxisV, vScale );
-
-		targetMesh.SetFaceTextureParameters( targetFace.Handle, vAxisU, vAxisV, vScale );
-	}
-
-	private static void RotateTextureCoordinatesAroundEdge( Plane fromPlane, Plane toPlane, ref Vector4 pInOutAxisU, ref Vector4 pInOutAxisV, Vector2 scale )
-	{
-		Vector3 vAxisUOld = (Vector3)pInOutAxisU;
-		Vector3 vAxisVOld = (Vector3)pInOutAxisV;
-		var flShiftUOld = pInOutAxisU.w * scale.x;
-		var flShiftVOld = pInOutAxisV.w * scale.y;
-
-		var vEdge = fromPlane.Normal.Cross( toPlane.Normal ).Normal;
-		var vEdgePoint = Plane.GetIntersection( fromPlane, toPlane, new Plane( vEdge, 0.0f ) );
-
-		var vAxisUNew = vAxisUOld;
-		var vAxisVNew = vAxisVOld;
-		var flShiftUNew = flShiftUOld;
-		var flShiftVNew = flShiftVOld;
-
-		if ( vEdgePoint.HasValue )
-		{
-			var vProjFromNormal = fromPlane.Normal - vEdge * vEdge.Dot( fromPlane.Normal );
-			var vProjToNormal = toPlane.Normal - vEdge * vEdge.Dot( toPlane.Normal );
-
-			vProjFromNormal = vProjFromNormal.Normal;
-			vProjToNormal = vProjToNormal.Normal;
-
-			var flPlanesDot = vProjFromNormal.Dot( vProjToNormal ).Clamp( -1.0f, 1.0f );
-			var flRotationAngle = System.MathF.Acos( flPlanesDot ) * (180.0f / System.MathF.PI);
-
-			if ( flPlanesDot < 0.0f )
-			{
-				flRotationAngle = 180.0f - flRotationAngle;
-			}
-
-			var mEdgeRotation = Rotation.FromAxis( vEdge, flRotationAngle );
-			vAxisUNew = vAxisUOld * mEdgeRotation;
-			vAxisVNew = vAxisVOld * mEdgeRotation;
-
-			var edgePoint = vEdgePoint.Value;
-			var flPointU = (Vector3.Dot( vAxisUOld, edgePoint ) + flShiftUOld) / scale.x;
-			var flPointV = (Vector3.Dot( vAxisVOld, edgePoint ) + flShiftVOld) / scale.y;
-
-			var flNewPointUnshiftedU = Vector3.Dot( vAxisUNew, edgePoint ) / scale.x;
-			var flNewPointUnshiftedV = Vector3.Dot( vAxisVNew, edgePoint ) / scale.y;
-
-			var flNeededShiftU = flPointU - flNewPointUnshiftedU;
-			var flNeededShiftV = flPointV - flNewPointUnshiftedV;
-
-			flShiftUNew = flNeededShiftU * scale.x;
-			flShiftVNew = flNeededShiftV * scale.y;
-		}
-
-		pInOutAxisU = new Vector4( vAxisUNew, flShiftUNew / scale.x );
-		pInOutAxisV = new Vector4( vAxisVNew, flShiftVNew / scale.y );
-	}
-
-	private void SelectContiguousFaces()
-	{
-		var targetFace = TraceFace();
-		if ( !targetFace.IsValid() )
-			return;
-
-		if ( Application.KeyboardModifiers.HasFlag( KeyboardModifiers.Alt ) && (SelectByNormal || SelectByMaterial) )
+		if ( Gizmo.IsAltPressed && (SelectByNormal || SelectByMaterial) )
 		{
 			SelectFacesByNormal( targetFace );
-			return;
+			return true;
 		}
 
-		if ( Application.KeyboardModifiers.HasFlag( KeyboardModifiers.Shift ) && TrySelectFacePath( targetFace ) )
-			return;
+		if ( Gizmo.IsShiftPressed && !Gizmo.IsCtrlPressed && TrySelectFacePath( targetFace ) )
+			return true;
 
 		SelectAllConnectedFaces( targetFace );
+		return true;
 	}
 
 	/// <summary>
@@ -328,11 +311,9 @@ public sealed partial class FaceTool( MeshTool tool ) : SelectionTool<MeshFace>(
 
 		var mesh = startFace.Component.Mesh;
 
-		if ( !Application.KeyboardModifiers.HasFlag( KeyboardModifiers.Shift ) )
-			Selection.Clear();
-
 		var queue = new Queue<FaceHandle>();
 		var visited = new HashSet<FaceHandle>();
+		var faces = new List<IMeshElement>();
 
 		queue.Enqueue( startFace.Handle );
 		visited.Add( startFace.Handle );
@@ -341,19 +322,7 @@ public sealed partial class FaceTool( MeshTool tool ) : SelectionTool<MeshFace>(
 		{
 			var currentHandle = queue.Dequeue();
 
-			var meshFace = new MeshFace( startFace.Component, currentHandle );
-
-			if ( Application.KeyboardModifiers.HasFlag( KeyboardModifiers.Ctrl ) )
-			{
-				if ( Selection.Contains( meshFace ) )
-					Selection.Remove( meshFace );
-				else
-					Selection.Add( meshFace );
-			}
-			else
-			{
-				Selection.Add( meshFace );
-			}
+			faces.Add( new MeshFace( startFace.Component, currentHandle ) );
 
 			var edges = mesh.GetFaceEdges( currentHandle );
 			foreach ( var edge in edges )
@@ -361,13 +330,15 @@ public sealed partial class FaceTool( MeshTool tool ) : SelectionTool<MeshFace>(
 				mesh.GetFacesConnectedToEdge( edge, out var faceA, out var faceB );
 
 				var neighbor = faceA == currentHandle ? faceB : faceA;
-				if ( neighbor.IsValid && !visited.Contains( neighbor ) )
+				if ( neighbor.IsValid && !mesh.IsFaceHidden( neighbor ) && !visited.Contains( neighbor ) )
 				{
 					visited.Add( neighbor );
 					queue.Enqueue( neighbor );
 				}
 			}
 		}
+
+		ApplyElementSelection( faces, Gizmo.KeyboardModifiers, "Select Connected Faces" );
 	}
 
 	/// <summary>
@@ -394,9 +365,6 @@ public sealed partial class FaceTool( MeshTool tool ) : SelectionTool<MeshFace>(
 		{
 			targetMaterial = targetFace.Material;
 		}
-
-		if ( !Application.KeyboardModifiers.HasFlag( KeyboardModifiers.Shift ) )
-			Selection.Clear();
 
 		var queue = new Queue<FaceHandle>();
 		var visited = new HashSet<FaceHandle>();
@@ -435,7 +403,7 @@ public sealed partial class FaceTool( MeshTool tool ) : SelectionTool<MeshFace>(
 					mesh.GetFacesConnectedToEdge( edge, out var faceA, out var faceB );
 
 					var neighbor = faceA == currentHandle ? faceB : faceA;
-					if ( neighbor.IsValid && !visited.Contains( neighbor ) )
+					if ( neighbor.IsValid && !mesh.IsFaceHidden( neighbor ) && !visited.Contains( neighbor ) )
 					{
 						visited.Add( neighbor );
 						queue.Enqueue( neighbor );
@@ -444,32 +412,13 @@ public sealed partial class FaceTool( MeshTool tool ) : SelectionTool<MeshFace>(
 			}
 		}
 
-		foreach ( var face in matchingFaces )
-		{
-			if ( Application.KeyboardModifiers.HasFlag( KeyboardModifiers.Ctrl ) )
-			{
-				if ( Selection.Contains( face ) )
-					Selection.Remove( face );
-				else
-					Selection.Add( face );
-			}
-			else
-			{
-				Selection.Add( face );
-			}
-		}
+		ApplyElementSelection( matchingFaces.Cast<IMeshElement>(), Gizmo.KeyboardModifiers, "Select Filtered Faces" );
 	}
 
 	private bool TrySelectFacePath( MeshFace targetFace )
 	{
-		var selected = Selection.OfType<MeshFace>()
-			.Where( f => f.IsValid() && f.Component == targetFace.Component )
-			.ToList();
-
-		if ( selected.Count == 0 || selected.Count > 2 )
-			return false;
-
-		var startFace = selected.FirstOrDefault( f => f.Handle != targetFace.Handle );
+		var startFace = Selection.OfType<MeshFace>().LastOrDefault( face =>
+			IsSelectableElement( face ) && face.Component == targetFace.Component && face.Handle != targetFace.Handle );
 
 		if ( !startFace.IsValid() )
 			return false;
@@ -478,8 +427,7 @@ public sealed partial class FaceTool( MeshTool tool ) : SelectionTool<MeshFace>(
 		if ( path == null || path.Count == 0 )
 			return false;
 
-		foreach ( var face in path.Where( f => !Selection.Contains( f ) ) )
-			Selection.Add( face );
+		ApplyElementSelection( path.Cast<IMeshElement>(), Gizmo.KeyboardModifiers, "Select Face Path" );
 
 		return true;
 	}
@@ -525,7 +473,7 @@ public sealed partial class FaceTool( MeshTool tool ) : SelectionTool<MeshFace>(
 				mesh.GetFacesConnectedToEdge( edge, out var faceA, out var faceB );
 
 				var neighbor = faceA == current ? faceB : faceA;
-				if ( neighbor.IsValid && !visited.Contains( neighbor ) )
+				if ( neighbor.IsValid && !mesh.IsFaceHidden( neighbor ) && !visited.Contains( neighbor ) )
 				{
 					visited.Add( neighbor );
 					parent[neighbor] = current;
@@ -566,7 +514,7 @@ public sealed partial class FaceTool( MeshTool tool ) : SelectionTool<MeshFace>(
 
 	public override Rotation CalculateSelectionBasis()
 	{
-		if ( GlobalSpace ) return Rotation.Identity;
+		if ( GlobalSpace ) return WorkPlane.Current.Rotation;
 
 		var face = Selection.OfType<MeshFace>().FirstOrDefault();
 		if ( face.IsValid() )
@@ -599,6 +547,9 @@ public sealed partial class FaceTool( MeshTool tool ) : SelectionTool<MeshFace>(
 		{
 			foreach ( var face in component.Mesh.FaceHandles )
 			{
+				if ( component.Mesh.IsFaceHidden( face ) )
+					continue;
+
 				unique.Add( new MeshFace( component, face ) );
 			}
 		}
@@ -621,5 +572,65 @@ public sealed partial class FaceTool( MeshTool tool ) : SelectionTool<MeshFace>(
 		}
 
 		return unique;
+	}
+
+	const float QuadSliceCornerAngle = 60.0f;
+
+	void RenderSubdivisionPreview()
+	{
+		if ( !_showCuts )
+			return;
+
+		if ( NumCuts.x <= 0 && NumCuts.y <= 0 )
+			return;
+
+		Gizmo.Draw.Color = Color.White;
+
+		foreach ( var face in Selection.OfType<MeshFace>() )
+		{
+			if ( !face.IsValid() )
+				continue;
+
+			var mesh = face.Component.Mesh;
+			mesh.GetVerticesConnectedToFace( face.Handle, out var vertices );
+			if ( vertices.Length != 4 )
+			{
+				mesh.FindCornerVerticesForFace( face.Handle, QuadSliceCornerAngle, out var cornerVertices );
+				vertices = [.. cornerVertices];
+			}
+
+			if ( vertices.Length != 4 )
+				continue;
+
+			var positions = new Vector3[4];
+			for ( var i = 0; i < 4; ++i )
+			{
+				var localPos = mesh.GetVertexPosition( vertices[i] );
+				positions[i] = face.Transform.PointToWorld( localPos );
+			}
+
+			mesh.ComputeFaceNormal( face.Handle, out var localNormal );
+			var worldNormal = face.Transform.NormalToWorld( localNormal );
+
+			const float previewOffset = 0.5f;
+			for ( var i = 0; i < 4; ++i )
+			{
+				positions[i] += worldNormal * previewOffset;
+			}
+
+			DrawCutsAlongEdge( positions[0], positions[1], positions[3], positions[2], NumCuts.x );
+			DrawCutsAlongEdge( positions[0], positions[3], positions[1], positions[2], NumCuts.y );
+		}
+	}
+
+	static void DrawCutsAlongEdge( Vector3 edge0Pos0, Vector3 edge0Pos1, Vector3 edge1Pos0, Vector3 edge1Pos1, int cuts )
+	{
+		for ( var x = 0; x < cuts; x++ )
+		{
+			var t = (x + 1.0f) / (cuts + 1.0f);
+			var a = Vector3.Lerp( edge0Pos0, edge0Pos1, t );
+			var b = Vector3.Lerp( edge1Pos0, edge1Pos1, t );
+			Gizmo.Draw.Line( a, b );
+		}
 	}
 }

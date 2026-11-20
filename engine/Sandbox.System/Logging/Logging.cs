@@ -27,7 +27,7 @@ internal static partial class Logging
 			{
 				var frames = logEvent.StackTrace.GetFrames().Skip( 1 ).Take( 10 ).Where( x => x.GetMethod().DeclaringType.Name != "Logger" );
 				var stack = string.Join( "\n", frames.Select( x => $"\t\t{x.GetMethod()?.DeclaringType?.Name}.{x.GetMethod()?.Name} - {x.GetFileName()}:{x.GetFileLineNumber()}" ) );
-				if ( stack.StartsWith( "\t\tEngineLoop.Print - " ) ) return "";
+				if ( stack.StartsWith( "\t\tLogging.PrintNative - " ) ) return "";
 
 				return $"\n{stack}\n";
 			} );
@@ -35,7 +35,8 @@ internal static partial class Logging
 
 		var appName = Process.GetCurrentProcess().ProcessName.Split( '.' )[0];
 
-		var gamePath = System.Environment.GetEnvironmentVariable( "FACEPUNCH_ENGINE", EnvironmentVariableTarget.User );
+		var gamePath = System.Environment.GetEnvironmentVariable( "FACEPUNCH_ENGINE" );
+		gamePath ??= System.Environment.GetEnvironmentVariable( "FACEPUNCH_ENGINE", EnvironmentVariableTarget.User );
 		gamePath ??= AppContext.BaseDirectory;
 
 #pragma warning disable CA2000 // Dispose objects before losing scope
@@ -44,14 +45,14 @@ internal static partial class Logging
 #pragma warning restore CA2000 // Dispose objects before losing scope
 		{
 			FileName = System.IO.Path.Combine( gamePath, $"logs/{appName}.log" ),
-			ArchiveFileName = System.IO.Path.Combine( gamePath, "logs/" + appName + "-${date:format=yyyy-MM-dd}.zip" ),
+			ArchiveFileName = System.IO.Path.Combine( gamePath, "logs/" + appName + "-${date:format=yyyy-MM-dd}.log" ),
 			ArchiveOldFileOnStartup = true,
 			ArchiveAboveSize = 512 * 1024 * 1024,
 			ArchiveEvery = FileArchivePeriod.Day,
 			OpenFileCacheSize = 10,
 			MaxArchiveFiles = 10,
 			KeepFileOpen = true,
-			EnableArchiveFileCompression = true,
+			EnableArchiveFileCompression = false,
 
 
 			//DeleteOldFileOnStartup = true,
@@ -163,8 +164,26 @@ internal static partial class Logging
 	public static bool Enabled { get; set; } = true;
 	internal static bool PrintToConsole { get; set; } = true;
 
+	/// <summary>
+	/// Where what the current thread logs is also written, if anywhere: the log of the content build job it works for
+	/// (ContentCompilerHost).
+	/// </summary>
+	internal static Func<StringBuilder> Capture;
+
 	internal static event Action<LogEvent> OnMessage;
+	// Runs on the emitting thread, before dispatch loses its AsyncLocal game context.
+	internal static event Action<LogEvent> OnEmitted;
 	internal static Action<Exception> OnException;
+
+	/// <summary>
+	/// Remove all OnMessage / OnException subscribers. Called during shutdown
+	/// so static delegates don't root addon panels (e.g. Console).
+	/// </summary>
+	public static void ClearListeners()
+	{
+		OnMessage = null;
+		OnException = null;
+	}
 
 	static Channel<LogEvent> QueuedMessages = Channel.CreateUnbounded<LogEvent>();
 
@@ -172,6 +191,8 @@ internal static partial class Logging
 
 	internal static void Write( in LogEvent e )
 	{
+		OnEmitted?.Invoke( e );
+
 		if ( ThreadSafe.IsMainThread && callDepth < 3 )
 		{
 			try
@@ -227,11 +248,12 @@ internal static partial class Logging
 	internal static void RegisterEngineLogger( int id, string v )
 	{
 		v = $"engine/{v}";
-		Loggers.Add( v );
+		lock ( Loggers ) Loggers.Add( v );
 	}
 
+	// Loggers are constructed from any thread
 	internal static void RegisterLogger( string name )
 	{
-		Loggers.Add( name );
+		lock ( Loggers ) Loggers.Add( name );
 	}
 }

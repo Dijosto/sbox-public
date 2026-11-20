@@ -75,11 +75,6 @@ public sealed class ManualHitbox : Component, Component.ExecuteInEditor
 		}
 	}
 
-	protected override void OnDirty()
-	{
-		Rebuild();
-	}
-
 	protected override void OnEnabled()
 	{
 		Rebuild();
@@ -99,8 +94,12 @@ public sealed class ManualHitbox : Component, Component.ExecuteInEditor
 		Hitbox?.Dispose();
 		Hitbox = null;
 
-		var body = new PhysicsBody( system.PhysicsWorld );
 		var tx = WorldTransform;
+		var body = system.PhysicsWorld.CreateBody( new PhysicsBodySettings
+		{
+			Position = tx.Position,
+			Rotation = tx.Rotation
+		} );
 
 		PhysicsShape shape = null;
 
@@ -133,7 +132,6 @@ public sealed class ManualHitbox : Component, Component.ExecuteInEditor
 		{
 			shape.Tags.SetFrom( GameObject.Tags );
 
-			body.Transform = tx.WithScale( 1 );
 			body.Component = this;
 		}
 		else
@@ -155,9 +153,8 @@ public sealed class ManualHitbox : Component, Component.ExecuteInEditor
 	/// </summary>
 	protected override void OnTagsChanged()
 	{
-		OnPropertyDirty();
+		Rebuild();
 	}
 
 }
-
 

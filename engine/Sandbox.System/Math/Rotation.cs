@@ -12,6 +12,7 @@ using Sandbox.Interpolation;
 /// </summary>
 [JsonConverter( typeof( Sandbox.Internal.JsonConvert.RotationConverter ) )]
 [StructLayout( LayoutKind.Sequential )]
+[Description( "A quaternion rotation in 3D space. Unlike Angles, it cannot store multiple revolutions around an axis." )]
 public struct Rotation : System.IEquatable<Rotation>, IParsable<Rotation>, IInterpolator<Rotation>
 {
 	internal System.Numerics.Quaternion _quat;
@@ -667,21 +668,32 @@ public struct Rotation : System.IEquatable<Rotation>, IParsable<Rotation>, IInte
 	#endregion
 
 	#region equality
-	public static bool operator ==( Rotation left, Rotation right ) => left.Equals( right );
-	public static bool operator !=( Rotation left, Rotation right ) => !(left == right);
+	public static bool operator ==( Rotation left, Rotation right ) => left.AlmostEqual( right );
+	public static bool operator !=( Rotation left, Rotation right ) => !left.AlmostEqual( right );
 	public readonly override bool Equals( object obj ) => obj is Rotation o && Equals( o );
-	public readonly bool Equals( Rotation o ) => _quat.X.AlmostEqual( o._quat.X, 0.000001f ) && _quat.Y.AlmostEqual( o._quat.Y, 0.000001f ) && _quat.Z.AlmostEqual( o._quat.Z, 0.000001f ) && _quat.W.AlmostEqual( o._quat.W, 0.000001f );
-	public readonly override int GetHashCode() => HashCode.Combine( _quat );
+	public readonly bool Equals( Rotation o ) => _quat.Equals( o._quat );
+	public readonly override int GetHashCode() => _quat.GetHashCode();
 
 	/// <summary>
 	/// Returns true if we're nearly equal to the passed rotation.
+	/// Checks if each component is within a threshold, and handles the fact that
+	/// there are two ways to represent the same rotation as a quaternion.
 	/// </summary>
 	/// <param name="r">The value to compare with</param>
-	/// <param name="delta">The max difference between component values</param>
+	/// <param name="delta">Per-component threshold.</param>
 	/// <returns>True if nearly equal</returns>
-	public readonly bool AlmostEqual( in Rotation r, float delta = 0.0001f )
+	public readonly bool AlmostEqual( in Rotation r, float delta = 0.00001f )
 	{
-		return Quaternion.Dot( _quat, r._quat ) > 1.0f - delta;
+		// quat and -quat represent the same rotation
+		return AlmostEqualCore( _quat, r._quat, delta ) || AlmostEqualCore( _quat, -r._quat, delta );
+	}
+
+	private static bool AlmostEqualCore( in Quaternion a, in Quaternion b, float delta )
+	{
+		return a.X.AlmostEqual( b.X, delta )
+			&& a.Y.AlmostEqual( b.Y, delta )
+			&& a.Z.AlmostEqual( b.Z, delta )
+			&& a.W.AlmostEqual( b.W, delta );
 	}
 	#endregion
 
@@ -689,4 +701,10 @@ public struct Rotation : System.IEquatable<Rotation>, IParsable<Rotation>, IInte
 	{
 		return a.LerpTo( b, delta );
 	}
+
+	/// <summary>
+	/// Returns true if x, y, z and w are all finite, so neither NaN nor infinity
+	/// </summary>
+	[JsonIgnore]
+	public readonly bool IsFinite => float.IsFinite( x ) && float.IsFinite( y ) && float.IsFinite( z ) && float.IsFinite( w );
 }

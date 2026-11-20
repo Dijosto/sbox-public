@@ -1,7 +1,4 @@
-﻿using System.Collections.ObjectModel;
-using System.Text.Json.Nodes;
-
-namespace Sandbox;
+﻿namespace Sandbox;
 
 public partial class GameObject
 {
@@ -25,7 +22,7 @@ public partial class GameObject
 
 		if ( !IsPrefabInstanceRoot )
 		{
-			Clear();
+			OutermostPrefabInstanceRoot.PrefabInstance.UpdateGameObjectFromPrefab( this );
 			return;
 		}
 
@@ -37,7 +34,18 @@ public partial class GameObject
 	/// </summary>
 	public static GameObject GetPrefab( string prefabFilePath )
 	{
-		var prefabFile = ResourceLibrary.Get<PrefabFile>( prefabFilePath );
+		var prefabFile = PrefabFile.Load( prefabFilePath );
+		if ( prefabFile is null ) return default;
+
+		return SceneUtility.GetPrefabScene( prefabFile );
+	}
+
+	/// <summary>
+	/// Get the GameObject of a prefab from file path
+	/// </summary>
+	internal static GameObject GetPrefab( ResourceId prefabFilePath )
+	{
+		var prefabFile = PrefabFile.Load( prefabFilePath );
 		if ( prefabFile is null ) return default;
 
 		return SceneUtility.GetPrefabScene( prefabFile );
@@ -47,7 +55,7 @@ public partial class GameObject
 	{
 		get
 		{
-			return PrefabInstance?.PrefabSource;
+			return PrefabInstance?.PrefabSource.Path;
 		}
 	}
 
@@ -136,16 +144,16 @@ public partial class GameObject
 	/// <summary>
 	/// Initializes the instance data.
 	/// </summary>
-	internal void InitPrefabInstance( string prefabSource, bool isNested )
+	internal void InitPrefabInstance( ResourceId prefabSource, bool isNested )
 	{
-		if ( string.IsNullOrEmpty( prefabSource ) )
+		if ( prefabSource.IsEmpty )
 		{
 			_prefabInstanceData = null;
 			return;
 		}
 
 		// Added 12th Dec 2023
-		prefabSource = prefabSource.Replace( ".object", ".prefab", StringComparison.OrdinalIgnoreCase );
+		prefabSource.Path = prefabSource.Path.Replace( ".object", ".prefab", StringComparison.OrdinalIgnoreCase );
 
 		_prefabInstanceData = new PrefabInstanceData( prefabSource, this, isNested );
 	}
@@ -163,6 +171,11 @@ public partial class GameObject
 	internal bool IsMapInstanceRoot => MapSource is not null;
 
 	/// <summary>
+	/// Created by a MapInstance, directly or via an ancestor; never travels in a snapshot.
+	/// </summary>
+	internal bool IsSpawnedByMap => IsMapInstanceRoot || Components.Get<MapInstance>( FindMode.EverythingInAncestors ) is not null;
+
+	/// <summary>
 	/// Access point for all prefab instance related data.
 	/// Can be accessed on both instance root and children contained within the instance.
 	/// For outermost prefab instances this will contain a patch and guid mappings.
@@ -177,10 +190,19 @@ public partial class GameObject
 	}
 	PrefabInstanceData _prefabInstanceData = null;
 
+	// Id of a nested prefab instance whose guid mappings are built in PostDeserialize, once its
+	// subtree has its final ids.
+	private Guid? _pendingNestedMappingId;
+
 	/// <summary>
 	/// Defines objects within a scene hierarchy we want to track for prefab diffing and patching.
 	/// </summary>
-	internal static HashSet<Json.TrackedObjectDefinition> DiffObjectDefinitions =
+	public static HashSet<Json.TrackedObjectDefinition> DiffObjectDefinitions = CreateDiffObjectDefinitions();
+
+	// The public set and its definitions are writable by game code, so the engine diffs and patches with its own
+	internal static readonly HashSet<Json.TrackedObjectDefinition> TrackedDiffDefinitions = CreateDiffObjectDefinitions();
+
+	static HashSet<Json.TrackedObjectDefinition> CreateDiffObjectDefinitions() =>
 	[
 		Json.TrackedObjectDefinition.CreatePresenceBasedDefinition(
 			type: "GameObject",

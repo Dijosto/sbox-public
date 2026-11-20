@@ -23,19 +23,37 @@ internal sealed class SteamRichPresenceSystem : IRichPresenceSystem
 
 	void Clear()
 	{
-		Steam.SteamFriends().ClearRichPresence();
+		var friends = Steam.SteamFriends();
+		if ( friends.IsValid )
+		{
+			friends.ClearRichPresence();
+		}
+
 		_values.Clear();
 	}
 
 	void IRichPresenceSystem.Poll()
 	{
+		if ( !Steam.SteamFriends().IsValid )
+			return;
+
+		// Friends' menus group everyone sharing a party_id, and use the rest to label it "X's party 2/16"
 		if ( PartyRoom.Current is PartyRoom party )
 		{
 			SetValue( "party_id", $"{party.Id}" );
+			SetValue( "party_owner", $"{party.Owner.Id}" );
+			SetValue( "party_size", $"{party.MemberCount}" );
+			SetValue( "party_max", $"{party.MaxMembers}" );
+			// Cap the roster to fit Steam's 256-byte value limit.
+			SetValue( "party_members", string.Join( ",", party.Members.Select( x => x.Id ).Order().Take( 12 ) ) );
 		}
 		else
 		{
 			SetValue( "party_id", null );
+			SetValue( "party_owner", null );
+			SetValue( "party_size", null );
+			SetValue( "party_max", null );
+			SetValue( "party_members", null );
 		}
 
 		SetValue( "in_editor", Application.IsEditor ? "1" : "0" );
@@ -59,8 +77,9 @@ internal sealed class SteamRichPresenceSystem : IRichPresenceSystem
 
 			if ( gameLobby is not null )
 			{
-				SetValue( "connect", $"+connect {gameLobby.LobbySteamId}" );
-				SetValue( "steam_player_group", $"{gameLobby.LobbySteamId}" );
+				// Anyone with the lobby id can try to join, so keep it from people who'd just get kicked
+				SetValue( "connect", gameLobby.AdvertiseJoin ? $"+connect {gameLobby.LobbySteamId}" : null );
+				SetValue( "steam_player_group", gameLobby.PresenceGroup );
 				SetValue( "steam_player_group_size", $"{gameLobby.LobbyMemberCount}" );
 			}
 			else
@@ -83,15 +102,39 @@ internal sealed class SteamRichPresenceSystem : IRichPresenceSystem
 			SetValue( "steam_player_group_size", null );
 		}
 
-		if ( IGameInstance.Current.Package is Package gamePackage )
+		if ( Application.IsEditor )
 		{
-			SetValue( "steam_display", "#StatusGame" );
+			// In editor
+			SetValue( "steam_display", "#StatusEditor" );
+		}
+		else if ( IGameInstance.Current.Package is Package gamePackage )
+		{
+			if ( Application.MapPackage is Package mapPackage )
+			{
+				// Playing Sandbox - Construct
+				SetValue( "steam_display", "#StatusGameMap" );
+				SetValue( "maptitle", mapPackage.Title );
+			}
+			else if ( !string.IsNullOrEmpty( Application.Map ) && Application.Map.EndsWith( ".scene" ) )
+			{
+				// Playing Sandbox - gm_construct
+				SetValue( "steam_display", "#StatusGameMap" );
+				SetValue( "maptitle", System.IO.Path.GetFileName( Application.Map.Split( '.' )[0] ) );
+			}
+			else
+			{
+				// Playing Sandbox
+				SetValue( "steam_display", "#StatusGame" );
+				SetValue( "maptitle", "" );
+			}
+
 			SetValue( "gametitle", gamePackage.Title );
 			SetValue( "map", "" );
 			SetValue( "gamename", Application.GameIdent );
 		}
 		else
 		{
+			// Playing Secret Game
 			SetValue( "steam_display", "#StatusGame" );
 			SetValue( "gametitle", "Secret Game" );
 			SetValue( "map", "" );

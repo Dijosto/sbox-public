@@ -2,6 +2,8 @@ using Microsoft.Extensions.Caching.Memory;
 using NativeEngine;
 using Steamworks;
 using Steamworks.Data;
+using System.Collections.Concurrent;
+using System.Threading;
 
 namespace Sandbox.TextureLoader;
 
@@ -11,9 +13,51 @@ namespace Sandbox.TextureLoader;
 internal static class Avatar
 {
 	/// <summary>
-	/// Entries are cached on a sliding window, they will be released if not used for 10 minutes
+	/// Caches raw avatar pixel data from Steam API responses to avoid repeat network requests.
 	/// </summary>
-	static readonly MemoryCache _cache = new( new MemoryCacheOptions() );
+	static readonly MemoryCache _dataCache = new( new MemoryCacheOptions() );
+
+	/// <summary>
+	/// Caches generated (Bot/Streamer Mode) avatar textures so we don't re-render them on every request.
+	/// </summary>
+	static readonly ConcurrentDictionary<ulong, Texture> _generatedCache = new();
+
+	/// <summary>
+	/// Weak references to every avatar texture, keyed by their url.
+	/// So we can re-resolve them (real vs generated) when Streamer Mode is toggled at runtime.
+	/// </summary>
+	static readonly ConcurrentDictionary<string, WeakReference<Texture>> _loaded = new();
+
+	static Avatar()
+	{
+		ConVarSystem.ConVarChanged += OnConVarChanged;
+	}
+
+	record struct AvatarData( int Width, int Height, byte[] Pixels );
+
+	static void OnConVarChanged( Command command, string oldValue )
+	{
+		if ( command.Name.Equals( "streamer_mode", System.StringComparison.OrdinalIgnoreCase ) )
+			RefreshAll();
+	}
+
+	// Reload every live avatar so it swaps between its real and generated variant. Dead refs are pruned here.
+	static void RefreshAll()
+	{
+		foreach ( var (url, weak) in _loaded )
+		{
+			if ( weak.TryGetTarget( out var texture ) )
+				_ = LoadIntoTexture( url, texture );
+			else
+				_loaded.TryRemove( url, out _ );
+		}
+	}
+
+	static void Track( string url, Texture texture )
+	{
+		if ( texture is not null )
+			_loaded[url] = new WeakReference<Texture>( texture );
+	}
 
 	internal static bool IsAppropriate( string url )
 	{
@@ -24,18 +68,14 @@ internal static class Avatar
 	{
 		try
 		{
-			return _cache.GetOrCreate( filename, entry =>
-			{
-				entry.SetSlidingExpiration( TimeSpan.FromMinutes( 10 ) );
+			var placeholder = Texture.Create( 1, 1 ).WithName( "avatar" ).WithData( new byte[4] { 0, 0, 0, 0 } ).Finish();
+			placeholder.IsLoaded = false;
 
-				var placeholder = Texture.Create( 1, 1 ).WithName( "avatar" ).WithData( new byte[4] { 0, 0, 0, 0 } ).Finish();
-				placeholder.IsLoaded = false;
-				placeholder.RegisterWeakResourceId( filename );
+			Track( filename, placeholder );
 
-				_ = LoadIntoTexture( filename, placeholder );
+			_ = LoadIntoTexture( filename, placeholder );
 
-				return placeholder;
-			} );
+			return placeholder;
 		}
 		catch ( System.Exception e )
 		{
@@ -44,7 +84,7 @@ internal static class Avatar
 		}
 	}
 
-	internal static async Task LoadIntoTexture( string url, Texture placeholder )
+	internal static async Task LoadIntoTexture( string url, Texture placeholder, CancellationToken ct = default )
 	{
 		try
 		{
@@ -77,59 +117,52 @@ internal static class Avatar
 			}
 
 			//
-			// Bots, lets find steam profiles with Simpsons avatars and use those
-			// Edit: I could only find like 6 so lets use a bunch of random ones
+			// Bots and Streamer Mode users get a deterministic, generated avatar
 			//
-			if ( steamid >= Utility.Steam.BaseFakeSteamId )
+			if ( Preferences.StreamerMode || Utility.Steam.IsFakeSteamId( steamid ) || !Steam.SteamFriends().IsValid )
 			{
-				steamid = SandboxSystem.Random.FromArray( new ulong[]
-				{
-				76561198076731362,
-				76561198115447501,
-				76561198081295106,
-				76561198165412225,
-				76561198023414915,
-				76561198176366622,
-				76561198092430664,
-				76561198066084037,
-				76561198368894435,
-				76561198389241377,
-				76561198158965172,
-				76561198306626714,
-				76561198208716648,
-				76561198835780877,
-				76561197970331648,
-				76561198051740093,
-				76561198111069943,
-				76561198075423731,
-				76561197965588718,
-				76561197960316241,
-				76561198361294115,
-				76561197960555384,
-				76561198021354850,
-				76561198207495888,
-				76561198040673812,
-				76561198241363850,
-				76561198151921867,
-				76561198095212046,
-				76561198169445087
-				} );
-			}
-
-			var result = size == 0 ? await SteamFriends.GetMediumAvatarAsync( steamid ) :  // 0
-						(size == 1 ? await SteamFriends.GetLargeAvatarAsync( steamid ) :  // 1
-									 await SteamFriends.GetSmallAvatarAsync( steamid )); // 2
-			if ( !result.HasValue )
-			{
-				Log.Warning( $"AvatarLoader - Couldn't get avatar for {steamid} ({url})" );
+				var generated = _generatedCache.GetOrAdd( steamid, GenerateAvatar );
+				placeholder.CopyFrom( generated );
+				placeholder.IsLoaded = true;
 				return;
 			}
 
-			//Log.Info( $"Got Avatar For {steamid} ({result.Value.Width} x {result.Value.Height})" );
+			if ( ct.IsCancellationRequested ) return;
 
-			using var texture = Texture.Create( (int)result.Value.Width, (int)result.Value.Height, ImageFormat.RGBA8888 )
+			// Cache key based on resolved steamid + size
+			var cacheKey = $"{steamid}:{size}";
+
+			if ( !_dataCache.TryGetValue( cacheKey, out AvatarData cached ) )
+			{
+				var result = size == 0 ? await SteamFriends.GetMediumAvatarAsync( steamid ) :  // 0
+							(size == 1 ? await SteamFriends.GetLargeAvatarAsync( steamid ) :  // 1
+										 await SteamFriends.GetSmallAvatarAsync( steamid )); // 2
+				if ( !result.HasValue )
+				{
+					Log.Warning( $"AvatarLoader - Couldn't get avatar for {steamid} ({url})" );
+					return;
+				}
+
+				cached = new AvatarData( (int)result.Value.Width, (int)result.Value.Height, result.Value.Data );
+				_dataCache.Set( cacheKey, cached, new MemoryCacheEntryOptions()
+					.SetSlidingExpiration( TimeSpan.FromMinutes( 10 ) ) );
+			}
+
+			//Log.Info( $"Got Avatar For {steamid} ({cached.Width} x {cached.Height})" );
+
+			if ( ct.IsCancellationRequested ) return;
+
+			// Streamer Mode could have changed during the fetch above, don't copy a real avatar if true
+			if ( Preferences.StreamerMode )
+			{
+				placeholder.CopyFrom( _generatedCache.GetOrAdd( steamid, GenerateAvatar ) );
+				placeholder.IsLoaded = true;
+				return;
+			}
+
+			using var texture = Texture.Create( cached.Width, cached.Height, ImageFormat.RGBA8888 )
 					.WithName( "avatar" )
-					.WithData( result.Value.Data )
+					.WithData( cached.Pixels )
 					.Finish();
 
 			//
@@ -140,6 +173,8 @@ internal static class Avatar
 
 			if ( size != 0 )
 				return;
+
+			if ( ct.IsCancellationRequested ) return;
 
 			//
 			// If we want the animated texture, request if they have it and load it from the url.
@@ -153,14 +188,59 @@ internal static class Avatar
 			if ( string.IsNullOrWhiteSpace( item ) )
 				return;
 
+			// Streamer Mode could have been enabled during the awaits above, don't apply a real animated avatar if true
+			if ( ct.IsCancellationRequested || Preferences.StreamerMode )
+				return;
+
 			//
 			// Download animated image into placeholder
 			//
-			await placeholder.ReplacementAsync( ImageUrl.LoadFromUrl( item ) );
+			await placeholder.ReplacementAsync( ImageUrl.LoadFromUrl( item, ct ) );
 		}
 		finally
 		{
 			placeholder.IsLoaded = true;
 		}
+	}
+
+	static readonly string[] AvatarIcons =
+	{
+		"pets", "rocket_launch", "favorite", "star", "bolt", "cruelty_free", "sports_esports", "mood",
+		"emoji_emotions", "ac_unit", "local_fire_department", "spa", "diamond", "park", "sailing", "flight",
+		"anchor", "cake", "icecream", "sports_basketball", "sports_soccer", "music_note", "headphones",
+		"photo_camera", "palette", "brush", "extension", "casino", "savings", "psychology", "coffee",
+		"forest", "water_drop", "wb_sunny", "dark_mode", "auto_awesome", "celebration", "bug_report"
+	};
+
+	static Texture GenerateAvatar( ulong id )
+	{
+		const int size = 256;
+
+		var rng = new Random( unchecked((int)id) );
+		var bgHue = rng.Float( 0f, 360f );
+		var background = (Color)new ColorHsv( bgHue, rng.Float( 0.45f, 0.7f ), rng.Float( 0.45f, 0.7f ) );
+
+		using var bitmap = new Bitmap( size, size );
+
+		// Some avatars get a gradient background, some get a solid fill.
+		if ( rng.Float( 0f, 1f ) < 0.5f )
+		{
+			var second = (Color)new ColorHsv( (bgHue + rng.Float( -35f, 35f ) + 360f) % 360f, rng.Float( 0.5f, 0.75f ), rng.Float( 0.25f, 0.45f ) );
+			bitmap.SetLinearGradient( new Vector2( 0, 0 ), new Vector2( 0, size ), Gradient.FromColors( background, second ) );
+		}
+		else
+		{
+			bitmap.SetFill( background );
+		}
+
+		bitmap.DrawRect( bitmap.Rect );
+
+		// Light, low-saturation icon colour (so it's still visible against the background)
+		var icon = AvatarIcons[rng.Next( AvatarIcons.Length )];
+		var iconColor = (Color)new ColorHsv( rng.Float( 0f, 360f ), rng.Float( 0f, 0.25f ), rng.Float( 0.9f, 1f ) );
+
+		bitmap.DrawText( new TextRendering.Scope( icon, iconColor, size * 0.5f, "Material Icons" ), bitmap.Rect, TextFlag.Center | TextFlag.DontClip );
+
+		return bitmap.ToTexture();
 	}
 }

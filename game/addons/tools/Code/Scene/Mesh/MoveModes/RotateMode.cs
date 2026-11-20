@@ -1,4 +1,4 @@
-﻿
+
 namespace Editor.MeshEditor;
 
 /// <summary>
@@ -7,20 +7,20 @@ namespace Editor.MeshEditor;
 /// <b>Shift</b> - extrude selection
 /// </summary>
 [Title( "Rotate" )]
-[Icon( "360" )]
+[Icon( "meshtools/move_modes/rotate.png" )]
 [Alias( "mesh.rotate.mode" )]
 [Order( 1 )]
 public sealed class RotateMode : MoveMode
 {
-	private Angles _moveDelta;
+	private Rotation _moveDelta;
 	private Vector3 _origin;
 	private Rotation _basis;
 
 	public override void OnBegin( SelectionTool tool )
 	{
-		_moveDelta = default;
+		_moveDelta = Rotation.Identity;
 		_basis = tool.CalculateSelectionBasis();
-		_origin = tool.Pivot;
+		_origin = tool.Pivot.Position;
 	}
 
 	protected override void OnUpdate( SelectionTool tool )
@@ -30,26 +30,29 @@ public sealed class RotateMode : MoveMode
 			Gizmo.Hitbox.DepthBias = 0.01f;
 			Gizmo.Hitbox.CanInteract = CanUseGizmo;
 
-			if ( Gizmo.Control.Rotate( "rotation", out var angleDelta ) )
+			if ( Gizmo.Control.UpdateRotation( "rotation", Rotation.Identity, out Rotation rotationDelta ) )
 			{
-				_moveDelta += angleDelta;
+				_moveDelta = Gizmo.Snap( rotationDelta );
 
-				var snapDelta = Gizmo.Snap( _moveDelta, _moveDelta );
-
-				tool.StartDrag();
-				tool.Rotate( _origin, _basis, snapDelta );
-				tool.UpdateDrag();
+				if ( tool.DragStarted || _moveDelta != Rotation.Identity )
+				{
+					tool.StartDrag();
+					tool.Rotate( _origin, _basis, _moveDelta );
+					tool.UpdateDrag();
+				}
 			}
+			if ( !tool.GlobalSpace )
+				Gizmo.Transform = Gizmo.Transform.WithRotation( _basis * _moveDelta );
+			Gizmo.Draw.Rotate( "rotation" );
 		}
 
-		if ( Gizmo.Pressed.Any && (_moveDelta.pitch != 0 || _moveDelta.yaw != 0 || _moveDelta.roll != 0) )
+		if ( Gizmo.Pressed.Any && _moveDelta != Rotation.Identity )
 		{
-			var snapDelta = Gizmo.Snap( _moveDelta, _moveDelta );
-			DrawRotationAngle( _origin, snapDelta );
+			DrawRotationAngle( _origin, _moveDelta );
 		}
 	}
 
-	private void DrawRotationAngle( Vector3 origin, Angles rotation )
+	private void DrawRotationAngle( Vector3 origin, Rotation rotation )
 	{
 		using ( Gizmo.Scope( "RotationAngle" ) )
 		{
@@ -59,10 +62,11 @@ public sealed class RotateMode : MoveMode
 			var cameraDistance = Gizmo.Camera.Position.Distance( origin );
 			var scaledTextSize = textSize * (cameraDistance / 50.0f).Clamp( 0.5f, 1.0f );
 
+			var angles = rotation.Angles();
 			var angleText = "";
-			if ( rotation.pitch != 0 ) angleText += $"P:{rotation.pitch:0.##}° ";
-			if ( rotation.yaw != 0 ) angleText += $"Y:{rotation.yaw:0.##}° ";
-			if ( rotation.roll != 0 ) angleText += $"R:{rotation.roll:0.##}° ";
+			if ( angles.pitch != 0 ) angleText += $"P:{angles.pitch:0.##}° ";
+			if ( angles.yaw != 0 ) angleText += $"Y:{angles.yaw:0.##}° ";
+			if ( angles.roll != 0 ) angleText += $"R:{angles.roll:0.##}° ";
 
 			angleText = angleText.Trim();
 

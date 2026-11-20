@@ -5,6 +5,7 @@ namespace Sandbox;
 /// <summary>
 /// Essentially wraps a couple of textures that we're going to render to. The color texture and the depth texture.
 /// </summary>
+[Expose]
 public sealed partial class RenderTarget : IDisposable
 {
 	/// <summary>
@@ -20,7 +21,16 @@ public sealed partial class RenderTarget : IDisposable
 	/// <summary>
 	/// The hash of the parameters used to create this
 	/// </summary>
-	internal int CreationHash { get; set; }
+	internal int CreationHash
+	{
+		get;
+		set
+		{
+			if ( field == value ) return;
+			field = value;
+			_colorHandleName = null;
+		}
+	}
 
 	/// <summary>
 	/// Width of the render target
@@ -40,7 +50,20 @@ public sealed partial class RenderTarget : IDisposable
 	/// <summary>
 	/// The target depth texture
 	/// </summary>
-	public Texture DepthTarget { get; internal set; }
+	public Texture DepthTarget
+	{
+		get;
+		internal set
+		{
+			if ( ReferenceEquals( field, value ) ) return;
+			field = value;
+			_depthHandleName = null;
+		}
+	}
+
+	// Names are reused by every view that binds these textures, including later pool loans.
+	string _colorHandleName;
+	string _depthHandleName;
 
 	// Private - Only way to get a valid render target should be with RenderTarget.From
 	private RenderTarget()
@@ -104,11 +127,11 @@ public sealed partial class RenderTarget : IDisposable
 	// Can't use operator overloads because of the implicit conversion
 	internal Rendering.SceneViewRenderTargetHandle ToColorHandle( ISceneView view )
 	{
-		return view.FindOrCreateRenderTarget( CreationHash.ToString(), ColorTarget.native, 0 );
+		return view.FindOrCreateRenderTarget( _colorHandleName ??= CreationHash.ToString(), ColorTarget.native, 0 );
 	}
 
 	internal Rendering.SceneViewRenderTargetHandle ToDepthHandle( ISceneView view )
 	{
-		return view.FindOrCreateRenderTarget( DepthTarget.GetHashCode().ToString(), DepthTarget.native, 1 );
+		return view.FindOrCreateRenderTarget( _depthHandleName ??= DepthTarget.GetHashCode().ToString(), DepthTarget.native, 1 );
 	}
 }

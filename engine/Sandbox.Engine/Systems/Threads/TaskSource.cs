@@ -69,10 +69,10 @@ public static class GameTask
 	public static Task<T[]> WhenAll<T>( IEnumerable<Task<T>> tasks ) => source.WhenAll<T>( tasks );
 
 	/// <inheritdoc cref="TaskSource.WhenAny(Task[])"/>
-	public static Task WhenAny( params Task[] tasks ) => source.WhenAny( tasks );
+	public static Task<Task> WhenAny( params Task[] tasks ) => source.WhenAny( tasks );
 
 	/// <inheritdoc cref="TaskSource.WhenAny(IEnumerable{Task})"/>
-	public static Task WhenAny( IEnumerable<Task> tasks ) => source.WhenAny( tasks );
+	public static Task<Task> WhenAny( IEnumerable<Task> tasks ) => source.WhenAny( tasks );
 
 	/// <inheritdoc cref="TaskSource.WhenAny{T}(Task{T}[])"/>
 	public static Task<Task<T>> WhenAny<T>( params Task<T>[] tasks ) => source.WhenAny<T>( tasks );
@@ -116,6 +116,7 @@ public static class GameTask
 /// <summary>
 /// Provides a way for us to cancel tasks after common async shit is executed.
 /// </summary>
+[Expose]
 public struct TaskSource
 {
 	private static CancellationTokenSource currentGenerationCts => GlobalContext.Current.CancellationTokenSource;
@@ -204,13 +205,56 @@ public struct TaskSource
 		await DelayInternal( ms, linkedCts.Token );
 	}
 
+	/// <summary>
+	/// Measured actual granularity of <see cref="Task.Delay( int )"/> on this platform/OS configuration.
+	/// Anything with more time remaining than this gets a single bulk <see cref="Task.Delay( int )"/>;
+	/// the sub-granularity tail is polled per frame. Measuring takes a while, so a typical value is used until it finishes.
+	/// </summary>
+	internal static int DelayPollingThresholdMs { get; private set; } = 16;
+
+	static readonly Task TimerGranularityProbe = Task.Run( () => DelayPollingThresholdMs = MeasureTimerGranularityMs() );
+
+	private static int MeasureTimerGranularityMs()
+	{
+		// Fire off a few Task.Delay(1) calls synchronously on the thread-pool and measure
+		// how long they actually sleep.
+		// This is cross-platform and should be an estimate timeBeginPeriod() or equivalent.
+		const int Samples = 10;
+		var total = 0L;
+
+		for ( var i = 0; i < Samples; i++ )
+		{
+			var sw = System.Diagnostics.Stopwatch.StartNew();
+			Task.Delay( 1 ).Wait();
+			sw.Stop();
+			total += sw.ElapsedMilliseconds;
+		}
+
+		// Add 1ms to be safe
+		return (int)(total / Samples) + 1;
+	}
+
 	private async Task DelayInternal( int ms, CancellationToken ct )
 	{
+		// Capture the calling context so we resume on the same thread (main or worker).
+		// Fall back to main thread if called from outside an ExpirableSynchronizationContext.
+		var context = SynchronizationContext.Current as Sandbox.Tasks.ExpirableSynchronizationContext ?? SyncContext.MainThread;
+
 		var time = Time.NowDouble + ms / 1000.0;
+
+		// For delays longer than the threshold, sleep most of the duration with a single Task.Delay
+		// and only poll the remaining sub-threshold window.
+		var bulkMs = ms - DelayPollingThresholdMs;
+		if ( bulkMs > 0 )
+		{
+			await Task.Delay( bulkMs, ct );
+			CancelIfInvalid();
+		}
 
 		while ( Time.NowDouble < time )
 		{
-			await Task.Delay( 1, ct );
+			// Use SyncTask instead of Task.Delay( 1 ) to avoid allocations.
+			await new Sandbox.Tasks.SyncTask( context, cancellation: ct );
 			CancelIfInvalid();
 		}
 
@@ -487,17 +531,19 @@ public struct TaskSource
 	}
 
 	/// <inheritdoc cref="Task.WhenAny(Task[])" />
-	public async Task WhenAny( params Task[] tasks )
+	public async Task<Task> WhenAny( params Task[] tasks )
 	{
-		await Task.WhenAny( tasks ).WaitAsync( _cancellation );
+		var result = await Task.WhenAny( tasks ).WaitAsync( _cancellation );
 		CancelIfInvalid();
+		return result;
 	}
 
 	/// <inheritdoc cref="Task.WhenAny(IEnumerable{Task})" />
-	public async Task WhenAny( IEnumerable<Task> tasks )
+	public async Task<Task> WhenAny( IEnumerable<Task> tasks )
 	{
-		await Task.WhenAny( tasks ).WaitAsync( _cancellation );
+		var result = await Task.WhenAny( tasks ).WaitAsync( _cancellation );
 		CancelIfInvalid();
+		return result;
 	}
 
 	/// <inheritdoc cref="Task.WaitAny(Task[])" />

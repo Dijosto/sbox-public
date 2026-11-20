@@ -20,40 +20,123 @@ public sealed class HingeJoint : Joint
 		TargetVelocity
 	}
 
+	/// <summary>Explicit limit state. Null retains automatic limits from the angle range.</summary>
+	[Property, Group( "Limit" )]
+	public bool? LimitEnabled
+	{
+		get;
+		set
+		{
+			if ( field == value ) return;
+			field = value;
+			ApplyLimits();
+		}
+	}
+
 	/// <summary>
 	/// Minimum angle it should be allowed to go
 	/// </summary>
 	[Title( "Min" ), Group( "Limit" )]
-	[Property, MakeDirty]
-	public float MinAngle { get; set; }
+	[Property]
+	public float MinAngle
+	{
+		get;
+		set
+		{
+			if ( field == value )
+				return;
+
+			field = value;
+			ApplyLimits();
+		}
+	}
 
 	/// <summary>
 	/// Maximum angle it should be allowed to go
 	/// </summary>
 	[Title( "Max" ), Group( "Limit" )]
-	[Property, MakeDirty]
-	public float MaxAngle { get; set; }
+	[Property]
+	public float MaxAngle
+	{
+		get;
+		set
+		{
+			if ( field == value )
+				return;
+
+			field = value;
+			ApplyLimits();
+		}
+	}
 
 	/// <summary>
 	/// Motor mode
 	/// </summary>
 	[Group( "Motor" )]
-	[Property, MakeDirty]
-	public MotorMode Motor { get; set; }
+	[Property]
+	public MotorMode Motor
+	{
+		get;
+		set
+		{
+			if ( field == value )
+				return;
+
+			field = value;
+
+			if ( _joint.IsValid() )
+			{
+				ApplyMotor();
+				_joint.WakeBodies();
+			}
+		}
+	}
 
 	/// <summary>
 	/// Hinge friction
 	/// </summary>
 	[Group( "Motor" )]
-	[Property, MakeDirty, ShowIf( nameof( Motor ), MotorMode.Disabled )]
-	public float Friction { get; set; }
+	[Property, ShowIf( nameof( Motor ), MotorMode.Disabled )]
+	public float Friction
+	{
+		get;
+		set
+		{
+			if ( field == value )
+				return;
+
+			field = value;
+
+			if ( _joint.IsValid() )
+			{
+				ApplyMotor();
+				_joint.WakeBodies();
+			}
+		}
+	}
 
 	/// <summary>
 	/// Target angle of motor
 	/// </summary>
 	[Group( "Motor" )]
-	[Property, MakeDirty, ShowIf( nameof( Motor ), MotorMode.TargetAngle )]
-	public float TargetAngle { get; set; }
+	[Property, ShowIf( nameof( Motor ), MotorMode.TargetAngle )]
+	public float TargetAngle
+	{
+		get;
+		set
+		{
+			if ( field == value )
+				return;
+
+			field = value;
+
+			if ( _joint.IsValid() )
+			{
+				ApplyMotor();
+				_joint.WakeBodies();
+			}
+		}
+	}
 
 	[Obsolete( $"Use {nameof( Frequency )}" )]
 	public float Fequency { get => Frequency; set => Frequency = value; }
@@ -62,29 +145,93 @@ public sealed class HingeJoint : Joint
 	/// Frequency of motor
 	/// </summary>
 	[Group( "Motor" )]
-	[Property, MakeDirty, ShowIf( nameof( Motor ), MotorMode.TargetAngle )]
-	public float Frequency { get; set; } = 1.0f;
+	[Property, ShowIf( nameof( Motor ), MotorMode.TargetAngle )]
+	public float Frequency
+	{
+		get;
+		set
+		{
+			if ( field == value )
+				return;
+
+			field = value;
+
+			if ( _joint.IsValid() )
+			{
+				ApplyMotor();
+				_joint.WakeBodies();
+			}
+		}
+	} = 1.0f;
 
 	/// <summary>
 	/// Damping of motor
 	/// </summary>
 	[Group( "Motor" )]
-	[Property, MakeDirty, ShowIf( nameof( Motor ), MotorMode.TargetAngle )]
-	public float DampingRatio { get; set; } = 1.0f;
+	[Property, ShowIf( nameof( Motor ), MotorMode.TargetAngle )]
+	public float DampingRatio
+	{
+		get;
+		set
+		{
+			if ( field == value )
+				return;
+
+			field = value;
+
+			if ( _joint.IsValid() )
+			{
+				ApplyMotor();
+				_joint.WakeBodies();
+			}
+		}
+	} = 1.0f;
 
 	/// <summary>
 	/// Target velocity of motor
 	/// </summary>
 	[Group( "Motor" )]
-	[Property, MakeDirty, ShowIf( nameof( Motor ), MotorMode.TargetVelocity )]
-	public float TargetVelocity { get; set; } = 0.0f;
+	[Property, ShowIf( nameof( Motor ), MotorMode.TargetVelocity )]
+	public float TargetVelocity
+	{
+		get;
+		set
+		{
+			if ( field == value )
+				return;
+
+			field = value;
+
+			if ( _joint.IsValid() )
+			{
+				ApplyMotor();
+				_joint.WakeBodies();
+			}
+		}
+	} = 0.0f;
 
 	/// <summary>
 	/// Max torque of motor
 	/// </summary>
 	[Group( "Motor" )]
-	[Property, MakeDirty, ShowIf( nameof( Motor ), MotorMode.TargetVelocity )]
-	public float MaxTorque { get; set; } = 0.0f;
+	[Property, ShowIf( nameof( Motor ), MotorMode.TargetVelocity )]
+	public float MaxTorque
+	{
+		get;
+		set
+		{
+			if ( field == value )
+				return;
+
+			field = value;
+
+			if ( _joint.IsValid() )
+			{
+				ApplyMotor();
+				_joint.WakeBodies();
+			}
+		}
+	} = 0.0f;
 
 	[Group( "State" )]
 	[Property, JsonIgnore]
@@ -124,38 +271,41 @@ public sealed class HingeJoint : Joint
 
 		_joint = PhysicsJoint.CreateHinge( point1, point2 );
 
-		UpdateProperties();
+		ApplyLimits();
+
+		ApplyMotor();
+
+		_joint.WakeBodies();
 
 		return _joint;
 	}
 
-	protected override void OnDirty()
+	void ApplyLimits()
 	{
-		UpdateProperties();
+		if ( !_joint.IsValid() ) return;
+		_joint.ConfigureLimits( new Vector2( MinAngle, MaxAngle ), LimitEnabled );
+		_joint.WakeBodies();
 	}
 
-	private void UpdateProperties()
+	void ApplyMotor()
 	{
 		if ( !_joint.IsValid() )
 			return;
 
-		_joint.MinAngle = MinAngle;
-		_joint.MaxAngle = MaxAngle;
+		switch ( Motor )
+		{
+			case MotorMode.Disabled:
+				_joint.Friction = Friction;
+				break;
 
-		if ( Motor == MotorMode.Disabled )
-		{
-			_joint.Friction = Friction;
-		}
-		else if ( Motor == MotorMode.TargetAngle )
-		{
-			_joint.native.SetAngularSpring( new Vector3( TargetAngle.DegreeToRadian(), Frequency, DampingRatio ) );
-		}
-		else if ( Motor == MotorMode.TargetVelocity )
-		{
-			_joint.native.SetAngularMotor( TargetVelocity.DegreeToRadian(), MaxTorque );
-		}
+			case MotorMode.TargetAngle:
+				_joint.SetAngularSpring( new Vector3( TargetAngle.DegreeToRadian(), Frequency, DampingRatio ) );
+				break;
 
-		_joint.WakeBodies();
+			case MotorMode.TargetVelocity:
+				_joint.SetAngularMotor( TargetVelocity.DegreeToRadian(), MaxTorque );
+				break;
+		}
 	}
 
 	public override int ComponentVersion => 1;

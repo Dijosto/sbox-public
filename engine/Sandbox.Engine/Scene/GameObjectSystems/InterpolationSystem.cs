@@ -1,4 +1,4 @@
-﻿using Sandbox.Utility;
+using Sandbox.Utility;
 
 namespace Sandbox;
 
@@ -10,7 +10,7 @@ sealed class InterpolationSystem : GameObjectSystem<InterpolationSystem>
 {
 	HashSetEx<GameObject> _list { get; set; } = new();
 
-	[ConVar( "debug_interp", ConVarFlags.Protected )]
+	[ConVar( "debug_interp", ConVarFlags.Protected | ConVarFlags.Cheat )]
 	static bool Debug { get; set; }
 
 	public InterpolationSystem( Scene scene ) : base( scene )
@@ -36,11 +36,17 @@ sealed class InterpolationSystem : GameObjectSystem<InterpolationSystem>
 
 	private void Update()
 	{
+		var now = Time.NowDouble;
+		float updateFreq = ProjectSettings.Physics.FixedUpdateFrequency.Clamp( 1, 1000 );
+
+		// Keep more history to avoid culling data we might still need for interpolation
+		var cullBefore = now - (1f / updateFreq) * 2f;
+
 		foreach ( var go in _list.EnumerateLocked( true ) )
 		{
 			if ( go.IsValid() )
 			{
-				go.Transform.Update();
+				go.Transform.Update( now, cullBefore );
 
 				if ( Debug )
 				{
@@ -52,7 +58,7 @@ sealed class InterpolationSystem : GameObjectSystem<InterpolationSystem>
 
 	private void DrawDebug( GameObject go )
 	{
-		using var _ = Gizmo.Scope();
+		using var _ = Gizmo.PushScope();
 		var targetWorld = go.WorldTransform;
 		var world = go.Transform.InterpolatedWorld;
 

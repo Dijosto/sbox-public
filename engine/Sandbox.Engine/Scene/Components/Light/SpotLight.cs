@@ -1,4 +1,4 @@
-﻿namespace Sandbox;
+namespace Sandbox;
 
 /// <summary>
 /// Emits light in a specific direction in a cone shape.
@@ -11,25 +11,104 @@
 [Alias( "SpotLightComponent" )]
 public class SpotLight : Light
 {
-	[Property, MakeDirty] public float Radius { get; set; } = 500;
+	SceneSpotLight _so;
 
-	[Range( 0, 90 )]
-	[Property, MakeDirty] public float ConeOuter { get; set; } = 45;
-
-	[Range( 0, 90 )]
-	[Property, MakeDirty] public float ConeInner { get; set; } = 15;
-
-	[Property, MakeDirty, Range( 0, 10 )] public float Attenuation { get; set; } = 1.0f;
-	[Property, MakeDirty] public Texture Cookie { get; set; }
-
-	public SpotLight()
+	/// <summary>
+	/// Maximum distance reached by this light.
+	/// </summary>
+	[Property, Group( "Influence", Order = 0 ), Order( 0 )]
+	public float Radius
 	{
-		LightColor = "#E9FAFF";
+		get;
+		set
+		{
+			if ( field == value ) return;
+			field = value;
+
+			if ( _so.IsValid() )
+				_so.Radius = value;
+		}
+	} = 500;
+
+	/// <summary>
+	/// Outer angle of the light cone in degrees, beyond which the beam emits no light.
+	/// </summary>
+	[Property, Range( 0, 90 ), Group( "Beam", Order = 1 ), Order( 1 ), Title( "Outer Cone" )]
+	public float ConeOuter
+	{
+		get;
+		set
+		{
+			if ( field == value ) return;
+			field = value;
+
+			if ( _so.IsValid() )
+				_so.ConeOuter = value;
+		}
+	} = 45;
+
+	/// <summary>
+	/// Inner angle of the light cone in degrees, before the beam fades toward its outer edge.
+	/// </summary>
+	[Property, Range( 0, 90 ), Group( "Beam", Order = 1 ), Order( 0 ), Title( "Inner Cone" )]
+	public float ConeInner
+	{
+		get;
+		set
+		{
+			if ( field == value ) return;
+			field = value;
+
+			if ( _so.IsValid() )
+				_so.ConeInner = value;
+		}
+	} = 15;
+
+	/// <summary>
+	/// Quadratic term controlling how this light fades with distance.
+	/// </summary>
+	[Property, Range( 0, 10 ), Group( "Influence", Order = 0 ), Order( 1 )]
+	public float Attenuation
+	{
+		get;
+		set
+		{
+			if ( field == value ) return;
+			field = value;
+
+			if ( _so.IsValid() )
+				_so.QuadraticAttenuation = value;
+		}
+	} = 1.0f;
+
+	/// <summary>
+	/// Texture projected by this light to shape the beam's appearance.
+	/// </summary>
+	[Property, Group( "Beam", Order = 1 ), Order( 2 )]
+	public Texture Cookie
+	{
+		get;
+		set
+		{
+			if ( field == value ) return;
+			field = value;
+
+			if ( _so.IsValid() )
+				_so.LightCookie = value;
+		}
 	}
 
 	protected override SceneLight CreateSceneObject()
 	{
-		return new SceneSpotLight( Scene.SceneWorld, WorldPosition, LightColor );
+		return _so = new SceneSpotLight( Scene.SceneWorld, WorldPosition, LightColor )
+		{
+			Radius = Radius,
+			QuadraticAttenuation = Attenuation,
+			LightCookie = Cookie,
+			FallOff = 1,
+			ConeInner = ConeInner,
+			ConeOuter = ConeOuter
+		};
 	}
 
 	protected override void OnAwake()
@@ -39,26 +118,9 @@ public class SpotLight : Light
 		base.OnAwake();
 	}
 
-	protected override void UpdateSceneObject( SceneLight o )
-	{
-		base.UpdateSceneObject( o );
-
-		o.Radius = Radius;
-		o.QuadraticAttenuation = Attenuation;
-		o.LightCookie = Cookie;
-		//o.ShadowTextureResolution = 4096;
-
-		if ( o is SceneSpotLight spot )
-		{
-			spot.FallOff = 1;
-			spot.ConeInner = ConeInner;
-			spot.ConeOuter = ConeOuter;
-		}
-	}
-
 	protected override void DrawGizmos()
 	{
-		using var scope = Gizmo.Scope( $"light-{GetHashCode()}" );
+		using var scope = Gizmo.PushScope( "light" );
 
 		if ( !Gizmo.IsSelected && !Gizmo.IsHovered )
 			return;

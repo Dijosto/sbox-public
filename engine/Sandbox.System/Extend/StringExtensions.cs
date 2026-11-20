@@ -2,6 +2,7 @@
 using System.Data;
 using System.Globalization;
 using System.IO;
+using System.IO.Enumeration;
 using System.Net;
 using System.Reflection;
 using System.Runtime.CompilerServices;
@@ -437,18 +438,20 @@ public static partial class SandboxSystemExtensions
 	public static string Snippet( this string source, string find, int padding )
 	{
 		if ( string.IsNullOrEmpty( find ) ) return string.Empty;
+		ArgumentOutOfRangeException.ThrowIfNegative( padding );
 
 		StringBuilder sb = new StringBuilder();
 
-		for ( int index = 0; index < source.Length; index += find.Length )
+		for ( int index = 0; index < source.Length; )
 		{
 			index = source.IndexOf( find, index, StringComparison.InvariantCultureIgnoreCase );
 			if ( index == -1 )
 				break;
 
 			var startPos = (index - padding).Clamp( 0, source.Length );
-			var endPos = (startPos + find.Length + padding * 2).Clamp( 0, source.Length );
-			index = endPos;
+			// Large padding must not overflow and move the search backwards.
+			var endPos = (int)Math.Min( (long)startPos + find.Length + (long)padding * 2, source.Length );
+			index = (int)Math.Min( (long)endPos + find.Length, source.Length );
 
 			if ( sb.Length > 0 )
 				sb.Append( " ... " );
@@ -650,7 +653,9 @@ public static partial class SandboxSystemExtensions
 		if ( t == typeof( ulong ) ) { Value = str.ToULong(); return true; }
 		if ( t == typeof( long ) ) { Value = str.ToLong(); return true; }
 		if ( t == typeof( Vector2 ) ) { Value = Vector2.Parse( str ); return true; }
+		if ( t == typeof( Vector2Int ) ) { Value = Vector2Int.Parse( str ); return true; }
 		if ( t == typeof( Vector3 ) ) { Value = Vector3.Parse( str ); return true; }
+		if ( t == typeof( Vector3Int ) ) { Value = Vector3Int.Parse( str ); return true; }
 		if ( t == typeof( Vector4 ) ) { Value = Vector4.Parse( str ); return true; }
 		if ( t == typeof( Angles ) ) { Value = global::Angles.Parse( str ); return true; }
 		if ( t == typeof( Color ) ) { Value = global::Color.Parse( str ); return true; }
@@ -821,20 +826,15 @@ public static partial class SandboxSystemExtensions
 
 	/// <summary>
 	/// Returns true if this string matches a wildcard match. Check is case insensitive.
+	/// Supports '*' (zero or more chars) and '?' (exactly one char) wildcards.
+	/// The backslash character '\' escapes '*' to match it literally.
 	/// </summary>
 	public static bool WildcardMatch( this string str, string wildcard )
 	{
 		if ( str == null ) return false;
 		if ( wildcard == null ) return false;
 
-		if ( wildcard.Contains( '*' ) )
-		{
-			wildcard = Regex.Escape( wildcard ).Replace( "\\*", ".*" );
-			wildcard = $"^{wildcard}$";
-			return Regex.IsMatch( str, wildcard, RegexOptions.IgnoreCase );
-		}
-
-		return string.Equals( str, wildcard, StringComparison.OrdinalIgnoreCase );
+		return FileSystemName.MatchesSimpleExpression( wildcard, str, ignoreCase: true );
 	}
 
 

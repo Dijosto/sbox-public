@@ -34,7 +34,7 @@ public class HtmlPanel : Panel
 		}
 	}
 
-	static string[] breakinElements = ["div", "p", "h1", "h2", "h3", "h4", "figure", "pre", "img", "video", "blockquote", "ul", "li", "ol"];
+	static string[] breakinElements = ["div", "p", "h1", "h2", "h3", "h4", "success", "info", "warning", "figure", "pre", "img", "video", "blockquote", "ul", "li", "ol"];
 
 	static bool IsTextElement( Sandbox.Html.INode node )
 	{
@@ -80,6 +80,13 @@ public class HtmlPanel : Panel
 			return;
 		}
 
+		if ( node.Name == "ul" || node.Name == "ol" )
+		{
+			FlushHtml( tree, node, ref index );
+			ProcessList( tree, node, ref index );
+			return;
+		}
+
 		if ( node.Name == "img" )
 		{
 			FlushHtml( tree, node, ref index );
@@ -113,6 +120,39 @@ public class HtmlPanel : Panel
 			//	tree.AddContent( index++, $"</{node.Name}>" );
 			tree.CloseElement();
 		}
+	}
+
+	void ProcessList( RenderTreeBuilder tree, Sandbox.Html.INode node, ref int index )
+	{
+		tree.OpenElement( index++, node.Name );
+
+		int itemNumber = 1;
+
+		foreach ( var child in node.Children )
+		{
+			if ( child.Name != "li" )
+				continue;
+
+			tree.OpenElement( index++, "li" );
+
+			// Bullet or number prefix
+			var prefix = node.Name == "ol" ? $"{itemNumber++}." : "•";
+			tree.OpenElement<Label>( index++ );
+			tree.AddAttribute<Label>( index++, prefix, t => t.Text = prefix );
+			tree.AddAttribute<Label>( index++, "bullet", t => t.AddClass( "bullet" ) );
+			tree.CloseElement();
+
+			// parse li content
+			foreach ( var liChild in child.Children )
+			{
+				BuildRenderTree( tree, liChild, ref index );
+			}
+			FlushHtml( tree, child, ref index );
+
+			tree.CloseElement(); // li
+		}
+
+		tree.CloseElement(); // ul / ol
 	}
 
 	void ProcessFigure( RenderTreeBuilder tree, Sandbox.Html.INode node, ref int index )

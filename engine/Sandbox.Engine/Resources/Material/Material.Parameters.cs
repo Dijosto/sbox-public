@@ -5,12 +5,17 @@ public partial class Material
 	/// <summary>
 	/// Gets the underlying shader name for this material.
 	/// </summary>
-	public string ShaderName => native.GetString( "shader", "invalid" );
+	public string ShaderName => _shaderName ??= native.GetString( "shader", "invalid" );
+
+	string _shaderName;
 
 	/// <summary>
 	/// Get thje first texture assigned to this material, if any.
 	/// </summary>
 	public Texture FirstTexture => Texture.FromNative( native.GetFirstTextureAttribute() );
+
+	// Made from an anonymous shader, which can't be loaded by the name the material has for it
+	internal Shader anonymousShader;
 
 	/// <summary>
 	/// Gets the material's shader
@@ -19,12 +24,17 @@ public partial class Material
 	{
 		get
 		{
-			return Shader.Load( native.GetString( "shader", "invalid" ) );
+			return anonymousShader ?? Shader.Load( ShaderName );
 		}
 
 		set
 		{
+			if ( value is { IsAnonymous: true } )
+				throw new InvalidOperationException( "An anonymous shader can't be set by name, make the material with Material.Create( name, shader )" );
+
+			anonymousShader = null;
 			native.Set( "shader", value?.ResourcePath ?? "invalid" );
+			_shaderName = null;
 		}
 	}
 

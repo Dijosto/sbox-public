@@ -1,4 +1,4 @@
-﻿namespace Sandbox;
+namespace Sandbox;
 
 public static partial class Gizmo
 {
@@ -15,30 +15,11 @@ public static partial class Gizmo
 	/// </summary>
 	public sealed partial class GizmoDraw
 	{
-		static Material LineMaterial;
-		static Material SolidMaterial;
-		static Material SpriteMaterial;
-		static Material GridMaterial;
-
-		internal static void InitStatic()
-		{
-			LineMaterial = Material.Load( "materials/gizmo/line.vmat" );
-			SolidMaterial = Material.Load( "materials/gizmo/solid.vmat" );
-			SpriteMaterial = Material.Load( "materials/gizmo/sprite.vmat" );
-			GridMaterial = Material.Load( "materials/gizmo/grid.vmat" );
-		}
-
-		internal static void DisposeStatic()
-		{
-			LineMaterial?.Dispose();
-			LineMaterial = null;
-			SolidMaterial?.Dispose();
-			SolidMaterial = null;
-			SpriteMaterial?.Dispose();
-			SpriteMaterial = null;
-			GridMaterial?.Dispose();
-			GridMaterial = null;
-		}
+		// Loaded on first draw, so scenes that never draw a gizmo don't load them
+		static Material LineMaterial => field ??= Material.Load( "materials/gizmo/line.vmat" );
+		static Material SolidMaterial => field ??= Material.Load( "materials/gizmo/solid.vmat" );
+		static Material SpriteMaterial => field ??= Material.Load( "materials/gizmo/sprite.vmat" );
+		static Material GridMaterial => field ??= Material.Load( "materials/gizmo/grid.vmat" );
 
 		internal GizmoDraw()
 		{
@@ -63,8 +44,8 @@ public static partial class Gizmo
 			}
 		}
 
-		static VertexSceneObject _vertexObject;
-		static string _vertexObjectPath;
+		VertexSceneObject _vertexObject;
+
 
 		/// <summary>
 		/// Ignore depth when drawing, draw on top of everything
@@ -93,9 +74,15 @@ public static partial class Gizmo
 			set => Active.scope.CullBackfaces = value;
 		}
 
-		internal void Start()
+		internal void Start() => Active.Renderer.BeginFrame();
+
+		void BeginFrame()
 		{
-			End();
+			_batchCursor = 0;
+			_batchFrame++;
+			_logicalValid = false;
+			_logicalPath = null;
+			_logicalState = default;
 
 			IgnoreDepth = false;
 			Color = Color.White;
@@ -104,11 +91,19 @@ public static partial class Gizmo
 
 		internal void End()
 		{
+			var renderer = Active.Renderer;
+			renderer.Flush();
+			// The editor submits the camera before disposing the gizmo frame.
+			renderer.HideUnused();
+		}
+
+		internal void Flush()
+		{
 			// Push the vertex buffer to the GPU on end of scope
+			BakeVertices();
 			_vertexObject?.Write();
 
 			_vertexObject = default;
-			_vertexObjectPath = default;
 		}
 
 		/// <summary>
@@ -130,11 +125,13 @@ public static partial class Gizmo
 		/// <summary>
 		/// Draw a model
 		/// </summary>
-		public SceneModel Model( Model model, Transform localTransform )
+		public SceneModel Model( Model model, Transform localTransform ) => Model( model, localTransform, false );
+
+		internal SceneModel Model( Model model, Transform localTransform, bool castShadows )
 		{
 			var tx = Transform.ToWorld( localTransform );
-			var so = Active.FindOrCreate<SceneModel>( $"{model.Name}", () => new SceneModel( World, model, tx ) );
-			so.Flags.CastShadows = false;
+			var so = Active.FindOrCreate( model.Name, (model, tx), static ( world, state ) => new SceneModel( world, state.model, state.tx ), flushGeometry: false );
+			if ( so.Flags.CastShadows != castShadows ) so.Flags.CastShadows = castShadows;
 			so.Model = model;
 			so.ColorTint = Color;
 			so.Transform = tx;
@@ -178,6 +175,7 @@ public static partial class Gizmo
 			so.ScreenPos = Camera.ToScreen( tx.Position );
 			so.Bounds = BBox.FromPositionAndSize( tx.Position, 50.0f );
 			so.TextFlags = flags;
+			so.BuildCommandList();
 		}
 
 		public void WorldText( string text, Transform tx, string font = "Roboto", float size = 12.0f, TextFlag flags = TextFlag.Center )
@@ -193,6 +191,7 @@ public static partial class Gizmo
 			so.FontSize = size;
 			so.TextFlags = flags;
 			so.IgnoreDepth = IgnoreDepth;
+			so.BuildCommandList();
 		}
 
 		/// <summary>
@@ -207,6 +206,7 @@ public static partial class Gizmo
 			so.ScreenPos = pos;
 			so.Bounds = BBox.FromPositionAndSize( 0, float.MaxValue );
 			so.TextFlags = flags;
+			so.BuildCommandList();
 		}
 
 		/// <summary>
@@ -221,6 +221,7 @@ public static partial class Gizmo
 			so.ScreenPos = pos;
 			so.Bounds = BBox.FromPositionAndSize( 0, float.MaxValue );
 			so.TextFlags = flags;
+			so.BuildCommandList();
 		}
 
 		/// <summary>
@@ -260,6 +261,7 @@ public static partial class Gizmo
 			so.ScreenSize = rect.Size;
 			so.Bounds = BBox.FromPositionAndSize( 0, float.MaxValue );
 			so.TextFlags = flags;
+			so.BuildCommandList();
 		}
 
 		/// <summary>
@@ -270,33 +272,35 @@ public static partial class Gizmo
 			var so = Active.FindOrCreate<GizmoInlineSceneObject>( $"screen-rect", () => new GizmoInlineSceneObject( World ) );
 
 			so.RenderLayer = SceneRenderLayer.OverlayWithoutDepth;
-			so.Action = () =>
+			so.CommandList.Reset();
+			var radii = BorderRadii.FromPublic( borderRadius ).Clamped( rect.Width, rect.Height );
+
+			so.CommandList.Attributes.Set( "BoxPosition", new Vector2( rect.Left, rect.Top ) );
+			so.CommandList.Attributes.Set( "BoxSize", new Vector2( rect.Width, rect.Height ) );
+			so.CommandList.Attributes.Set( "BoxBloat", 1.0f );
+			so.CommandList.Attributes.Set( "BorderRadius", radii.Horizontal );
+			so.CommandList.Attributes.Set( "BorderRadiusV", radii.Vertical );
+			so.CommandList.Attributes.Set( "Texture", Texture.White );
+			so.CommandList.Attributes.SetCombo( "D_BACKGROUND_IMAGE", 0 );
+			so.CommandList.Attributes.SetCombo( "D_BORDER_IMAGE", 0 );
+			so.CommandList.Attributes.SetCombo( "D_BLENDMODE", blendMode );
+
+			if ( borderSize.Length != 0 )
 			{
-				so.Attributes.Set( "BoxPosition", new Vector2( rect.Left, rect.Top ) );
-				so.Attributes.Set( "BoxSize", new Vector2( rect.Width, rect.Height ) );
-				so.Attributes.Set( "BorderRadius", borderRadius );
-				so.Attributes.Set( "Texture", Texture.White );
-				so.Attributes.SetCombo( "D_BACKGROUND_IMAGE", 0 );
-				so.Attributes.SetCombo( "D_BORDER_IMAGE", 0 );
-				so.Attributes.SetComboEnum( "D_BLENDMODE", blendMode );
+				so.CommandList.Attributes.Set( "HasBorder", 1 );
+				so.CommandList.Attributes.Set( "BorderSize", borderSize );
 
-				if ( borderSize.Length != 0 )
-				{
-					so.Attributes.Set( "HasBorder", 1 );
-					so.Attributes.Set( "BorderSize", borderSize );
+				so.CommandList.Attributes.Set( "BorderColorL", borderColor );
+				so.CommandList.Attributes.Set( "BorderColorT", borderColor );
+				so.CommandList.Attributes.Set( "BorderColorR", borderColor );
+				so.CommandList.Attributes.Set( "BorderColorB", borderColor );
+			}
+			else
+			{
+				so.CommandList.Attributes.Set( "HasBorder", 0 );
+			}
 
-					so.Attributes.Set( "BorderColorL", borderColor );
-					so.Attributes.Set( "BorderColorT", borderColor );
-					so.Attributes.Set( "BorderColorR", borderColor );
-					so.Attributes.Set( "BorderColorB", borderColor );
-				}
-				else
-				{
-					so.Attributes.Set( "HasBorder", 0 );
-				}
-
-				Graphics.DrawQuad( rect, Material.UI.Box, color, so.Attributes );
-			};
+			so.CommandList.DrawQuad( rect.Grow( 1 ), Material.UI.Box, color );
 		}
 
 		/// <summary>
@@ -304,7 +308,7 @@ public static partial class Gizmo
 		/// </summary>
 		public void Plane( Vector3 position, Vector3 normal )
 		{
-			using var scope = Scope( "plane", new Transform( position, Rotation.LookAt( normal ) ) );
+			using var scope = PushScope( "plane", new Transform( position, Rotation.LookAt( normal ) ) );
 
 			LineThickness = 1.0f;
 
@@ -355,9 +359,12 @@ public static partial class Gizmo
 		public void Grid( Vector3 center, GridAxis axis, Vector2 spacing = default, float opacity = 1.0f, float minorLineWidth = 0.01f, float majorLineWidth = 0.02f )
 		{
 			if ( spacing == default ) spacing = new Vector2( 32, 32 );
-			var so = VertexObject( Graphics.PrimitiveType.Triangles, GridMaterial );
+			var so = VertexObject( Graphics.PrimitiveType.Triangles, GridMaterial, isolated: true );
 
-			so.Attributes.Set( "GridOrigin", center );
+			so.Attributes.Set( "GridOrigin", Transform.PointToWorld( center ) );
+			so.Attributes.Set( "GridForward", Transform.Rotation.Forward * Transform.Scale.x );
+			so.Attributes.Set( "GridLeft", Transform.Rotation.Left * Transform.Scale.y );
+			so.Attributes.Set( "GridUp", Transform.Rotation.Up * Transform.Scale.z );
 			so.Attributes.Set( "GridAxis", (int)axis );
 			so.Attributes.Set( "GridScale", spacing );
 			so.Attributes.Set( "MinorLineWidth", minorLineWidth );

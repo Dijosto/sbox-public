@@ -8,6 +8,12 @@ public class VolumetricFogVolumeTool : EditorTool<VolumetricFogVolume>
 
 	public override void OnUpdate()
 	{
+		if ( !Gizmo.Pressed.Any )
+		{
+			_componentUndoScope?.Dispose();
+			_componentUndoScope = null;
+		}
+
 		var volumetricFogVolume = GetSelectedComponent<VolumetricFogVolume>();
 		if ( volumetricFogVolume == null )
 			return;
@@ -16,20 +22,14 @@ public class VolumetricFogVolumeTool : EditorTool<VolumetricFogVolume>
 
 		using ( Gizmo.Scope( "Volumetric Fog Volume Editor", volumetricFogVolume.WorldTransform ) )
 		{
-			if ( Gizmo.Control.BoundingBox( "Bounds", currentBounds, out var newBounds ) )
+			if ( Gizmo.Control.UpdateBoundingBox( "Bounds", currentBounds, out var newBounds ) )
 			{
-				if ( Gizmo.WasLeftMousePressed )
-				{
-					_componentUndoScope = SceneEditorSession.Active.UndoScope( "Resize Volumetric Fog Volume Bounds" ).WithComponentChanges( volumetricFogVolume ).Push();
-				}
+				_componentUndoScope ??= SceneEditorSession.Active.UndoScope( "Resize Volumetric Fog Volume Bounds" )
+					.WithComponentChanges( volumetricFogVolume ).Push();
+
 				volumetricFogVolume.Bounds = newBounds;
 			}
-
-			if ( Gizmo.WasLeftMouseReleased )
-			{
-				_componentUndoScope?.Dispose();
-				_componentUndoScope = null;
-			}
+			Gizmo.Draw.BoundingBox( "Bounds", volumetricFogVolume.Bounds );
 		}
 	}
 }

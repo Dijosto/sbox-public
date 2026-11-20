@@ -9,7 +9,11 @@ namespace Sandbox;
 
 public partial class Project
 {
-	static CompileGroup CompileGroup;
+	/// <summary>
+	/// The compile group every local project's code builds in. Internal so game code can't see
+	/// it - editor code reaches it through the Sandbox.Tools Project extensions.
+	/// </summary>
+	internal static CompileGroup CompileGroup { get; private set; }
 
 
 	/// <summary>
@@ -18,7 +22,7 @@ public partial class Project
 	public static Project Current { get; internal set; }
 
 	internal static List<Project> All;
-	internal static IEnumerable<Project> Libraries => All.Where( x => x.Config.Type == "library" );
+	internal static IEnumerable<Project> Libraries => All.Where( x => x.Active && x.Config.Type == "library" );
 
 	static Project()
 	{
@@ -36,7 +40,6 @@ public partial class Project
 		CompileGroup?.Dispose();
 
 		CompileGroup = new( "local" );
-		CompileGroup.AccessControl = PackageManager.AccessControl;
 		CompileGroup.PrintErrorsInConsole = !Application.IsEditor;
 		CompileGroup.OnCompileStarted = OnCompileStarted;
 		CompileGroup.OnCompileFinished = OnCompileFinished;
@@ -48,7 +51,6 @@ public partial class Project
 		CompileGroup?.Dispose();
 
 		CompileGroup = new( "local" );
-		CompileGroup.AccessControl = PackageManager.AccessControl;
 		CompileGroup.PrintErrorsInConsole = !Application.IsEditor;
 		CompileGroup.OnCompileStarted = OnCompileStarted;
 		CompileGroup.OnCompileFinished = OnCompileFinished;
@@ -65,6 +67,20 @@ public partial class Project
 			proj.lastCompilerHash = default;
 
 			proj.UpdateCompiler();
+		}
+	}
+
+	/// <summary>
+	/// Game and addon compilers reference every library, and those references are only added when the
+	/// compiler is created. Call this after a library is added while projects are open so their compilers
+	/// are remade with it. Projects whose library references haven't changed are left alone.
+	/// </summary>
+	internal static void UpdateLibraryReferences()
+	{
+		foreach ( var project in All )
+		{
+			if ( project.Config.Type is "game" or "addon" )
+				project.UpdateCompiler();
 		}
 	}
 
@@ -101,25 +117,15 @@ public partial class Project
 	}
 
 	/// <summary>
-	/// Initializes all the base projects
+	/// Discovers the base projects. Content builds activate every addon to load its resource types.
 	/// </summary>
-	internal static async Task InitializeBuiltIn( bool syncPackageManager = true )
+	internal static async Task InitializeBuiltIn( bool syncPackageManager = true, bool activateAddons = false )
 	{
-		AddFromFileBuiltIn( "addons/base/.sbproj" );
-
-		if ( !Application.IsStandalone && !Application.IsHeadless )
-		{
-			AddFromFileBuiltIn( "addons/menu/.sbproj" );
-		}
+		if ( !Application.IsStandalone )
+			AddAddonPath( EngineFileSystem.Root.GetFullPath( "addons" ), activateAddons );
 
 		if ( Application.IsEditor || Application.IsUnitTest )
-		{
-			AddFromFileBuiltIn( "addons/tools/.sbproj" );
-			AddFromFileBuiltIn( "editor/ShaderGraph/.sbproj" );
-			AddFromFileBuiltIn( "editor/ActionGraph/.sbproj" );
-			AddFromFileBuiltIn( "editor/MovieMaker/.sbproj" );
-			AddFromFileBuiltIn( "editor/Hammer/.sbproj" );
-		}
+			AddAddonPath( EngineFileSystem.Root.GetFullPath( "editor" ) );
 
 		if ( syncPackageManager )
 		{
@@ -162,7 +168,7 @@ public partial class Project
 				if ( !project.Active ) continue;
 
 				// Don't put menu project in everyone's slns
-				if ( project.Config.Ident == "menu" && Current?.Config?.Ident != "menu" ) continue;
+				if ( project.Config.Type == "menu" && Current != project ) continue;
 
 				await project.GenerateProject( generator );
 			}
@@ -239,37 +245,127 @@ public partial class Project
 	}
 
 	/// <summary>
-	/// Like AddFromFile but the project is marked as "built in" - which means
-	/// it's always automatically loaded and can't be unloaded.
+	/// Load projects from the immediate subfolders of an addon path into the shared project list.
+	/// Projects activate according to their config unless <paramref name="activate"/> requests all of them.
+	/// Existing projects are reused.
 	/// </summary>
-	internal static Project AddFromFileBuiltIn( string path )
+	internal static void AddAddonPath( string addonsPath, bool activate = false )
 	{
-		var p = AddFromFile( path );
-		if ( p == null ) return null;
+		if ( !Directory.Exists( addonsPath ) ) return;
 
-		p.IsBuiltIn = true;
-		return p;
+		foreach ( var folder in Directory.EnumerateDirectories( addonsPath ).Order( StringComparer.OrdinalIgnoreCase ) )
+		{
+			try
+			{
+				var configs = Directory.EnumerateFiles( folder, "*.sbproj" ).ToArray();
+				if ( configs.Length != 1 ) continue;
+
+				if ( AddFromFile( configs[0], active: activate ) is null && activate )
+					throw new InvalidOperationException( $"Couldn't activate addon project '{configs[0]}'." );
+			}
+			catch ( Exception e ) when ( !activate )
+			{
+				Log.Warning( $"Couldn't load project in {folder}: {e.Message}" );
+			}
+		}
+	}
+
+	/// <summary>
+	/// Add a game project from its .sbproj - its assets mounted, the libraries in its Libraries folder added
+	/// alongside it - and compile it, so it can be run like a package. Null if it didn't load.
+	/// </summary>
+	internal static async Task<Project> AddGameFromFile( string path )
+	{
+		var project = AddFromFile( path );
+		if ( project is null ) return null;
+
+		if ( project.pendingCompilation is not { IsCompleted: false } )
+			project.StartCompilation();
+
+		var build = project.pendingCompilation;
+		if ( await build ) return project.Active ? project : null;
+
+		if ( project.Active && project.pendingCompilation == build )
+		{
+			project.Active = false;
+			project.UpdateCompiler();
+		}
+
+		return null;
+	}
+
+	private Task<bool> pendingCompilation;
+
+	/// <summary>
+	/// A discovered project with code must be prepared before mounting it. Activation happens
+	/// before compilation, so a concurrent install must also wait for the build that activated it.
+	/// </summary>
+	internal bool NeedsInstallCompilation
+	{
+		get
+		{
+			if ( pendingCompilation is { } build && (!build.IsCompletedSuccessfully || !build.Result) )
+				return true;
+
+			return !Active && (Config.Type == "game" || HasCodePath() || HasEditorPath());
+		}
+	}
+
+	private void StartCompilation()
+	{
+		NativeEngine.FullFileSystem.AddProjectPath( ConfigFilePath, GetAssetsPath().ToLowerInvariant() );
+
+		// What the editor's put on disk for it - the cloud assets its own use, and generated files - found from there as
+		// they are in the editor, rather than nowhere
+		var sbox = Path.Combine( GetRootPath(), ".sbox" );
+		NativeEngine.FullFileSystem.AddCloudPath( "mod_cloud", Path.Combine( sbox, "cloud" ) );
+		NativeEngine.FullFileSystem.AddCloudPath( "mod_transient", Path.Combine( sbox, "transient" ) );
+
+		var libraries = Path.Combine( RootDirectory.FullName, "Libraries" );
+		var dependencies = new List<Project>();
+
+		// We should iterate all available libraries and add their projects
+		foreach ( var folder in Directory.Exists( libraries ) ? Directory.EnumerateDirectories( libraries ) : [] )
+		{
+			var configs = Directory.EnumerateFiles( folder, "*.sbproj" ).ToArray();
+			if ( configs.Length != 1 ) continue;
+			if ( AddFromFile( configs[0] ) is { } library )
+				dependencies.Add( library );
+		}
+
+		// Refresh compiler references now that the game's libraries are registered.
+		UpdateCompiler();
+
+		pendingCompilation = CompileAsync();
+		foreach ( var library in dependencies )
+			library.pendingCompilation = pendingCompilation;
 	}
 
 	internal static Project AddFromFile( string path, bool active = true )
 	{
 		// Need an project file
-		if ( !path.EndsWith( ".sbproj" ) )
-			path = System.IO.Path.Combine( path, ".sbproj" );
-
-		var cleanPath = System.IO.Path.GetFullPath( path );
+		var cleanPath = NormalizeConfigFilePath( path );
 
 		// Don't add the same project twice
-		if ( All.Where( a => a.ConfigFilePath == cleanPath ).FirstOrDefault() is Project lp )
-			return lp;
-
-		var project = new Project { ConfigFilePath = cleanPath, Active = active };
-		project.Load();
-
-		// If it loaded broken, don't bother with it
-		if ( project.Broken )
+		if ( All.FirstOrDefault( a => string.Equals( a.ConfigFilePath, cleanPath, StringComparison.OrdinalIgnoreCase ) ) is Project lp )
 		{
-			throw new System.Exception( $"Couldn't add project." );
+			if ( active && !lp.Active )
+			{
+				lp.Active = true;
+				if ( !lp.Load() ) return null;
+			}
+
+			return lp;
+		}
+
+		var project = new Project( cleanPath ) { Active = active };
+		if ( !project.Load( registering: true ) )
+		{
+			project.Dispose();
+			if ( project.Broken )
+				throw new System.Exception( $"Couldn't add project." );
+
+			return null;
 		}
 
 		// If the schema needs upgrading then upgrade it and save before
@@ -284,9 +380,41 @@ public partial class Project
 		return project;
 	}
 
+	/// <summary>
+	/// Add a project from config JSON rather than a .sbproj on disk, rooted at <paramref name="rootPath"/>.
+	/// This is how an exported standalone game loads itself: the config was embedded in its
+	/// executable at export time, so it's read-only and never upgraded or saved here.
+	/// </summary>
+	internal static Project AddFromEmbeddedConfig( string configJson, string rootPath )
+	{
+		var root = new DirectoryInfo( Path.GetFullPath( rootPath ) );
+
+		if ( All.FirstOrDefault( a => a.RootDirectory?.FullName == root.FullName ) is Project existing )
+			return existing;
+
+		var project = new Project( root, configJson ) { Active = true };
+		if ( !project.Load( registering: true ) )
+		{
+			project.Dispose();
+			throw new System.Exception( $"Couldn't add embedded project rooted at {root.FullName}" );
+		}
+
+		All.Add( project );
+
+		return project;
+	}
+
 	internal static Project FindByIdent( string ident )
 	{
-		return All.FirstOrDefault( x => string.Equals( ident.Replace( "#local", "" ), x.Config.FullIdent, StringComparison.OrdinalIgnoreCase ) );
+		if ( !Package.TryParseIdentParts( ident, out var parsed ) ) return null;
+
+		return FindByIdent( parsed.org, parsed.package );
+	}
+
+	internal static Project FindByIdent( string org, string ident )
+	{
+		return All.FirstOrDefault( x => string.Equals( x.savedIdent.Org, org, StringComparison.OrdinalIgnoreCase )
+			&& string.Equals( x.savedIdent.Ident, ident, StringComparison.OrdinalIgnoreCase ) );
 	}
 
 	[ConCmd( "list_projects", ConVarFlags.Protected )]
@@ -309,16 +437,15 @@ public partial class Project
 		}
 	}
 
+	/// <summary>
+	/// Load a project from disk without registering it. Returns null if it fails or its type cannot load here.
+	/// </summary>
 	public static Project Load( string dir )
 	{
-		var cleanPath = System.IO.Path.GetFullPath( dir );
-
-		var project = new Project { ConfigFilePath = cleanPath, Active = false };
-		project.Load();
-
-		// If it loaded broken, don't bother with it
-		if ( project.Broken )
+		var project = new Project( NormalizeConfigFilePath( dir ) ) { Active = false };
+		if ( !project.Load() )
 		{
+			project.Dispose();
 			return null;
 		}
 

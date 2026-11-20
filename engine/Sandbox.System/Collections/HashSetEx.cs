@@ -62,6 +62,23 @@ internal class HashSetEx<T> : IHotloadManaged
 	}
 
 	/// <summary>
+	/// Removes matching items, including additions not yet visible to active enumerators.
+	/// Active enumerators keep their current list until they finish.
+	/// </summary>
+	public int RemoveWhere( Predicate<T> match )
+	{
+		try
+		{
+			return _hashset.RemoveWhere( match );
+		}
+		finally
+		{
+			// Predicates can refresh the cache or throw after removing some items.
+			_listInvalid = true;
+		}
+	}
+
+	/// <summary>
 	/// Determines whether this set contains the given object.
 	/// </summary>
 	public bool Contains( T obj ) => _hashset.Contains( obj );
@@ -93,32 +110,83 @@ internal class HashSetEx<T> : IHotloadManaged
 	}
 
 	/// <summary>
-	/// Enumerates the list, increments iterating before and after. When we finished
-	/// iterating, and nothing else is iterating, runs deferred actions.
-	/// IMPORTANT: Don't expose this IEnumerable to users directly - because they might purposefully not dispose it?
+	/// Enumerates the list, incrementing <see cref="_activeEnumerators"/> for the duration so
+	/// <see cref="_cachedList"/> can't be rebuilt underneath us.
+	/// IMPORTANT: Don't expose this to users directly - because they might purposefully not dispose it?
 	/// </summary>
-	public IEnumerable<T> EnumerateLocked( bool nullChecks = false )
+	public LockedEnumerable EnumerateLocked( bool nullChecks = false ) => new( this, nullChecks );
+
+	/// <summary>
+	/// Struct enumerable so <c>foreach</c> over <see cref="EnumerateLocked"/> doesn't allocate.
+	/// </summary>
+	internal readonly struct LockedEnumerable
 	{
-		try
+		private readonly HashSetEx<T> _set;
+		private readonly bool _nullChecks;
+
+		internal LockedEnumerable( HashSetEx<T> set, bool nullChecks )
 		{
-			UpdateList();
+			_set = set;
+			_nullChecks = nullChecks;
+		}
 
-			_activeEnumerators++;
+		// The foreach pattern requires these members be public, even though the type isn't
+		public LockedEnumerator GetEnumerator() => new( _set, _nullChecks );
+	}
 
-			foreach ( var item in _cachedList )
+	/// <summary>
+	/// Holds the enumeration lock until disposed, which <c>foreach</c> does for us.
+	/// </summary>
+	internal struct LockedEnumerator : IDisposable
+	{
+		private readonly HashSetEx<T> _set;
+		private readonly bool _nullChecks;
+		private int _index;
+		private bool _disposed;
+
+		internal LockedEnumerator( HashSetEx<T> set, bool nullChecks )
+		{
+			_set = set;
+			_nullChecks = nullChecks;
+			_index = -1;
+			_disposed = false;
+			Current = default;
+
+			set.UpdateList();
+			set._activeEnumerators++;
+		}
+
+		public T Current { get; private set; }
+
+		public bool MoveNext()
+		{
+			var list = _set._cachedList;
+
+			// The list can't be rebuilt while we're active, so indexing it is safe
+			while ( ++_index < list.Count )
 			{
-				if ( nullChecks && item is IValid { IsValid: false } )
+				var item = list[_index];
+
+				if ( _nullChecks && item is IValid { IsValid: false } )
 				{
-					Remove( item );
+					_set.Remove( item );
 					continue;
 				}
 
-				yield return item;
+				Current = item;
+				return true;
 			}
+
+			Current = default;
+			return false;
 		}
-		finally
+
+		public void Dispose()
 		{
-			_activeEnumerators--;
+			if ( _disposed ) return;
+
+			_disposed = true;
+			_set._activeEnumerators--;
 		}
 	}
 

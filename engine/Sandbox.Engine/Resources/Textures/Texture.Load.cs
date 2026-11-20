@@ -61,20 +61,24 @@ public partial class Texture
 
 		filepath = filepath.Replace( ".vtex_c", ".vtex" );
 
-		if ( Sandbox.Mounting.Directory.TryLoad( filepath, ResourceType.Texture, out object model ) && model is Texture m )
+		if ( Sandbox.Mounting.Directory.TryLoad( filepath, out object model ) && model is Texture m )
 			return m;
 
-		var normalizedFilename = filepath.NormalizeFilename( false );
+		if ( !TextureLoader.ImageUrl.IsAppropriate( filepath ) && !TextureLoader.ImageDataUri.IsAppropriate( filepath ) )
+			filepath = filepath.NormalizeFilename( false );
 
-		if ( normalizedFilename.StartsWith( '/' ) )
-			normalizedFilename = normalizedFilename[1..];
+		if ( filepath.StartsWith( '/' ) )
+			filepath = filepath[1..];
 
-		if ( Find( normalizedFilename ) is Texture existing )
+		if ( Find( filepath ) is Texture existing )
 			return existing;
 
-		var tex = TryToLoad( filesystem, normalizedFilename, warnOnMissing );
+		var tex = TryToLoad( filesystem, filepath, warnOnMissing );
 		if ( tex == null )
 			return null;
+
+		if ( !TextureLoader.ImageDataUri.IsAppropriate( filepath ) )
+			tex.RegisterWeakResourceId( filepath, tex.native.GetGuid() );
 
 		return tex;
 	}
@@ -84,6 +88,24 @@ public partial class Texture
 	/// Try to load a texture.
 	/// </summary>
 	public static Texture Load( string path_or_url, bool warnOnMissing = true ) => LoadInternal( GlobalContext.Current.FileMount, path_or_url, warnOnMissing );
+
+	internal static Texture Load( ResourceId id, bool warnOnMissing = true )
+	{
+		ThreadSafe.AssertIsMainThread();
+
+		if ( id.Guid is Guid guid )
+		{
+			if ( Game.Resources.TryGet<Texture>( guid, out var resource ) )
+				return resource;
+
+			var textureHandle = NativeGlue.Resources.GetTexture( id.Path, guid );
+			var t = FromNative( textureHandle );
+			t?.RegisterWeakResourceId( id.Path, guid );
+			return t;
+		}
+
+		return LoadInternal( GlobalContext.Current.FileMount, id.Path, warnOnMissing );
+	}
 
 	/// <summary>
 	/// Load avatar image of a Steam user (with a certain size if supplied).
@@ -113,35 +135,49 @@ public partial class Texture
 
 	internal static void Hotload( BaseFileSystem filesystem, string filepath )
 	{
-		var existing = Game.Resources.Get<Texture>( filepath );
-		if ( existing is not null )
-		{
-			existing.TryReload( filesystem, filepath );
-		}
-		else if ( filepath.StartsWith( "/" ) && TextureLoader.Image.IsAppropriate( filepath ) )
-		{
-			// Image might have been loaded without '/' so try again without it
-			Hotload( filesystem, filepath[1..] );
-		}
-		else if ( TextureLoader.SvgLoader.IsAppropriate( filepath ) )
+		if ( TextureLoader.SvgLoader.IsAppropriate( filepath ) )
 		{
 			// SVGs can have query parameters appended to them, find the ones
 			// that match and reload with the same parameters
 			var svgPath = filepath.TrimStart( '/' );
-			foreach ( var svgTarget in Game.Resources.FindWeakByPathPrefix<Texture>( svgPath ) )
+			foreach ( var svgTarget in Game.Resources.FindWeakByPathPrefix<Texture>( svgPath ).ToArray() )
 			{
 				svgTarget.TryReload( filesystem, svgTarget.ResourcePath );
 			}
+
+			return;
 		}
+
+		if ( Game.Resources.Get<Texture>( filepath ) is { } existing )
+			existing.TryReload( filesystem, existing.ResourcePath );
 	}
 
 	internal static Texture TryToLoad( BaseFileSystem filesystem, string filepath, bool warnOnMissing = true )
 	{
-		if ( Application.IsUnitTest )
+		if ( Application.IsUnitTest && !Graphics.IsAvailable )
 			return null;
 
 		// if no filesystem provided
 		filesystem ??= GlobalContext.Current.FileMount;
+
+		// Project menu artwork is available before the game's assets are mounted. Keep the
+		// qualified path as the texture's identity, but read the image from that project's folder.
+		if ( filepath.StartsWith( "project:" ) )
+		{
+			var separator = filepath.IndexOf( '/' );
+			if ( separator < 0 ) return null;
+
+			var project = Project.FindByIdent( filepath[8..separator] );
+			var image = filepath[(separator + 1)..];
+			if ( project?.FileSystem is null || image.Contains( ':' ) || image.Split( '/' ).Contains( ".." ) ) return null;
+
+			if ( TextureLoader.SvgLoader.IsAppropriate( image ) )
+				return TextureLoader.SvgLoader.Load( project.FileSystem, image, warnOnMissing );
+
+			return TextureLoader.Image.IsAppropriate( image )
+				? TextureLoader.Image.Load( project.FileSystem, image, warnOnMissing )
+				: null;
+		}
 
 		//
 		// Svg Loader
@@ -176,6 +212,15 @@ public partial class Texture
 		}
 
 		//
+		// Thumb loader - before the image loader, which goes by extension and would take a
+		// thumb: of a .png for a file path
+		//
+		if ( TextureLoader.ThumbLoader.IsAppropriate( filepath ) )
+		{
+			return TextureLoader.ThumbLoader.Load( filepath );
+		}
+
+		//
 		// Image loader
 		//
 		if ( TextureLoader.Image.IsAppropriate( filepath ) )
@@ -191,24 +236,14 @@ public partial class Texture
 			return TextureLoader.Avatar.Load( filepath );
 		}
 
-		//
-		// Thumb loader
-		//
-		if ( TextureLoader.ThumbLoader.IsAppropriate( filepath ) )
-		{
-			return TextureLoader.ThumbLoader.Load( filepath );
-		}
-
 		//Precache.Add( filename );
 
 		//
 		// Try to load from engine, which will worst case give us an error texture
 		//
 		ThreadSafe.AssertIsMainThread();
-		var textureHandle = NativeGlue.Resources.GetTexture( filepath );
-		var t = FromNative( textureHandle );
-		t?.RegisterWeakResourceId( filepath );
-		return t;
+		var textureHandle = NativeGlue.Resources.GetTexture( filepath, Guid.Empty );
+		return FromNative( textureHandle );
 	}
 
 	/// <summary>
@@ -236,12 +271,18 @@ public partial class Texture
 	/// </summary>
 	public static async Task<Texture> LoadFromFileSystemAsync( string filepath, BaseFileSystem filesystem, bool warnOnMissing = true )
 	{
+		// Capture the context's cancellation token now, before awaiting.
+		// GlobalContext.Current is AsyncLocal and flows correctly here
+		// (before the first await), but may not be correct after awaiting
+		// if the scope was disposed by the caller.
+		var ct = GlobalContext.Current.CancellationTokenSource?.Token ?? default;
+
 		var t = LoadInternal( filesystem, filepath, warnOnMissing );
 		if ( t == null ) return null;
 
 		while ( !t.IsLoaded )
 		{
-			await Task.Delay( 10 );
+			await Task.Delay( 10, ct );
 		}
 
 		return t;
@@ -256,7 +297,8 @@ public partial class Texture
 	{
 		if ( string.IsNullOrWhiteSpace( filepath ) ) return null;
 
-		filepath = filepath.NormalizeFilename( false );
+		if ( !TextureLoader.ImageUrl.IsAppropriate( filepath ) && !TextureLoader.ImageDataUri.IsAppropriate( filepath ) )
+			filepath = filepath.NormalizeFilename( false );
 
 		return Game.Resources.Get<Texture>( filepath );
 	}

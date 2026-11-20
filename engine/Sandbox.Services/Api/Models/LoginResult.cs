@@ -1,7 +1,15 @@
 ﻿namespace Sandbox.Services;
 
+/// <summary>
+/// Authenticated session and initial player state for the client.
+/// </summary>
 public struct LoginResult
 {
+	/// <summary>
+	/// Initial AI credit balance. Subsequent AI responses provide updated snapshots; null means unavailable.
+	/// </summary>
+	public ServiceApi.CreditBalance? AiCredits { get; set; }
+
 	/// <summary>
 	/// Our steamid, redundant but here for verification
 	/// </summary>
@@ -30,7 +38,7 @@ public struct LoginResult
 	/// <summary>
 	/// A list of organizations of which we're a member
 	/// </summary>
-	public OrganizationDto[] Memberships { get; set; }
+	public OrganizationMinimal[] Memberships { get; set; }
 
 	/// <summary>
 	/// A list of our favourited games
@@ -58,9 +66,9 @@ public struct LoginResult
 	public Player Player { get; set; }
 
 	/// <summary>
-	/// A list of our most recently seen friends, in the hopes that we can occupy the friends
-	/// list with their score without having to look up etc..
+	/// If true then this user will send us analytic data, like errors and performance metrics.
+	/// This should generally always be on - we only disable it if our backend can't handle the load.
 	/// </summary>
-	public Player[] Friends { get; set; }
+	public bool UseAnalytics { get; set; }
 
 }

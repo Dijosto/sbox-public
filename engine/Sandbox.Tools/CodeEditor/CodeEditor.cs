@@ -13,6 +13,12 @@ namespace Editor;
 public interface ICodeEditor
 {
 	/// <summary>
+	/// Friendly display name for this code editor.
+	/// Defaults to the name from <see cref="TitleAttribute"/> via <see cref="DisplayInfo"/>.
+	/// </summary>
+	public string Title => DisplayInfo.ForType( GetType(), true ).Name;
+
+	/// <summary>
 	/// Opens a file in the editor, optionally at a line and column.
 	/// </summary>
 	public void OpenFile( string path, int? line = null, int? column = null );
@@ -127,9 +133,9 @@ public static partial class CodeEditor
 		{
 			if ( CodeEditor.Current != null )
 			{
-				var displayInfo = DisplayInfo.ForType( CodeEditor.Current.GetType(), true );
-				if ( !string.IsNullOrEmpty( displayInfo.Name ) )
-					return displayInfo.Name;
+				var title = CodeEditor.Current.Title;
+				if ( !string.IsNullOrEmpty( title ) )
+					return title;
 			}
 
 			return "Code Editor";
@@ -142,18 +148,18 @@ public static partial class CodeEditor
 
 		if ( AssetSystem.FindByPath( path ) is { } asset )
 		{
-			if ( !IAssetEditor.OpenInEditor( asset, out var editor ) )
+			if ( IAssetEditor.OpenInEditor( asset, out var editor ) )
 			{
+				if ( memberName is not null && editor is not null )
+				{
+					editor.SelectMember( memberName );
+				}
+
 				return;
 			}
 
-			if ( memberName is null || editor is null )
-			{
-				return;
-			}
-
-			editor.SelectMember( memberName );
-			return;
+			// Source assets such as .csx scripts use the selected code editor when no asset editor handles them.
+			path = asset.AbsolutePath;
 		}
 
 		if ( !System.IO.Path.IsPathRooted( path ) )
@@ -183,6 +189,9 @@ public static partial class CodeEditor
 			Current?.OpenFile( path, line, column );
 	}
 
+	/// <summary>
+	/// Opens the source location, including its line, column and member when available.
+	/// </summary>
 	public static void OpenFile( ISourcePathProvider location )
 	{
 		OpenFile(
@@ -230,7 +239,7 @@ public static partial class CodeEditor
 			return false;
 		}
 
-		return false;
+		return System.IO.File.Exists( path );
 	}
 
 	/// <summary>

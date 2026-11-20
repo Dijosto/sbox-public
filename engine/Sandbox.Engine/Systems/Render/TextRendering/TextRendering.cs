@@ -22,79 +22,80 @@ public static partial class TextRendering
 	/// </summary>
 	public static Texture GetOrCreateTexture( in Scope scope, Vector2 clip = default, TextFlag flag = TextFlag.LeftTop )
 	{
-		if ( Application.IsHeadless )
+		if ( !Graphics.IsAvailable )
 			return Texture.Invalid;
 
+		var tb = GetOrCreateTextBlock( scope, flag, clip );
+		tb.MakeReady();
+		return tb.Texture ?? Texture.Invalid;
+	}
+
+	/// <summary>
+	/// Resolves or creates a laid out <see cref="TextBlock"/> for the given scope, null when headless. Safe to call
+	/// from any thread. MakeReady() must still be called on the render thread before drawing its texture.
+	/// </summary>
+	internal static TextBlock GetOrCreateTextBlock( in Scope scope, TextFlag flag, Vector2 clip = default )
+	{
+		if ( Application.IsHeadless ) return null;
 		if ( clip == default ) clip = 8096;
 
 		var hc = new HashCode();
 		hc.Add( scope );
-		hc.Add( clip );
+		hc.Add( new Vector2( clip ) );
 		hc.Add( flag );
 
-		// TextManager is caching this right now
-		var tb = GetOrCreateTextBlock( hc.ToHashCode(), out bool created );
+		var hash = hc.ToHashCode();
 
-		if ( created )
+		if ( Dictionary.TryGetValue( hash, out var tb ) )
 		{
-			tb.Clip = clip;
-			tb.Flags = flag;
-			tb.Initialize( scope );
+			tb.EnsureLayout();
+			return tb;
 		}
 
-		tb.MakeReady();
-		return tb.Texture;
+		// Build a fully initialized candidate before publishing.
+		// If another thread wins the race, their instance is returned and ours is discarded.
+		var candidate = new TextBlock();
+		candidate.Clip = clip;
+		candidate.Flags = flag;
+		candidate.Initialize( scope );
+		candidate.EnsureLayout();
+
+		// GetOrAdd is race-safe: only one instance wins the slot.
+		// Set CacheKey on the winner so MakeReady can re-register if Tick() evicts it.
+		var winner = Dictionary.GetOrAdd( hash, candidate );
+		winner.CacheKey = hash;
+		return winner;
 	}
 
 	static ConcurrentDictionary<int, TextBlock> Dictionary = new();
 
-	/// <summary>
-	/// We don't expose this because we don't want them to do something stupid like free
-	/// a textblock that they're still using
-	/// </summary>
-	internal static TextBlock GetOrCreateTextBlock( int hash, out bool created )
-	{
-		Assert.False( Application.IsHeadless );
-
-		created = false;
-
-		if ( Dictionary.TryGetValue( hash, out var textBlock ) )
-			return textBlock;
-
-		created = true;
-		textBlock = new TextBlock();
-		Dictionary[hash] = textBlock;
-		return textBlock;
-	}
-
+	const ulong UnusedFrameLimit = 2;
 	static RealTimeSince _timeSinceCleanup;
 
 	/// <summary>
-	/// Free old, unused textblocks (and their textures)
+	/// Evict unused text blocks. Callers can still retain their textures.
 	/// </summary>
 	internal static void Tick()
 	{
+		if ( Graphics.IsAvailable ) GpuFontText.PreloadShader();
+
 		Assert.False( Application.IsHeadless );
 
 		if ( _timeSinceCleanup < 0.5f ) return;
 		_timeSinceCleanup = 0;
 
-		int total = Dictionary.Count;
-		int deleted = 0;
-
 		foreach ( var item in Dictionary )
 		{
-			if ( item.Value.TimeSinceUsed < 1.5f ) continue;
+			// Preparation also counts: measuring text need not submit its texture to the GPU.
+			if ( Application.FrameCount - item.Value.LastPreparedFrame <= UnusedFrameLimit ) continue;
+			// LastUsed is measured in resource frames, not seconds.
+			if ( item.Value.Texture?.LastUsed <= (int)UnusedFrameLimit ) continue;
 
-			item.Value.Dispose();
 			Dictionary.TryRemove( item );
-			deleted++;
 		}
-
-		//Log.Info( $"TextManager: {total} ({deleted} deleted)" );
 	}
 
-	internal static void ClearCache()
+	internal static void Shutdown()
 	{
 		foreach ( var item in Dictionary )
 		{

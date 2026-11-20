@@ -7,6 +7,11 @@ namespace Editor.MovieMaker;
 
 #nullable enable
 
+/// <summary>
+/// A base signal that isn't composed of other signals.
+/// </summary>
+public interface ILiteralSignal : IPropertySignal;
+
 public abstract partial record PropertySignal : IPropertySignal
 {
 	[JsonIgnore]
@@ -35,7 +40,7 @@ public abstract partial record PropertySignal : IPropertySignal
 public abstract partial record PropertySignal<T>() : PropertySignal, IPropertySignal<T>
 {
 	[JsonIgnore]
-	public sealed override Type PropertyType => typeof(T);
+	public sealed override Type PropertyType => typeof( T );
 
 	protected PropertySignal( PropertySignal<T> copy )
 		: base( copy )
@@ -54,7 +59,10 @@ public abstract partial record PropertySignal<T>() : PropertySignal, IPropertySi
 	/// <param name="end">Optional end time, we can discard any features after this if given.</param>
 	public PropertySignal<T> Reduce( MovieTime? start = null, MovieTime? end = null )
 	{
-		return start >= end && !GetKeyframes( start.Value ).Any() ? GetValue( start.Value ) : OnReduce( start, end );
+		// Edge case: reduce down to a constant if we're trimming down to a single moment in time,
+		// but only if there isn't a keyframe at that moment.
+
+		return start >= end && Keyframes.All( x => x.Time != start.Value ) ? GetValue( start.Value ) : OnReduce( start, end );
 	}
 
 	public PropertySignal<T> Reduce( MovieTimeRange timeRange ) =>
@@ -62,9 +70,11 @@ public abstract partial record PropertySignal<T>() : PropertySignal, IPropertySi
 
 	protected abstract PropertySignal<T> OnReduce( MovieTime? start, MovieTime? end );
 
-	public virtual IEnumerable<ICompiledPropertyBlock<T>> Compile( MovieTimeRange timeRange, int sampleRate )
+	public virtual IEnumerable<ICompiledPropertyBlock<T>> Compile( MovieTimeRange timeRange, int? sampleRate )
 	{
-		var samples = Sample( timeRange, sampleRate );
+		var sampleRateOrDefault = sampleRate ?? MovieProject.DefaultSampleRate;
+
+		var samples = Sample( timeRange, sampleRateOrDefault );
 		var sampleSpans = new List<SampleSpan>();
 
 		FindConstantSpans( sampleSpans, samples );
@@ -74,8 +84,8 @@ public abstract partial record PropertySignal<T>() : PropertySignal, IPropertySi
 
 		var canInterpolate = Interpolator.GetDefault<T>() is not null;
 		var minConstBlockSampleCount = canInterpolate
-			? Math.Max( sampleRate / 2, 10 )
-			: Math.Max( sampleRate / 4, 1 );
+			? Math.Max( sampleRateOrDefault / 2, 10 )
+			: Math.Max( sampleRateOrDefault / 4, 1 );
 
 		// We take an extra sample at the end so we can interpolate smoothly to the next span
 
@@ -83,10 +93,27 @@ public abstract partial record PropertySignal<T>() : PropertySignal, IPropertySi
 
 		MergeSpans( sampleSpans, minConstBlockSampleCount );
 
-		foreach ( var span in sampleSpans )
+		for ( var i = 0; i < sampleSpans.Count; i++ )
 		{
-			var startTime = timeRange.Start + MovieTime.FromFrames( span.Start, sampleRate );
-			var endTime = timeRange.Start + MovieTime.FromFrames( span.Start + span.Count, sampleRate );
+			var span = sampleSpans[i];
+
+			var startTime = timeRange.Start + MovieTime.FromFrames( span.Start, sampleRateOrDefault );
+			var endTime = timeRange.Start + MovieTime.FromFrames( span.Start + span.Count, sampleRateOrDefault );
+
+			var startOffset = MovieTime.Zero;
+
+			// Need to make sure blocks exactly fill timeRange
+
+			if ( i == 0 )
+			{
+				startOffset = startTime - timeRange.Start;
+				startTime = timeRange.Start;
+			}
+
+			if ( i == sampleSpans.Count - 1 )
+			{
+				endTime = timeRange.End;
+			}
 
 			if ( span.IsConstant )
 			{
@@ -96,7 +123,7 @@ public abstract partial record PropertySignal<T>() : PropertySignal, IPropertySi
 
 			var spanSamples = samples.Skip( span.Start ).Take( span.Count + trailingExtraSamples );
 
-			yield return new CompiledSampleBlock<T>( (startTime, endTime), 0d, sampleRate, [.. spanSamples] );
+			yield return new CompiledSampleBlock<T>( (startTime, endTime), startOffset, sampleRateOrDefault, [.. spanSamples] );
 		}
 	}
 

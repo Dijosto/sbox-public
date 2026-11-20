@@ -3,6 +3,7 @@
 /// <summary>
 /// A render target handle used with CommandLists
 /// </summary>
+[Expose]
 public ref struct RenderTargetHandle
 {
 	public string Name { get; internal set; }
@@ -11,6 +12,11 @@ public ref struct RenderTargetHandle
 	/// Reference to the color texture of this target
 	/// </summary>
 	public readonly ColorTextureRef ColorTexture => new ColorTextureRef { Name = Name };
+
+	/// <summary>
+	/// Reference to the depth texture of this target
+	/// </summary>
+	public readonly DepthTextureRef DepthTexture => new DepthTextureRef { Name = Name };
 
 	/// <summary>
 	/// Reference to the index of the color texture of this target
@@ -23,6 +29,11 @@ public ref struct RenderTargetHandle
 	public readonly SizeHandle Size => new SizeHandle { Name = Name };
 
 	public ref struct ColorTextureRef
+	{
+		public string Name { get; internal set; }
+	}
+
+	public ref struct DepthTextureRef
 	{
 		public string Name { get; internal set; }
 	}

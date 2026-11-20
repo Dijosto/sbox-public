@@ -35,13 +35,19 @@ public partial class Scene : GameObject
 
 		if ( NavMesh.IsGenerating ) return;
 
-		if ( NavMesh.IsDirty || (NavMesh.DrawMesh && NavMesh.EditorAutoUpdate && IsEditor) )
+		// An editor scene that loaded without its bake has just generated, and bakes that
+		if ( IsEditor && NavMesh.TakeMissingBake() && Editor is { HasUnsavedChanges: false } editor && editor.GetSceneFolder() is { } folder )
+		{
+			_ = NavMesh.BakeInEditor( PhysicsWorld, folder, () => !editor.HasUnsavedChanges, regenerate: false );
+		}
+
+		if ( NavMesh.IsDirty || (NavMesh.AutoUpdates && IsEditor) )
 		{
 			NavMesh.InvalidateAllTiles( PhysicsWorld );
 		}
 
 		NavMesh.UpdateCache( PhysicsWorld );
 
-		NavMesh.crowd.Update( Time.Delta, new DotRecast.Detour.Crowd.DtCrowdAgentDebugInfo() );
+		NavMesh.Simulation.Update( Time.Delta );
 	}
 }

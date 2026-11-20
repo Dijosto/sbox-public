@@ -36,6 +36,7 @@ public class EditorTool : IDisposable
 			if ( _currentTool == value )
 				return;
 
+			_currentTool?.CancelBoxSelection();
 			_currentTool?.OnDisabled();
 			_currentTool = value;
 			_currentTool?.OnEnabled();
@@ -54,7 +55,8 @@ public class EditorTool : IDisposable
 	/// Create a trace that traces against the render meshes but not the physics world, using the current mouse cursor
 	/// </summary>
 	[JsonIgnore]
-	public SceneTrace MeshTrace => Trace.UseRenderMeshes( true, EditorPreferences.BackfaceSelection )
+	public SceneTrace MeshTrace => Scene.Trace.Ray( Gizmo.Hitbox.Ray, Gizmo.RayDepth ).UseRenderMeshes( true, EditorPreferences.BackfaceSelection )
+										.WithoutTags( "hidden" )
 										.UsePhysicsWorld( false );
 
 
@@ -75,6 +77,12 @@ public class EditorTool : IDisposable
 	/// allow context menu or not, some tools don't need it.
 	/// </summary>
 	public bool AllowContextMenu { get; set; } = true;
+
+	public virtual bool TryGetSelectionOrigin( out Vector3 origin )
+	{
+		origin = default;
+		return false;
+	}
 
 	internal void InitializeInternal( EditorToolManager manager )
 	{
@@ -112,7 +120,7 @@ public class EditorTool : IDisposable
 		{
 			if ( Manager.IsCurrentViewFocused )
 			{
-				if ( HasLassoSelectionMode() && (IsLassoSelecting || (Gizmo.IsAltPressed && Gizmo.IsLeftMouseDown && Gizmo.Pressed.CursorDelta.Length > 0.1f)) )
+				if ( HasLassoSelectionMode() && (IsLassoSelecting || (Gizmo.IsAltPressed && (Gizmo.IsShiftPressed || Gizmo.IsCtrlPressed) && Gizmo.IsLeftMouseDown && Gizmo.Pressed.CursorDelta.Length > 0.1f)) )
 				{
 					UpdateLassoSelection();
 				}
@@ -121,6 +129,7 @@ public class EditorTool : IDisposable
 					UpdateBoxSelection();
 				}
 			}
+
 
 			OnUpdate();
 			CurrentTool?.Frame( camera );
@@ -152,6 +161,36 @@ public class EditorTool : IDisposable
 	}
 
 	/// <summary>
+	/// Allows tools to contribute custom items to the scene viewport context menu.
+	/// </summary>
+	public virtual void BuildSceneContextMenu( Menu menu, Ray ray, SceneTraceResult? trace )
+	{
+	}
+
+	protected static void AddMenuOption( Menu m, string name, string icon, string shortcut, bool condition )
+	{
+		if ( !condition ) return;
+		m.AddOption( name, icon, () => InvokeShortcut( shortcut ), shortcut );
+	}
+
+	protected static void AddMenuOption( Menu m, string name, string icon, Action action, string shortcut, bool condition )
+	{
+		if ( !condition ) return;
+		m.AddOption( name, icon, action, shortcut );
+	}
+
+	internal static bool InvokeShortcut( string identifier )
+	{
+		foreach ( var shortcut in EditorShortcuts.Entries )
+		{
+			if ( shortcut.Identifier != identifier ) continue;
+			if ( shortcut.Invoke( true ) ) return true;
+		}
+
+		return false;
+	}
+
+	/// <summary>
 	/// Return true here to keep the tool active even if the component is no longer
 	/// in the selection.
 	/// </summary>
@@ -163,6 +202,7 @@ public class EditorTool : IDisposable
 
 	public virtual void Dispose()
 	{
+		CancelBoxSelection();
 		OnDisabled();
 
 		foreach ( var w in overlayWidgets )
@@ -286,70 +326,80 @@ public class EditorTool : IDisposable
 	public virtual bool HasBoxSelectionMode() => false;
 
 	/// <summary>
-	/// If true then this mode uses lasso selection (activated with Alt+Drag)
+	/// If true then this mode uses lasso selection (Alt+Shift+Drag to add, Alt+Ctrl+Drag to remove)
 	/// </summary>
 	public virtual bool HasLassoSelectionMode() => false;
 
-	Ray _ray1;
-	Ray _ray2;
+	Vector2? _boxStart;
 	List<Vector2> _lassoPoints = new();
 
 	protected bool IsBoxSelecting { get; private set; }
 	protected bool IsLassoSelecting { get; private set; }
 
+	internal bool CancelBoxSelection()
+	{
+		var canceled = _boxStart.HasValue || IsBoxSelecting;
+		_boxStart = null;
+		// Suppress the background-click deselection when the canceled drag is released.
+		IsBoxSelecting = canceled;
+		return CurrentTool?.CancelBoxSelection() == true || canceled;
+	}
+
 	private void UpdateBoxSelection()
 	{
-		var ray = Gizmo.CurrentRay;
-
 		if ( Gizmo.WasLeftMousePressed )
 		{
-			_ray1 = ray;
-		}
-
-		if ( Gizmo.IsLeftMouseDown && _ray1 != default )
-		{
-			_ray2 = ray;
-		}
-
-		// project to screen position
-		var c1 = Gizmo.Camera.ToScreen( _ray1.Project( 100 ) );
-		var c2 = Gizmo.Camera.ToScreen( _ray2.Project( 100 ) );
-
-		if ( Vector2.Distance( c1, c2 ) < 5 || Gizmo.Pressed.Any )
-		{
+			_boxStart = Gizmo.Pressed.CursorPosition;
 			IsBoxSelecting = false;
+		}
+		if ( !Gizmo.IsLeftMouseDown && !Gizmo.WasLeftMouseReleased )
+		{
+			_boxStart = null;
+			IsBoxSelecting = false;
+		}
+		if ( _boxStart is not { } start ) return;
+		if ( Gizmo.Pressed.Any )
+		{
+			// Object clicks relinquish capture after dragging. Keep the original start for that transition.
+			if ( !Gizmo.IsLeftMouseDown ) _boxStart = null;
+			IsBoxSelecting = false;
+			return;
+		}
 
-			if ( !Gizmo.IsLeftMouseDown )
-			{
-				_ray1 = _ray2 = default;
-			}
-
+		var end = Gizmo.CursorPosition;
+		if ( !start.IsFinite || !end.IsFinite )
+		{
+			_boxStart = null;
+			IsBoxSelecting = false;
+			return;
+		}
+		if ( !IsBoxSelecting && Vector2.Distance( start, end ) < 5 )
+		{
+			if ( !Gizmo.IsLeftMouseDown ) _boxStart = null;
 			return;
 		}
 
 		IsBoxSelecting = true;
+		// Input positions are widget coordinates; the camera and overlays use physical pixels.
+		var dpiScale = MathF.Max( 1.0f, Gizmo.Camera.Attributes.GetFloat( "EditorGizmoDpiScale" ) );
+		var rect = Rect.FromPoints( start, end ) * dpiScale;
+		// A line has no selectable area. Do not construct a degenerate frustum.
+		if ( rect.Width > 0 && rect.Height > 0 )
+			OnBoxSelect( Gizmo.Camera.GetFrustum( rect ), rect, Gizmo.WasLeftMouseReleased );
 
-		var frustum = Gizmo.Camera.GetFrustum( Rect.FromPoints( c1, c2 ) );
-		Rect rect = new Rect( MathF.Min( c1.x, c2.x ), MathF.Min( c1.y, c2.y ), MathF.Abs( c1.x - c2.x ), MathF.Abs( c1.y - c2.y ) );
-
-		OnBoxSelect( frustum, rect, Gizmo.WasLeftMouseReleased );
-
-		// Crystalize the box select
 		if ( Gizmo.WasLeftMouseReleased )
 		{
-			_ray1 = _ray2 = default;
+			_boxStart = null;
 			return;
 		}
 
-		// Paint the selection rectangle
-		{
-			Gizmo.Draw.ScreenRect( rect, Theme.Blue.WithAlpha( 0.1f ), new Vector4( 1.0f ), Theme.Blue, new Vector4( 1.0f ) );
-		}
+		var color = Gizmo.IsCtrlPressed ? (Gizmo.IsShiftPressed ? Theme.Yellow : Theme.Red) : Gizmo.IsShiftPressed ? Theme.Green : Theme.Blue;
+		Gizmo.Draw.ScreenRect( rect, color.WithAlpha( 0.1f ), new Vector4( 1.0f ), color, new Vector4( 1.0f ) );
 	}
 
 	private void UpdateLassoSelection()
 	{
-		if ( Gizmo.WasLeftMousePressed && !IsLassoSelecting )
+		if ( Gizmo.IsLeftMouseDown && !IsLassoSelecting )
 		{
 			_lassoPoints.Clear();
 			IsLassoSelecting = true;
@@ -450,6 +500,49 @@ public class EditorTool : IDisposable
 	protected virtual void OnBoxSelect( Frustum frustum, Rect screenRect, bool isFinal )
 	{
 
+	}
+
+	/// <summary>Object selection is committed once on release, like Hammer.</summary>
+	protected void SelectObjectsInBox( Frustum frustum, bool isFinal )
+	{
+		if ( !isFinal ) return;
+		var inside = BoxSelection.Find( Scene, frustum, EditorPreferences.BoxSelectIntersecting, Gizmo.Settings.GizmosEnabled );
+		using ( Scene.Editor?.UndoScope( "Box Selection" ).Push() )
+			BoxSelection.Apply( Selection, inside, Gizmo.IsShiftPressed, Gizmo.IsCtrlPressed );
+	}
+
+	/// <summary>
+	/// Apply the result of a drag selection. Ctrl deselects whatever the drag covered, shift keeps
+	/// what was already selected, otherwise the drag replaces the selection.
+	/// </summary>
+	/// <param name="inside">Everything the drag covered</param>
+	/// <param name="outside">Everything it didn't</param>
+	protected void ApplyDragSelection<T>( IEnumerable<T> inside, IEnumerable<T> outside )
+	{
+		if ( Gizmo.IsCtrlPressed )
+		{
+			foreach ( var element in inside )
+			{
+				if ( Selection.Contains( element ) )
+					Selection.Remove( element );
+			}
+
+			return;
+		}
+
+		foreach ( var element in inside )
+		{
+			if ( !Selection.Contains( element ) )
+				Selection.Add( element );
+		}
+
+		if ( Gizmo.IsShiftPressed ) return;
+
+		foreach ( var element in outside )
+		{
+			if ( Selection.Contains( element ) )
+				Selection.Remove( element );
+		}
 	}
 
 	/// <summary>

@@ -1,8 +1,15 @@
-﻿namespace Sandbox;
+using System.Text.Json.Serialization;
+
+namespace Sandbox;
 
 public static partial class Gizmo
 {
 	public static SceneSettings Settings => Active?.Settings;
+
+	/// <summary>
+	/// Bumped when gizmo type enable/disable settings change, so cached handles know to rebuild.
+	/// </summary>
+	internal static int GizmoTypeGeneration { get; private set; }
 
 	[Expose]
 	public enum GridAxis
@@ -42,6 +49,25 @@ public static partial class Gizmo
 		public float GizmoScale { get; set; } = 1.0f;
 
 		/// <summary>
+		/// When enabled, component gizmo handles are drawn at a fixed world size
+		/// instead of maintaining a constant screen size regardless of distance.
+		/// </summary>
+		public bool WorldSpaceGizmos { get; set; } = false;
+
+		/// <summary>
+		/// When enabled, component gizmo handles are depth tested against scene geometry.
+		/// When disabled, they render on top of everything.
+		/// </summary>
+		public bool GizmoDepthTest { get; set; } = false;
+
+		/// <summary>
+		/// Maximum distance from the camera at which component gizmo handles are visible.
+		/// Set to 0 for unlimited distance.
+		/// </summary>
+		[Range( 0, 50000, slider: false ), Step( 100 )]
+		public float GizmoRenderDistance { get; set; } = 0;
+
+		/// <summary>
 		/// Grid spacing
 		/// </summary>
 		[Range( 0.125f, 128 ), Step( 1 )]
@@ -76,22 +102,23 @@ public static partial class Gizmo
 		/// <summary>
 		/// Which gizmos are disabled
 		/// </summary>
-		private Dictionary<Type, bool> DisabledGizmos = new();
+		[JsonInclude]
+		Dictionary<string, bool> DisabledGizmos { get; set; } = [];
 
 		/// <summary>
 		/// Check if a gizmo type is enabled
 		/// </summary>
-		public bool IsGizmoEnabled( Type type )
-		{
-			return !DisabledGizmos.TryGetValue( type, out var disabled ) || !disabled;
-		}
+		public bool IsGizmoEnabled( Type type ) => type is not null && (DisabledGizmos.Count == 0 || !DisabledGizmos.GetValueOrDefault( type.FullName ));
 
 		/// <summary>
 		/// Set the enabled state of a gizmo type
 		/// </summary>
 		public void SetGizmoEnabled( Type type, bool enabled )
 		{
-			DisabledGizmos[type] = !enabled;
+			if ( type is null ) return;
+
+			DisabledGizmos[type.FullName] = !enabled;
+			GizmoTypeGeneration++;
 		}
 
 		/// <summary>
@@ -100,6 +127,7 @@ public static partial class Gizmo
 		public void ClearEnabledGizmos()
 		{
 			DisabledGizmos.Clear();
+			GizmoTypeGeneration++;
 		}
 	}
 }

@@ -1,5 +1,4 @@
 using NativeEngine;
-using Sandbox.VR;
 
 namespace Sandbox;
 
@@ -7,6 +6,7 @@ namespace Sandbox;
 /// A compute shader is a program that runs on the GPU, often with data provided to/from the CPU by means of a <see cref="GpuBuffer{T}"/> or a <see cref="Texture"/>.
 /// </summary>
 /// <seealso cref="GpuBuffer{T}"/>
+[Expose]
 public class ComputeShader
 {
 	/// <summary>
@@ -14,7 +14,7 @@ public class ComputeShader
 	/// </summary>
 	public RenderAttributes Attributes { get; } = new RenderAttributes();
 
-	Material ComputeMaterial;
+	internal Material ComputeMaterial;
 
 	/// <summary>
 	/// Create a compute shader from the specified path.
@@ -26,9 +26,19 @@ public class ComputeShader
 		ComputeMaterial = material;
 	}
 
-	internal void Dispose()
+	/// <summary>
+	/// Create a compute shader from the specified shader.
+	/// </summary>
+	public ComputeShader( Shader shader )
 	{
-		ComputeMaterial.Dispose();
+		var material = Material.FromShader( shader );
+		Assert.NotNull( material );
+		ComputeMaterial = material;
+	}
+
+	internal void Destroy()
+	{
+		ComputeMaterial.Destroy();
 	}
 
 	/// <summary>

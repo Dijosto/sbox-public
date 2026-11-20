@@ -5,82 +5,31 @@ namespace Editor.MeshEditor;
 /// Select and edit vertices.
 /// </summary>
 [Title( "Vertex Tool" )]
-[Icon( "workspaces" )]
+[Icon( "meshtools/sub-tools/vertex_tool.png" )]
 [Alias( "tools.vertex-tool" )]
 [Group( "1" )]
 public sealed partial class VertexTool( MeshTool tool ) : SelectionTool<MeshVertex>( tool )
 {
 	public override bool DrawVertices => true;
 
-	public override bool HasBoxSelectionMode() => true;
-
-	protected override void OnBoxSelect( Frustum frustum, Rect screenRect, bool isFinal )
+	public override void BuildSceneContextMenu( Menu menu, Ray ray, SceneTraceResult? trace )
 	{
-		HashSet<MeshVertex> selection = [];
-		HashSet<MeshVertex> previous = [];
+		base.BuildSceneContextMenu( menu, ray, trace );
 
-		foreach ( var component in Scene.GetAllComponents<MeshComponent>() )
-		{
-			var mesh = component.Mesh;
-			if ( mesh == null ) continue;
+		int count = Selection.OfType<MeshVertex>().Count( x => x.IsValid() );
+		if ( count == 0 ) return;
 
-			var bounds = component.GetWorldBounds();
-			if ( !frustum.IsInside( bounds, true ) )
-			{
-				foreach ( var handle in mesh.VertexHandles )
-					previous.Add( new MeshVertex( component, handle ) );
+		menu.AddSeparator();
 
-				continue;
-			}
+		var ops = menu.AddMenu( "Vertex Operations", "build" );
+		AddMenuOption( ops, "Merge Verts", "meshtools/vertex_tools/merge.png", "mesh.merge", count > 1 );
+		AddMenuOption( ops, "Connect Vertex Path", "meshtools/vertex_tools/connect.png", "mesh.connect", count > 1 );
+		AddMenuOption( ops, "Bevel Verts", "meshtools/vertex_tools/bevel.png", "mesh.bevel", true );
 
-			var transform = component.Transform.World;
-
-			foreach ( var v in mesh.VertexHandles )
-			{
-				var worldPos = transform.PointToWorld( mesh.GetVertexPosition( v ) );
-
-				if ( !Tool.SelectionThrough && IsVertexOccluded( worldPos, Gizmo.Camera.Position ) )
-				{
-					previous.Add( new MeshVertex( component, v ) );
-					continue;
-				}
-
-				if ( frustum.IsInside( worldPos ) )
-				{
-					selection.Add( new MeshVertex( component, v ) );
-				}
-				else
-				{
-					previous.Add( new MeshVertex( component, v ) );
-				}
-			}
-		}
-
-		if ( Application.KeyboardModifiers.HasFlag( KeyboardModifiers.Ctrl ) )
-		{
-			foreach ( var v in selection )
-			{
-				if ( Selection.Contains( v ) )
-					Selection.Remove( v );
-			}
-		}
-		else
-		{
-			foreach ( var v in selection )
-			{
-				if ( !Selection.Contains( v ) )
-					Selection.Add( v );
-			}
-
-			if ( !Application.KeyboardModifiers.HasFlag( KeyboardModifiers.Shift ) )
-			{
-				foreach ( var v in previous )
-				{
-					if ( Selection.Contains( v ) )
-						Selection.Remove( v );
-				}
-			}
-		}
+		var sel = menu.AddMenu( "Vertex Selection", "select_all" );
+		AddMenuOption( sel, "Select Loop", "all_out", "mesh.select-loop", count > 1 );
+		AddMenuOption( sel, "Invert Selection", "swap_vert", InvertCurrentSelection, "mesh.invert-selection", true );
+		sel.AddOption( "Select All", "select_all", () => InvokeShortcut( "mesh.select-all" ), "mesh.select-all" );
 	}
 
 	public override void OnUpdate()
@@ -89,25 +38,30 @@ public sealed partial class VertexTool( MeshTool tool ) : SelectionTool<MeshVert
 
 		using var scope = Gizmo.Scope( "VertexTool" );
 
-		var closestVertex = MeshTrace.GetClosestVertex( 8 );
+		var closestVertex = MeshTrace.GetClosestVertex( 8, out var closestFace );
 		if ( closestVertex.IsValid() )
 			Gizmo.Hitbox.TrySetHovered( closestVertex.PositionWorld );
+		else if ( Gizmo.IsDoubleClicked && closestFace.IsValid() && MeshTrace.TraceFace( out var hitPosition ).IsValid() )
+			Gizmo.Hitbox.TrySetHovered( hitPosition );
 
-		if ( Gizmo.IsHovered && Tool.MoveMode.AllowSceneSelection )
+		if ( Gizmo.IsHovered && Tool.MoveMode.AllowSceneSelection && !IsLassoSelecting )
 		{
-			SelectVertex();
-
-			if ( Gizmo.IsDoubleClicked )
-				SelectAllVertices();
+			SelectVertex( closestVertex );
 		}
 
-		using ( Gizmo.Scope( "Vertex Selection" ) )
-		{
-			Gizmo.Draw.IgnoreDepth = true;
-			Gizmo.Draw.Color = Color.White;
+		UpdateMoveMode();
+		DrawSelectedElements();
 
-			foreach ( var vertex in Selection.OfType<MeshVertex>() )
-				Gizmo.Draw.Sprite( vertex.PositionWorld, 8, null, false );
+		if ( ShowSelectionBounds )
+			DrawBounds();
+	}
+
+	private void DrawBounds()
+	{
+		using ( Gizmo.Scope( "Vertex Size" ) )
+		{
+			var box = CalculateSelectionBounds();
+			DimensionDisplay.DrawBounds( box );
 		}
 	}
 
@@ -144,9 +98,8 @@ public sealed partial class VertexTool( MeshTool tool ) : SelectionTool<MeshVert
 		}
 	}
 
-	private void SelectVertex()
+	private void SelectVertex( MeshVertex vertex )
 	{
-		var vertex = MeshTrace.GetClosestVertex( 8 );
 		if ( vertex.IsValid() )
 		{
 			using ( Gizmo.ObjectScope( vertex.Component.GameObject, vertex.Transform ) )
@@ -163,28 +116,88 @@ public sealed partial class VertexTool( MeshTool tool ) : SelectionTool<MeshVert
 		UpdateSelection( vertex );
 	}
 
-	private void SelectAllVertices()
+	protected override bool OnDoubleClick( IMeshElement element )
 	{
-		var vertex = MeshTrace.GetClosestVertex( 8 );
+		var vertex = element is MeshVertex target ? target : default;
 		if ( !vertex.IsValid() )
-			return;
-
-		if ( !Application.KeyboardModifiers.HasFlag( KeyboardModifiers.Shift ) )
-			Selection.Clear();
-
-		if ( !Application.KeyboardModifiers.HasFlag( KeyboardModifiers.Ctrl ) )
 		{
-			foreach ( var hVertex in vertex.Component.Mesh.VertexHandles )
-				Selection.Add( new MeshVertex( vertex.Component, hVertex ) );
+			var face = MeshTrace.TraceFace();
+			if ( !face.IsValid() )
+				return false;
+			vertex = new MeshVertex( face.Component, face.Component.Mesh.GetFaceVertices( face.Handle ).First() );
 		}
+
+		var mesh = vertex.Component.Mesh;
+		var queue = new Queue<HalfEdgeMesh.VertexHandle>();
+		var visited = new HashSet<HalfEdgeMesh.VertexHandle> { vertex.Handle };
+		var vertices = new List<IMeshElement>();
+		queue.Enqueue( vertex.Handle );
+		while ( queue.TryDequeue( out var current ) )
+		{
+			vertices.Add( new MeshVertex( vertex.Component, current ) );
+			mesh.GetEdgesConnectedToVertex( current, out var edges );
+			foreach ( var edge in edges )
+			{
+				if ( mesh.IsEdgeHidden( edge ) )
+					continue;
+				mesh.GetEdgeVertices( edge, out var a, out var b );
+				var next = a == current ? b : a;
+				if ( !mesh.IsVertexHidden( next ) && visited.Add( next ) )
+					queue.Enqueue( next );
+			}
+		}
+
+		ApplyElementSelection( vertices, Gizmo.KeyboardModifiers, "Select Connected Vertices" );
+		return true;
+	}
+
+	public override List<MeshFace> ExtrudeSelection( Vector3 delta = default )
+	{
+		var groups = Selection.OfType<MeshVertex>()
+			.GroupBy( v => v.Component );
+
+		var connectingFaces = new List<MeshFace>();
+		if ( !groups.Any() )
+			return connectingFaces;
+
+		var selectedVertices = new List<MeshVertex>();
+		var components = groups.Select( x => x.Key );
+
+		using ( SceneEditorSession.Active.UndoScope( "Extrude Vertices" ).WithComponentChanges( components ).Push() )
+		{
+			var extrudeWidth = EditorScene.GizmoSettings.GridSpacing;
+
+			foreach ( var group in groups )
+			{
+				var component = group.Key;
+				var mesh = component.Mesh;
+				var vertices = group.Select( x => x.Handle ).ToList();
+
+				mesh.ExtendOrExtrudeVertices( vertices, 0.0f, extrudeWidth,
+					out var modifiedVertices, out _, out var newFaces );
+
+				foreach ( var hVertex in modifiedVertices )
+					selectedVertices.Add( new MeshVertex( component, hVertex ) );
+
+				foreach ( var hFace in newFaces )
+					connectingFaces.Add( new MeshFace( component, hFace ) );
+			}
+		}
+
+		Selection.Clear();
+
+		foreach ( var vertex in selectedVertices )
+			Selection.Add( vertex );
+
+		CalculateSelectionVertices();
+
+		return connectingFaces;
 	}
 
 	protected override IEnumerable<IMeshElement> GetAllSelectedElements()
 	{
-		foreach ( var group in Selection.OfType<MeshVertex>()
-			.GroupBy( x => x.Component ) )
+		foreach ( var component in SelectedMeshes )
 		{
-			var component = group.Key;
 			foreach ( var hVertex in component.Mesh.VertexHandles )
 				yield return new MeshVertex( component, hVertex );
 		}

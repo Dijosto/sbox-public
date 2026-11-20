@@ -104,10 +104,10 @@ public static partial class SandboxSystemExtensions
 
 		if ( secs < 60 ) return string.Format( "{0} seconds", secs );
 		if ( m < 60 ) return string.Format( "{1} minutes, {0} seconds", secs % 60, m );
-		if ( h < 48 ) return string.Format( "{2} hours and {1} minutes", secs % 60, m % 60, h );
-		if ( d < 7 ) return string.Format( "{3} days, {2} hours and {1} minutes", secs % 60, m % 60, h % 24, d );
+		if ( h < 48 ) return string.Format( "{1} hours and {0} minutes", m % 60, h );
+		if ( d < 7 ) return string.Format( "{2} days, {1} hours and {0} minutes", m % 60, h % 24, d );
 
-		return string.Format( "{4} weeks, {3} days, {2} hours and {1} minutes", secs % 60, m % 60, h % 24, d % 7, w );
+		return string.Format( "{3} weeks, {2} days, {1} hours and {0} minutes", m % 60, h % 24, d % 7, w );
 	}
 	/// <inheritdoc cref=" FormatSecondsLong(long)"/>
 	public static string FormatSecondsLong( this ulong secs ) { return FormatSecondsLong( (long)secs ); }
@@ -180,22 +180,26 @@ public static partial class SandboxSystemExtensions
 
 	private enum SizeUnit { B, KB, MB, GB, TB, PB, EB, ZB, YB }
 
+	/// <summary>
+	/// Formats a byte count with its sign and a binary unit suffix.
+	/// </summary>
 	public static string SizeFormat( this long bytes )
 	{
-		if ( bytes < 0 )
-			return "-" + SizeFormat( -bytes );
-
 		int unit = 0;
-		double value = bytes;
+		// Convert before taking the magnitude: negating long.MinValue overflows.
+		double value = Math.Abs( (double)bytes );
 		while ( unit < (int)SizeUnit.YB && value >= 1024 )
 		{
 			value /= 1024;
 			unit++;
 		}
 
-		return $"{value:F2} {(SizeUnit)unit}";
+		return $"{(bytes < 0 ? "-" : "")}{value:F2} {(SizeUnit)unit}";
 	}
 
+	/// <summary>
+	/// Formats a byte count with its sign and a binary unit suffix.
+	/// </summary>
 	public static string SizeFormat( this int bytes ) => SizeFormat( (long)bytes );
 
 	/// <summary>

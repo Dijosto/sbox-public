@@ -21,6 +21,12 @@ public class SearchWidget : Widget
 	public string BaseQuery { get; set; } = string.Empty;
 	public string Query => $"{BaseQuery} {Value}".TrimStart();
 
+	public string PlaceholderText
+	{
+		get => LineEdit.PlaceholderText;
+		set { LineEdit.PlaceholderText = value; LineEdit.Update(); }
+	}
+
 	public Action ValueChanged;
 
 	public TagPicker AssetTypes;
@@ -66,6 +72,33 @@ public class SearchWidget : Widget
 
 			Layout.Add( AssetTypes );
 		}
+	}
+
+	/// <summary>
+	/// Clears the search text and any active type/tag filters. Does nothing if no filter is active.
+	/// </summary>
+	public void Clear()
+	{
+		bool hadTags = AssetTypes is { Enabled: true } && (AssetTypes.ActiveTags.Count > 0 || AssetTypes.ExcludedTags.Count > 0);
+
+		if ( hadTags )
+		{
+			AssetTypes.ActiveTags.Clear();
+			AssetTypes.ExcludedTags.Clear();
+			AssetTypes.Rebuild();
+		}
+
+		if ( !string.IsNullOrEmpty( LineEdit.Text ) )
+		{
+			LineEdit.Text = string.Empty;
+			return;
+		}
+
+		if ( !hadTags )
+			return;
+
+		ValueChanged?.Invoke();
+		Update();
 	}
 
 	private void OnTextChanged( string value )
@@ -149,78 +182,37 @@ public class SearchWidget : Widget
 
 		var splitValues = query.Split( " " );
 		bool hasExtension = query.Contains( '.' );
-		if ( asset != null && !hasExtension )
+		foreach ( var splitValue in splitValues )
 		{
-			foreach ( var splitValue in splitValues )
-			{
-				var search = splitValue;
-				var negated = false;
-				if ( splitValue.StartsWith( "-" ) )
-				{
-					search = splitValue.Substring( 1 );
-					negated = true;
-				}
+			var negated = splitValue.StartsWith( "-" );
+			var search = negated ? splitValue[1..] : splitValue;
+			bool matches;
 
-				var assetName = asset.Name;
-				if ( AssetLocations.IncludePathNames )
-				{
-					assetName = asset.RelativePath;
-				}
-				if ( !negated )
-				{
-					if ( !(
-						assetName.Contains( search, StringComparison.OrdinalIgnoreCase )
-						|| asset.AssetType.FriendlyName.Contains( search, StringComparison.OrdinalIgnoreCase )
-						|| asset.Tags.Any( x => x.Contains( search, StringComparison.OrdinalIgnoreCase ) )
-					) )
-					{
-						return true;
-					}
-				}
-				else
-				{
-					if ( assetName.Contains( search, StringComparison.OrdinalIgnoreCase )
-						|| asset.AssetType.FriendlyName.Contains( search, StringComparison.OrdinalIgnoreCase )
-						|| asset.Tags.Any( x => x.Contains( search, StringComparison.OrdinalIgnoreCase ) ) )
-					{
-						return true;
-					}
-				}
+			if ( search.Contains( '*' ) || search.Contains( '?' ) )
+			{
+				// Use the source asset path so compiled-only assets also match their source extension.
+				var path = (asset?.Path ?? file.Name).Replace( '\\', '/' );
+				search = search.Replace( '\\', '/' );
+				var name = search.Contains( '/' ) ? path : Path.GetFileName( path );
+				matches = name.WildcardMatch( search );
+			}
+			else if ( asset != null && !hasExtension )
+			{
+				var assetName = AssetLocations.IncludePathNames ? asset.RelativePath : asset.Name;
+				matches = assetName.Contains( search, StringComparison.OrdinalIgnoreCase )
+					|| asset.AssetType.FriendlyName.Contains( search, StringComparison.OrdinalIgnoreCase )
+					|| asset.Tags.Any( x => x.Contains( search, StringComparison.OrdinalIgnoreCase ) );
+			}
+			else
+			{
+				matches = file.Name.Contains( search, StringComparison.OrdinalIgnoreCase );
 			}
 
-			return false;
+			if ( matches == negated )
+				return true;
 		}
-		else
-		{
-			// Loose file filtering
-			foreach ( var splitValue in splitValues )
-			{
-				var search = splitValue;
-				var negated = false;
-				if ( splitValue.StartsWith( "-" ) )
-				{
-					search = splitValue.Substring( 1 );
-					negated = true;
-				}
 
-				if ( !negated )
-				{
-					if ( !file.Name.Contains( search, StringComparison.OrdinalIgnoreCase ) )
-					{
-						return true;
-					}
-				}
-				else
-				{
-					if ( file.Name.Contains( search, StringComparison.OrdinalIgnoreCase ) )
-					{
-						return true;
-					}
-				}
-			}
-
-			return false;
-		}
+		return false;
 	}
 
 	private bool FilterAssetType( FileInfo file )

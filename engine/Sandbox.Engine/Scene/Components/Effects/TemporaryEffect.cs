@@ -59,13 +59,30 @@ public sealed class TemporaryEffect : Component, Component.ExecuteInEditor
 
 	bool HasActiveEffects()
 	{
-		foreach ( var pe in GetComponentsInChildren<ITemporaryEffect>() )
-		{
-			if ( pe.IsActive )
-				return true;
-		}
+		// Walks the hierarchy without allocating
+		return Check( GameObject );
 
-		return false;
+		static bool Check( GameObject go )
+		{
+			if ( !go.Enabled ) return false;
+
+			// Indexed, because foreaching GetAll() boxes an enumerator per object per frame
+			var components = go.Components;
+			for ( int i = 0; i < components.Count; i++ )
+			{
+				var component = components[i];
+				if ( component is ITemporaryEffect te && component.Active && te.IsActive )
+					return true;
+			}
+
+			for ( int i = 0; i < go.Children.Count; i++ )
+			{
+				var child = go.Children[i];
+				if ( child.IsValid() && Check( child ) ) return true;
+			}
+
+			return false;
+		}
 	}
 
 	public override void OnParentDestroy()
@@ -89,7 +106,7 @@ public sealed class TemporaryEffect : Component, Component.ExecuteInEditor
 	/// </summary>
 	public static void CreateOrphans( GameObject gameObject, bool disableLooping = true )
 	{
-		foreach ( var te in gameObject.GetComponentsInChildren<TemporaryEffect>().ToArray() )
+		foreach ( var te in gameObject.GetComponentsInChildren<TemporaryEffect>() )
 		{
 			te.GameObject.SetParent( null, true );
 

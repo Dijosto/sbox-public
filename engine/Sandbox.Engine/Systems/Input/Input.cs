@@ -6,6 +6,7 @@ namespace Sandbox;
 /// <summary>
 /// Allows querying of player button presses and other inputs.
 /// </summary>
+[Expose]
 public static partial class Input
 {
 	/// <summary>
@@ -32,7 +33,7 @@ public static partial class Input
 	}
 
 	/// <summary>
-	/// True if the mouse cursor is visible (using UI etc)
+	/// Whether input is in cursor mode. Can be true even when <see cref="Mouse.CursorType"/> is <c>"none"</c>.
 	/// </summary>
 	public static bool MouseCursorVisible
 	{
@@ -81,24 +82,10 @@ public static partial class Input
 	}
 
 	/// <summary>
-	/// Called multiple times between ticks.
+	/// Computes AnalogLook from mouse delta and user preferences.
 	/// </summary>
-	internal static void Process()
+	private static void ComputeAnalogLook()
 	{
-		// Reset suppression flag
-		Suppressed = false;
-
-		// Flip all controller input contexts once a frame
-		foreach ( var controller in Controller.All )
-		{
-			controller.InputContext?.Flip();
-		}
-
-		//
-		// Setup
-		//
-		CurrentContext.MouseCursorVisible = InputRouter.MouseCursorVisible;
-
 		// this is all kind of how it did it in CInputService::HandleAnalogValueChange
 		var mouseSensitivity = Preferences.Sensitivity * 10.0f;
 		var halfDim = MathF.Max( Screen.Width, Screen.Height ) * 0.5f;
@@ -107,19 +94,20 @@ public static partial class Input
 		AnalogLook = new( (MouseDelta.y / halfDim) * mouseSensitivity, (-MouseDelta.x / halfDim) * mouseSensitivity, 0 );
 
 		if ( MouseCursorVisible )
-		{
 			AnalogLook = default;
-		}
-
-		Actions = CurrentContext.ActionsCurrent;
-		LastActions = CurrentContext.ActionsPrevious;
 
 		if ( Preferences.InvertMousePitch )
 			AnalogLook = AnalogLook.WithPitch( -AnalogLook.pitch );
 
 		if ( Preferences.InvertMouseYaw )
 			AnalogLook = AnalogLook.WithYaw( -AnalogLook.yaw );
+	}
 
+	/// <summary>
+	/// Computes AnalogMove from movement action bindings.
+	/// </summary>
+	private static void ComputeAnalogMove()
+	{
 		// garry: do we need to smooth these or something?
 		// They were smoothed in the old input code, but I think
 		// we leave them as raw as possible now and let games decide
@@ -128,7 +116,29 @@ public static partial class Input
 		if ( Down( "backward", false ) ) AnalogMove += Vector3.Backward;
 		if ( Down( "left", false ) ) AnalogMove += Vector3.Left;
 		if ( Down( "right", false ) ) AnalogMove += Vector3.Right;
+	}
 
+	/// <summary>
+	/// Called multiple times between ticks.
+	/// </summary>
+	internal static void Process()
+	{
+		// Reset suppression flag
+		Suppressed = false;
+
+		// Flip all controller input contexts
+		foreach ( var controller in Controller.All )
+		{
+			controller.InputContext?.Flip();
+		}
+
+		CurrentContext.MouseCursorVisible = InputRouter.MouseCursorVisible;
+
+		// Compute analogs
+		ComputeAnalogLook();
+		ComputeAnalogMove();
+
+		// Overlay controller analogs
 		ProcessControllerInput();
 	}
 
@@ -144,6 +154,8 @@ public static partial class Input
 	/// </remarks>
 	internal static string GetButtonOrigin( InputAction action, bool ignoreController = false )
 	{
+		if ( Application.IsHeadless ) return action.KeyboardCode;
+
 		if ( UsingController )
 		{
 			return action.GamepadCode.ToString();
@@ -155,9 +167,9 @@ public static partial class Input
 		var collection = InputBinds.FindCollection( loadedGame );
 
 		var bind = collection.Get( action.Name, 0 );
-		if ( string.IsNullOrEmpty( bind ) ) return action.KeyboardCode;
+		if ( string.IsNullOrEmpty( bind ) ) bind = action.KeyboardCode;
 
-		return bind;
+		return GetLocalKeyName( bind );
 	}
 
 	/// <summary>
@@ -169,6 +181,8 @@ public static partial class Input
 	/// </summary>
 	public static string GetButtonOrigin( string name, bool ignoreController = false )
 	{
+		if ( Application.IsHeadless ) return name;
+
 		var action = InputActions?
 			.FirstOrDefault( x => string.Equals( x.Name, name, StringComparison.OrdinalIgnoreCase ) );
 
@@ -179,5 +193,15 @@ public static partial class Input
 		}
 
 		return GetButtonOrigin( action, ignoreController );
+	}
+
+	/// <summary>
+	/// Convert a button code to its user-facing keyname (our best guess at what's painted on the physical key cap)
+	/// </summary>
+	internal static string GetLocalKeyName( string key )
+	{
+		if ( Application.IsHeadless ) return key;
+		var buttonCode = Sandbox.Engine.KeyTranslation.StringToButtonCode( key );
+		return Sandbox.Engine.KeyTranslation.GetKeyDisplayName( buttonCode );
 	}
 }

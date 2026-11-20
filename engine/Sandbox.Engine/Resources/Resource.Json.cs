@@ -1,4 +1,5 @@
-﻿using Sandbox.Resources;
+﻿using Sandbox.Engine;
+using Sandbox.Resources;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
@@ -35,31 +36,37 @@ public partial class Resource
 	}
 
 	/// <summary>
-	/// Load a resource from a path with improved deferred loading support
+	/// Load a resource with improved deferred loading support
 	/// </summary>
-	internal static Resource LoadFromPath( Type typeToConvert, string path )
+	internal static Resource Load( Type targetType, ResourceId id )
 	{
-		if ( typeToConvert.IsAssignableTo( typeof( GameResource ) ) )
+		if ( Game.Resources.TryLoadUncompiledResource( targetType, id, FileSystem.Mounted, out var uncompiled ) )
 		{
-			//
-			// GameResource: Fetch it from the cache, or setup a deferred load
-			//
+			return uncompiled;
+		}
 
-			if ( !path.EndsWith( "_c" ) ) path += "_c";
-
-			// at this point the type may be a common base class
-			// but we want to make sure we're loading this resource as the type it ACTUALLY is
-			var extension = System.IO.Path.GetExtension( path );
-			if ( Game.Resources.TryGetType( extension, out var resourceAttribute ) )
+		if ( targetType.IsAssignableTo( typeof( GameResource ) ) )
+		{
+			if ( !string.IsNullOrEmpty( id.Path ) )
 			{
-				typeToConvert = resourceAttribute.TargetType;
+				string path = id.Path;
+				if ( !path.EndsWith( "_c" ) ) path += "_c";
+
+				// at this point the type may be a common base class
+				// but we want to make sure we're loading this resource as the type it ACTUALLY is
+				var extension = System.IO.Path.GetExtension( path );
+				if ( Game.Resources.TryGetType( extension, out var resourceAttribute ) )
+				{
+					targetType = resourceAttribute.TargetType;
+				}
 			}
 
-			return GameResource.GetPromise( typeToConvert, path );
+			// GameResource: Fetch it from the cache, or setup a deferred load
+			return GameResource.GetPromise( targetType, id );
 		}
 
 		// For native resource types, use direct loading
-		return Load( typeToConvert, path );
+		return LoadNative( targetType, id );
 	}
 
 	/// <summary>
@@ -68,24 +75,31 @@ public partial class Resource
 	/// </summary>
 	internal static Resource LoadJsonReference( Type targetType, ref Utf8JsonReader reader )
 	{
-		// Just a path?
 		if ( reader.TokenType == JsonTokenType.String )
 		{
-			return LoadFromPath( targetType, reader.GetString() );
+			// legacy: just a path
+			return Load( targetType, reader.GetString() );
 		}
 
-		// from an object (embedded resource)
-		if ( reader.TokenType == JsonTokenType.StartObject )
+		using var doc = JsonDocument.ParseValue( ref reader );
+		var root = doc.RootElement;
+
+		if ( root.ValueKind != JsonValueKind.Object )
+			return default;
+
+		//
+		// Embedded resource
+		//
+		if ( root.TryGetProperty( "$compiler", out var _ ) )
 		{
 			EmbeddedResource serializedResource;
-
 			try
 			{
-				serializedResource = JsonSerializer.Deserialize<EmbeddedResource>( ref reader );
+				serializedResource = root.Deserialize<EmbeddedResource>();
 			}
 			catch ( System.Exception e )
 			{
-				Log.Warning( e, $"Couldn't deserialize resource data for {targetType.Name}" );
+				Log.Warning( e, $"Couldn't deserialize embedded resource data for {targetType.Name}" );
 				return default;
 			}
 
@@ -94,7 +108,7 @@ public partial class Resource
 			//
 			if ( !string.IsNullOrWhiteSpace( serializedResource.CompiledPath ) )
 			{
-				var resource = LoadFromPath( targetType, serializedResource.CompiledPath );
+				var resource = Load( targetType, serializedResource.CompiledPath );
 
 				// Store embedded resource data if the resource supports it
 				if ( resource is not null )
@@ -116,7 +130,7 @@ public partial class Resource
 				//
 				if ( !string.IsNullOrEmpty( serializedResource.TypeName ) )
 				{
-					var type = Game.TypeLibrary.GetType( serializedResource.TypeName );
+					var type = GlobalContext.Current.TypeLibrary.GetType( serializedResource.TypeName );
 					if ( type is not null )
 					{
 						targetType = type.TargetType;
@@ -137,8 +151,23 @@ public partial class Resource
 			return ResourceGenerator.CreateResource( serializedResource, options, targetType );
 		}
 
-		// not found, null, empty, unhandled
-		return default;
+		//
+		// Resource reference, either by path or by guid
+		//
+
+		Guid? guid = null;
+		if ( root.TryGetProperty( "Id", out var idElement ) && idElement.TryGetGuid( out var id ) && id != default )
+		{
+			guid = id;
+		}
+
+		string path = null;
+		if ( root.TryGetProperty( "Path", out var pathElement ) )
+		{
+			path = pathElement.GetString();
+		}
+
+		return Load( targetType, new ResourceId { Guid = guid, Path = path } );
 	}
 
 	/// <summary>
@@ -147,7 +176,7 @@ public partial class Resource
 	/// </summary>
 	internal virtual void WriteJsonReference( Utf8JsonWriter writer )
 	{
-		// if we have an embedded resource, write that instead of the path
+		// if we have an embedded resource, write that instead of the id
 		if ( EmbeddedResource.HasValue )
 		{
 			//
@@ -162,7 +191,17 @@ public partial class Resource
 			return;
 		}
 
-		// default write ResourcePath
-		writer.WriteStringValue( ResourcePath );
+		if ( Guid == default )
+		{
+			// no known guid, just write the path
+			writer.WriteStringValue( ResourcePath );
+			return;
+		}
+
+		writer.WriteStartObject();
+		writer.WriteString( "Id", Guid );
+		writer.WriteString( "Path", ResourcePath );
+		// might be a good idea to store type?
+		writer.WriteEndObject();
 	}
 }

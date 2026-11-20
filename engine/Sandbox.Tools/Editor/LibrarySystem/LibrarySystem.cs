@@ -84,12 +84,15 @@ public static class LibrarySystem
 				IAssetSystem.UpdateMods();
 			}
 
-			ResourceLoader.LoadAllGameResource( FileSystem.Mounted );
+			await ResourceLoader.LoadAllGameResourceAsync( FileSystem.Mounted, token );
 		}
 
 		// install it
 		await PackageManager.InstallAsync( new PackageLoadOptions( project.Project.Package.FullIdent, "local", token ) );
 		await PackageManager.InstallAsync( new PackageLoadOptions( project.Project.Package.FullIdent, "gamemenu", token ) );
+
+		// open game/addon compilers were made before this library existed
+		Project.UpdateLibraryReferences();
 
 		// update the sln with the new projects
 		await Project.GenerateSolution();
@@ -146,7 +149,7 @@ public static class LibrarySystem
 	[ConCmd( "library_install", ConVarFlags.Protected )]
 	internal static void InstallLibrary( string name )
 	{
-		if ( !Package.TryParseIdent( name, out var ident ) )
+		if ( !Package.TryParseIdentParts( name, out var ident ) )
 		{
 			Log.Warning( "Invalid package ident" );
 			return;
@@ -157,7 +160,7 @@ public static class LibrarySystem
 	}
 
 	/// <summary>
-	/// Install a library from a package. This will download the package and install it in the project's Library folder.
+	/// Uses a registered library project or installs the requested published revision into the project's Libraries folder.
 	/// </summary>
 	public static async Task<bool> Install( string ident, long versionId = -1, CancellationToken token = default )
 	{
@@ -166,15 +169,32 @@ public static class LibrarySystem
 		// something like using( FileSystem.DeferChanges() ), but globally
 		//
 
-		using var progress = Application.Editor.ProgressSection();
-		progress.Title = "Installing Package";
-
 		var package = await Package.FetchAsync( ident, false );
 		if ( package is null )
 		{
 			Log.Warning( "Failed to install library, package not found" );
 			return false;
 		}
+
+		if ( package is LocalPackage local )
+		{
+			if ( local.TypeName != "library" )
+			{
+				Log.Warning( $"'{local.FullIdent}' is registered as a {local.TypeName} project." );
+				return false;
+			}
+
+			// The library manager can explicitly update a revision it installed in this project's Libraries folder.
+			// Every other registered library is the user's working project.
+			if ( versionId <= 0 || !_all.Any( x => x.Project == local.Project && x.IsPackageInstall ) )
+			{
+				await PackageManager.InstallAsync( new PackageLoadOptions( local.FullIdent, "local", token ) );
+				return true;
+			}
+		}
+
+		using var progress = Application.Editor.ProgressSection();
+		progress.Title = "Installing Package";
 
 		// no version specified - then use the current live version
 		if ( versionId <= 0 )
@@ -183,7 +203,7 @@ public static class LibrarySystem
 		}
 
 		// get the version info 
-		var version = (await Package.FetchVersions( ident )).Where( x => x.VersionId == versionId ).FirstOrDefault();
+		var version = (await Package.FetchVersions( ident, token ))?.FirstOrDefault( x => x.VersionId == versionId );
 		if ( version == null )
 		{
 			Log.Warning( "Failed to install library, version wasn't found" );
@@ -282,6 +302,11 @@ public class LibraryProject
 {
 	public Version Version { get; set; }
 
+	/// <summary>
+	/// Whether the library manager owns this versioned installation and can update it to another published revision.
+	/// </summary>
+	public bool IsPackageInstall { get; private set; }
+
 	public Project Project { get; }
 
 	internal LibraryProject( Project project )
@@ -292,14 +317,14 @@ public class LibraryProject
 		// add the content path
 		if ( project.HasAssetsPath() )
 		{
-			var assetPath = project.GetAssetsPath();
+			var assets = project.AssetsFileSystem;
 
 			// Add to our c# content search path
-			FileSystem.Content.CreateAndMount( assetPath );
-			FileSystem.Mounted.CreateAndMount( assetPath );
+			FileSystem.Content.Mount( assets );
+			FileSystem.Mounted.Mount( assets );
 
 			// make content available to the game
-			EngineFileSystem.LibraryContent.CreateAndMount( assetPath );
+			EngineFileSystem.LibraryContent.Mount( assets );
 
 			// Add to the c++ filesystem search path
 			NativeEngine.FullFileSystem.AddProjectPath( project.Config.FullIdent, project.GetAssetsPath() );
@@ -308,7 +333,7 @@ public class LibraryProject
 		if ( project.HasCodePath() )
 		{
 			// make .scss etc available to the game
-			EngineFileSystem.LibraryContent.CreateAndMount( project.GetCodePath() );
+			EngineFileSystem.LibraryContent.Mount( project.CodeFileSystem );
 		}
 	}
 
@@ -318,6 +343,7 @@ public class LibraryProject
 	internal void ReadVersionFromFile()
 	{
 		Version = new Version( 1, 1, 1 );
+		IsPackageInstall = false;
 
 		var versionInfo = System.IO.Path.Combine( Project.GetRootPath(), ".version" );
 		if ( !System.IO.File.Exists( versionInfo ) ) return;
@@ -327,6 +353,7 @@ public class LibraryProject
 		if ( Version.TryParse( versionText.Trim(), out var result ) )
 		{
 			Version = result;
+			IsPackageInstall = string.Equals( Project.RootDirectory.Name, Project.Config.FullIdent, StringComparison.OrdinalIgnoreCase );
 		}
 	}
 

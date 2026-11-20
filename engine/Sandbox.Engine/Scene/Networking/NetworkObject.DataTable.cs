@@ -21,7 +21,7 @@ internal sealed partial class NetworkObject
 	void CreateDataTable()
 	{
 		dataTable?.Dispose();
-		dataTable = new();
+		dataTable = new( this );
 
 		RegisterPropertiesRecursive( GameObject );
 	}
@@ -44,14 +44,26 @@ internal sealed partial class NetworkObject
 			}
 		}
 
-		foreach ( var child in go.Children.Where( child => child.NetworkMode == NetworkMode.Snapshot ) )
+		foreach ( var child in go.Children )
 		{
+			if ( child.NetworkMode != NetworkMode.Snapshot ) continue;
 			// Conna: pass false here so that we don't add properties from child GameObjects. We only
 			// want to add properties from components on child GameObjects. This is because we don't
 			// want to add potentially hundreds of entries for OwnerTransfer, etc.
 			RegisterPropertiesRecursive( child, false );
 		}
+
+		if ( go != GameObject )
+			return;
+
+		RefreshKeepsAwake();
+
+		// Polled entries need a pending object even if they haven't reported a change.
+		if ( dataTable.HasPollEntries )
+			MarkDirty();
 	}
+
+	private Func<Connection, bool> _hasControlCondition;
 
 	internal void RegisterProperties( object instance, Guid guid )
 	{
@@ -61,21 +73,23 @@ internal sealed partial class NetworkObject
 		foreach ( var propertyAndAttribute in ReflectionQueryCache.SyncProperties( type ) )
 		{
 			var isHostSync = propertyAndAttribute.Attribute.Flags.HasFlag( SyncFlags.FromHost );
+#pragma warning disable CS0618 // Existing games still rely on Query polling.
 			var isQuery = propertyAndAttribute.Attribute.Flags.HasFlag( SyncFlags.Query );
+#pragma warning restore CS0618
 
 			try
 			{
-				var originType = propertyAndAttribute.Property.DeclaringType ?? type;
-				var identity = GetPropertySlot( $"{originType.FullName}.{propertyAndAttribute.Property.Name}".FastHash(), guid );
+				var identity = GetPropertySlot( propertyAndAttribute.NameHash, guid );
 
 				var entry = new NetworkTable.Entry
 				{
 					TargetType = propertyAndAttribute.Property.PropertyType,
-					ControlCondition = c => isHostSync ? c.IsHost : HasControl( c ),
+					ControlCondition = isHostSync ? static c => c.IsHost : _hasControlCondition ??= HasControl,
 					GetValue = () => propertyAndAttribute.Property.GetValue( instance ),
 					SetValue = ( v ) => propertyAndAttribute.Property?.SetValue( instance, v ),
+					Typed = NetworkTable.TypedAccess.Create( instance, propertyAndAttribute.Property ),
 					NeedsQuery = isQuery,
-					DebugName = $"{originType.Name}.{propertyAndAttribute.Property.Name}"
+					DebugName = propertyAndAttribute.DebugName
 				};
 
 				dataTable.Register( identity, entry );
@@ -126,12 +140,12 @@ internal sealed partial class NetworkObject
 	/// <summary>
 	/// Read the network table data.
 	/// </summary>
-	private void ReadDataTable( byte[] data, NetworkTable.ReadFilter filter = null )
+	private void ReadDataTable( byte[] data, NetworkTable.ReadFilter filter = null, Connection source = null )
 	{
 		if ( data is null ) return;
 
 		var reader = ByteStream.CreateReader( data );
-		dataTable.Read( ref reader, filter );
+		dataTable.Read( ref reader, filter, source );
 		reader.Dispose();
 	}
 }

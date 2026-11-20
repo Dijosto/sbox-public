@@ -86,13 +86,57 @@ public sealed partial class EnvmapProbe : Component, Component.ExecuteInEditor, 
 		}
 	}
 
-	[Space]
-	[Property, MakeDirty] public SceneCubemap.ProjectionMode Projection { get; set; }
-	[Property, MakeDirty] public Color TintColor { get; set; } = Color.White;
-	[Property, MakeDirty] public BBox Bounds { get; set; } = BBox.FromPositionAndSize( 0, 1024 );
+	[Property, Space]
+	public ProjectionMode Projection
+	{
+		get;
+		set
+		{
+			if ( field == value ) return;
+			field = value;
 
+			UpdateSceneObject();
+		}
 
-	[Property, Range( -32.0f, 32.0f ), MakeDirty] public float Feathering { get; set; } = 8.0f;
+	}
+	[Property]
+	public Color TintColor
+	{
+		get;
+		set
+		{
+			if ( field == value ) return;
+			field = value;
+
+			UpdateSceneObject();
+		}
+	} = Color.White;
+
+	[Property]
+	public BBox Bounds
+	{
+		get;
+		set
+		{
+			if ( field == value ) return;
+			field = value;
+
+			UpdateSceneObject();
+		}
+	} = BBox.FromPositionAndSize( 0, 1024 );
+
+	[Property, Range( -32.0f, 32.0f )]
+	public float Feathering
+	{
+		get;
+		set
+		{
+			if ( field == value ) return;
+			field = value;
+
+			UpdateSceneObject();
+		}
+	} = 8.0f;
 
 	/// <summary>
 	/// Gets or sets the priority level for the object.
@@ -117,9 +161,19 @@ public sealed partial class EnvmapProbe : Component, Component.ExecuteInEditor, 
 	/// <summary>
 	/// If this is set, the EnvmapProbe will use a custom cubemap texture instead of rendering dynamically
 	/// </summary>
-	[Property, MakeDirty]
+	[Property]
 	[ShowIf( nameof( Mode ), EnvmapProbeMode.CustomTexture )]
-	public Texture Texture { get; set; }
+	public Texture Texture
+	{
+		get;
+		set
+		{
+			if ( field == value ) return;
+			field = value;
+
+			UpdateSceneObject();
+		}
+	}
 
 	/// <summary>
 	/// The texture that was baked for this envmap probe
@@ -139,22 +193,62 @@ public sealed partial class EnvmapProbe : Component, Component.ExecuteInEditor, 
 	/// </summary>
 	[Header( "Rendering" )]
 	[HideIf( nameof( Mode ), EnvmapProbeMode.CustomTexture )]
-	[Property, MakeDirty]
+	[Property]
 	[EnumButtonGroup]
-	public CubemapResolution Resolution { get; set; } = CubemapResolution.Small;
+	public CubemapResolution Resolution
+	{
+		get;
+		set
+		{
+			if ( field == value ) return;
+			field = value;
+
+			UpdateSceneObject();
+		}
+	} = CubemapResolution.Small;
 
 	[HideIf( nameof( Mode ), EnvmapProbeMode.CustomTexture )]
-	[Property, MakeDirty]
-	public float ZNear { get; set; } = 16;
+	[Property]
+	public float ZNear
+	{
+		get;
+		set
+		{
+			if ( field == value ) return;
+			field = value;
+
+			UpdateSceneObject();
+		}
+	} = 16;
 
 	[HideIf( nameof( Mode ), EnvmapProbeMode.CustomTexture )]
-	[Property, MakeDirty]
-	public float ZFar { get; set; } = 4096;
+	[Property]
+	public float ZFar
+	{
+		get;
+		set
+		{
+			if ( field == value ) return;
+			field = value;
+
+			UpdateSceneObject();
+		}
+	} = 4096;
 
 	[Header( "Realtime Updates" )]
 	[ShowIf( nameof( Mode ), EnvmapProbeMode.Realtime )]
-	[Property, MakeDirty]
-	public CubemapDynamicUpdate UpdateStrategy { get; set; }
+	[Property]
+	public CubemapDynamicUpdate UpdateStrategy
+	{
+		get;
+		set
+		{
+			if ( field == value ) return;
+			field = value;
+
+			UpdateSceneObject();
+		}
+	}
 
 	/// <summary>
 	/// Only update dynamically if we're this close to it
@@ -179,8 +273,25 @@ public sealed partial class EnvmapProbe : Component, Component.ExecuteInEditor, 
 	/// </summary>
 	[HideIf( nameof( Mode ), EnvmapProbeMode.CustomTexture )]
 	[ShowIf( nameof( UpdateStrategy ), CubemapDynamicUpdate.OnEnabled )]
-	[Property, MakeDirty]
-	public bool MultiBounce { get; set; } = false;
+	[Property]
+	public bool MultiBounce
+	{
+		get;
+		set
+		{
+			if ( field == value ) return;
+			field = value;
+
+			UpdateSceneObject();
+		}
+	} = false;
+
+	/// <summary>
+	/// Objects with any of these tags will be excluded when rendering this cubemap.
+	/// </summary>
+	[HideIf( nameof( Mode ), EnvmapProbeMode.CustomTexture )]
+	[Property]
+	public TagSet RenderExcludeTags { get; set; } = new();
 
 	protected override void OnEnabled()
 	{
@@ -199,6 +310,8 @@ public sealed partial class EnvmapProbe : Component, Component.ExecuteInEditor, 
 	{
 		Transform.OnTransformChanged -= OnTransformChanged;
 
+		Dirty = false;
+
 		_sceneObject?.Delete();
 		_sceneObject = null;
 
@@ -208,7 +321,7 @@ public sealed partial class EnvmapProbe : Component, Component.ExecuteInEditor, 
 
 	protected override async Task OnLoad( LoadingContext context )
 	{
-		if ( Application.IsHeadless )
+		if ( !Graphics.IsAvailable )
 			return;
 
 		if ( Mode == EnvmapProbeMode.Realtime && Active && _dynamicTexture is null )
@@ -225,11 +338,6 @@ public sealed partial class EnvmapProbe : Component, Component.ExecuteInEditor, 
 				await Task.DelayRealtime( 10 );
 			}
 		}
-	}
-
-	protected override void OnDirty()
-	{
-		UpdateSceneObject();
 	}
 
 	void OnTransformChanged()
@@ -389,10 +497,10 @@ public sealed partial class EnvmapProbe : Component, Component.ExecuteInEditor, 
 
 	internal void RenderCubemap()
 	{
-		RenderCubemap( _dynamicTexture, CubemapRendering.GGXFilterType.Fast );
+		RenderCubemap( _dynamicTexture, CubemapRendering.GGXFilterType.Fast, RenderExcludeTags );
 	}
 
-	internal void RenderCubemap( Texture target, CubemapRendering.GGXFilterType filterType )
+	internal void RenderCubemap( Texture target, CubemapRendering.GGXFilterType filterType, TagSet excludeTags = null )
 	{
 		if ( target is null )
 			return;
@@ -401,7 +509,7 @@ public sealed partial class EnvmapProbe : Component, Component.ExecuteInEditor, 
 
 		if ( target.UAVAccess )
 		{
-			CubemapRendering.Render( Scene.SceneWorld, target, WorldTransform.WithScale( 1 ), ZNear.Clamp( 1, ZFar ), ZFar.Clamp( ZNear, 1024 * 16 ), filterType );
+			CubemapRendering.Render( Scene.SceneWorld, target, WorldTransform.WithScale( 1 ), ZNear.Clamp( 1, ZFar ), ZFar.Clamp( ZNear, 1024 * 16 ), filterType, excludeTags );
 		}
 
 		// Just finished rendering, signal to component that we're done

@@ -51,7 +51,7 @@ public class ControlSheet : GridLayout, IControlSheet
 		{
 			if ( target is GameObject go ) return go.Id;
 			if ( target is Component cmp ) return cmp.Id;
-			if ( target is Resource rc ) return new Guid( rc.ResourceId, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 );
+			if ( target is Resource rc ) return new Guid( rc.ResourcePath.FastHash(), 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 );
 		}
 
 		return FindGuid( so.ParentProperty?.Parent );
@@ -124,7 +124,7 @@ public class ControlSheet : GridLayout, IControlSheet
 		}
 	}
 
-	public void AddProperty<T>( Expression<Func<T>> property )
+	public ControlWidget AddProperty<T>( Expression<Func<T>> property )
 	{
 		if ( property.Body is not MemberExpression member || member.Member is not PropertyInfo propertyInfo )
 			throw new ArgumentException( "Expression must target a property.", nameof( property ) );
@@ -137,10 +137,11 @@ public class ControlSheet : GridLayout, IControlSheet
 
 		var row = ControlSheetRow.Create( new ReflectionSerializedProperty<T>( propertyInfo, getter, setter ), IncludePropertyNames );
 		if ( !row.IsValid() )
-			return;
+			return null;
 
 		SetColumnStretch( 0 );
 		AddCell( 0, rows++, row );
+		return row.ControlWidget;
 	}
 
 	private void AddProperty<T>( T target, string name )

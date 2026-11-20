@@ -1,5 +1,6 @@
 ﻿using Sandbox.Internal;
 using Sandbox.Network;
+using System.IO;
 using System.Threading;
 
 namespace Sandbox;
@@ -47,17 +48,36 @@ internal class LargeNetworkFiles
 	}
 
 	/// <summary>
-	/// Add a file to be networked.
+	/// Add a file from the mounted filesystem used to serve download requests.
 	/// </summary>
-	public bool AddFile( string fileName )
+	public bool AddFile( BaseFileSystem mounted, string fileName )
 	{
-		if ( !EngineFileSystem.Mounted.FileExists( fileName ) )
+		Stream stream;
+		try
+		{
+			stream = mounted.OpenRead( fileName );
+		}
+		catch ( FileNotFoundException )
+		{
 			return false;
+		}
+		catch ( DirectoryNotFoundException )
+		{
+			return false;
+		}
 
-		var crc = EngineFileSystem.Mounted.GetCrc( fileName );
-		var size = EngineFileSystem.Mounted.FileSize( fileName );
-		var normalizedFileName = NormalizeFileName( fileName );
-		StringTable.Set( normalizedFileName, new LargeFileInfo( size, crc ) );
+		// Redirect filesystems can return null for an unmapped path.
+		if ( stream is null ) return false;
+		using ( stream )
+		{
+			var size = stream.Length;
+			var crc = Sandbox.Utility.Crc64.FromStream( stream );
+			var normalizedFileName = NormalizeFileName( fileName );
+			StringTable.Set( normalizedFileName, new LargeFileInfo( size, crc ) );
+
+			if ( AssetDownloadCache.DebugNetworkFiles )
+				Log.Info( $"Adding LARGE File {fileName} ({size.FormatBytes()})" );
+		}
 
 		return true;
 	}
@@ -153,7 +173,8 @@ internal class LargeNetworkFiles
 				Log.Info( $"Download file {file}" );
 			}
 
-			system.UpdateLoading( $"Download file ({currentCount + 1}/{downloadQueue.Count}) {file}" );
+			LoadingScreen.Title = $"Downloading Files ({currentCount + 1}/{downloadQueue.Count})";
+			LoadingScreen.Subtitle = file;
 
 			if ( RedirectFileSystem.FileExists( file.NormalizeFilename( true ) ) )
 			{
@@ -189,9 +210,10 @@ internal class LargeNetworkFiles
 			currentCount++;
 		}
 
-		downloadQueue.Clear();
+		LoadingScreen.Subtitle = null;
+		Log.Info( $"Download Complete ({currentCount} files total) ({sw.Elapsed.TotalSeconds:0.00}s)" );
 
-		Log.Info( $"Download Complete ({downloadQueue.Count()} files total) ({sw.Elapsed.TotalSeconds:0.00}s)" );
+		downloadQueue.Clear();
 	}
 
 	internal void NetworkInitialize( GameNetworkSystem instance )
@@ -201,14 +223,24 @@ internal class LargeNetworkFiles
 
 	async Task OnRequestNetworkFile( RequestFile file, Connection connection, Guid msgGuid )
 	{
-		if ( !EngineFileSystem.Mounted.FileExists( file.filename ) )
+		// The advertised table is the download allowlist. A guessed path must not expose
+		// other mounted files, including server-only scripts excluded from replication.
+		if ( connection.System?.IsHost != true || !AssetDownloadCache.IsLegalDownload( file.filename )
+			|| !StringTable.Entries.TryGetValue( NormalizeFileName( file.filename ), out var entry ) )
 		{
-			Log.Warning( $"Client ({connection.Name}) requested missing file: {file.filename}" );
+			Log.Warning( $"Client ({connection.Name}) requested an unadvertised file: {file.filename}" );
 			connection.SendResponse( msgGuid, Array.Empty<byte>() );
 			return;
 		}
 
-		var contents = await EngineFileSystem.Mounted.ReadAllBytesAsync( file.filename );
+		if ( !EngineFileSystem.Mounted.FileExists( entry.Name ) )
+		{
+			Log.Warning( $"Client ({connection.Name}) requested missing file: {entry.Name}" );
+			connection.SendResponse( msgGuid, Array.Empty<byte>() );
+			return;
+		}
+
+		var contents = await EngineFileSystem.Mounted.ReadAllBytesAsync( entry.Name );
 
 		connection.SendResponse( msgGuid, contents );
 	}

@@ -26,6 +26,41 @@ static class AssetThumbnail
 		return GetAssetThumb( asset )?.ptr ?? default;
 	}
 
+	/// <summary>
+	/// Get an asset thumb. Will generate it if not immediately available, but will wait for it to be generated before returning.
+	/// </summary>
+	internal static async Task<Pixmap> GetAssetThumbAsync( Asset asset )
+	{
+		ArgumentNullException.ThrowIfNull( asset, nameof( asset ) );
+
+		if ( asset.HasCachedThumbnail )
+		{
+			return asset.CachedThumbnail;
+		}
+
+		var fullPath = GetThumbnailFile( asset, false );
+		if ( System.IO.File.Exists( fullPath ) )
+		{
+			var pix = Pixmap.FromFile( fullPath );
+			asset.CachedThumbnail = pix;
+			return asset.CachedThumbnail;
+		}
+
+		// start an async render
+		QueueThumbBuild( asset );
+
+		// wait for it to come out of the list
+		while ( RenderQueue.Contains( asset ) || RenderingList.Contains( asset ) )
+		{
+			await Task.Delay( 100 );
+		}
+
+		// If it was null still
+		asset.CachedThumbnail ??= asset.AssetType.Icon256;
+
+		return asset.CachedThumbnail;
+	}
+
 	internal static Pixmap GetAssetThumb( Asset asset, bool generateIfNotInCache = true )
 	{
 		ArgumentNullException.ThrowIfNull( asset, nameof( asset ) );
@@ -151,17 +186,11 @@ static class AssetThumbnail
 		ThreadSafe.AssertIsMainThread();
 
 		//
-		// If it's a resource, let it generate itself the thumbnail!
+		// The type would rather show its icon than anything we could render, so
+		// leave the thumbnail unset and let the callers fall back to the icon
 		//
-		{
-			var resource = asset.LoadResource();
-			var bitmap = resource?.RenderThumbnail( new() { Width = 256, Height = 256 } );
-			if ( bitmap != null )
-			{
-				return Pixmap.FromBitmap( bitmap );
-			}
-		}
-
+		if ( asset.AssetType.PrefersIconThumbnail )
+			return null;
 
 		if ( asset.thumbnailOverride != null )
 		{
@@ -192,6 +221,16 @@ static class AssetThumbnail
 			catch ( System.Exception e )
 			{
 				Log.Warning( e, $"Exception when rendering thumb via {t.Method} ({e.Message})" );
+			}
+		}
+
+		// Keep editor overrides and custom previews ahead of the resource's default thumbnail.
+		{
+			var resource = asset.LoadResource();
+			using var bitmap = resource?.RenderThumbnail( new() { Width = 256, Height = 256 } );
+			if ( bitmap != null )
+			{
+				return Pixmap.FromBitmap( bitmap );
 			}
 		}
 

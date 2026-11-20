@@ -1,9 +1,12 @@
 ﻿using Sandbox.MovieMaker;
 using System.Collections.Immutable;
+using System.Diagnostics.CodeAnalysis;
 using System.IO;
 using System.Linq;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Text.RegularExpressions;
+using System.Threading.Tasks;
 
 namespace Editor.MovieMaker;
 
@@ -291,6 +294,7 @@ public sealed partial class Session
 		PlaybackFrame();
 
 		EditMode?.Frame();
+		Renderer.Frame();
 
 		if ( _applyNextFrame )
 		{
@@ -315,6 +319,8 @@ public sealed partial class Session
 
 	public void Save()
 	{
+		Resource.StateHasChanged( Project );
+
 		HasUnsavedChanges = false;
 
 		// If we're embedded, save the scene
@@ -336,6 +342,83 @@ public sealed partial class Session
 		{
 			asset.SaveToDisk( resource );
 		}
+	}
+
+	public sealed record CreateSequenceResult( MovieResource Resource, MovieTime StartTime = default );
+
+	public CreateSequenceResult CreateSequence( IReadOnlyList<TrackView> trackViews, MovieTimeRange timeRange )
+	{
+		var project = new MovieProject();
+
+		var minTime = MovieTime.MaxValue;
+		var maxTime = MovieTime.MinValue;
+
+		foreach ( var trackView in trackViews )
+		{
+			if ( trackView.Track is not IProjectBlockTrack blockTrack ) continue;
+			if ( blockTrack.Blocks is not { Count: > 0 } blocks ) continue;
+
+			foreach ( var block in blocks )
+			{
+				if ( block.TimeRange.Intersect( timeRange ) is not { } intersection ) continue;
+
+				minTime = MovieTime.Min( intersection.Start, minTime );
+				maxTime = MovieTime.Max( intersection.End, maxTime );
+			}
+		}
+
+		timeRange = timeRange.Clamp( (minTime, maxTime) );
+
+		foreach ( var trackView in trackViews )
+		{
+			if ( trackView.Track is not IProjectPropertyTrack propertyTrack ) continue; // TODO
+
+			if ( propertyTrack.Slice( timeRange ) is not { Count: > 0 } slice ) continue;
+
+			var trackCopy = (IProjectPropertyTrack)project.GetOrAddTrack( trackView.Track );
+
+			trackCopy.SetBlocks( [.. slice.Select( x => x.Shift( -timeRange.Start ) )] );
+		}
+
+		var resource = new MovieResource { EditorData = project.Serialize(), Compiled = project.Compile() };
+
+		return new CreateSequenceResult( resource, timeRange.Start );
+	}
+
+	public bool Delete( IReadOnlyList<TrackView> trackViews, MovieTimeRange timeRange, bool shiftTime, bool removeEmptyTracks )
+	{
+		var changed = false;
+
+		foreach ( var view in trackViews )
+		{
+			if ( view.Track is not IProjectPropertyTrack propertyTrack ) continue;
+
+			var trackChanged = shiftTime ? propertyTrack.Remove( timeRange ) : propertyTrack.Clear( timeRange );
+
+			if ( !trackChanged ) continue;
+
+			changed = true;
+
+			view.MarkValueChanged();
+		}
+
+		if ( !changed ) return false;
+
+		if ( !removeEmptyTracks )
+		{
+			ClipModified();
+
+			return true;
+		}
+
+		foreach ( var view in trackViews.Reverse() )
+		{
+			if ( view.IsEmpty ) view.Remove();
+		}
+
+		ClipModified();
+
+		return true;
 	}
 
 	public void Undo()
@@ -414,7 +497,7 @@ public sealed partial class Session
 		_ik.ShowContextMenu( ev );
 	}
 
-	public bool CanReferenceMovie( MovieResource? resource )
+	public bool CanReferenceMovie( [NotNullWhen( true )] MovieResource? resource )
 	{
 		if ( resource is null ) return false;
 
@@ -426,15 +509,21 @@ public sealed partial class Session
 
 		while ( refQueue.TryDequeue( out var next ) )
 		{
-			var refs = next.EditorData?["References"]?.Deserialize<ImmutableHashSet<string>>()
-				?? ImmutableHashSet<string>.Empty;
+			IReadOnlyList<MovieResource?> refs;
 
-			foreach ( var moviePath in refs )
+			try
 			{
-				if ( ResourceLibrary.Get<MovieResource>( moviePath ) is not { } reference )
-				{
-					continue;
-				}
+				refs = next.EditorData?["References"]?.Deserialize<IReadOnlyList<MovieResource?>>( EditorJsonOptions ) ?? [];
+			}
+			catch ( Exception ex )
+			{
+				Log.Warning( ex );
+				continue;
+			}
+
+			foreach ( var reference in refs )
+			{
+				if ( reference is null ) continue;
 
 				if ( references.Add( reference ) )
 				{
@@ -478,15 +567,142 @@ public sealed partial class Session
 		}
 	}
 
+	private void ImportMovieFromCapture( string fullPath, MovieTime time = default )
+	{
+		var dstPath = Path.Combine( "movies", "captures", Path.GetFileName( fullPath ) );
+
+		if ( ResourceLibrary.TryGet( dstPath, out MovieResource existing ) )
+		{
+			ImportMovie( existing, time );
+			return;
+		}
+
+		Task.Run( async () =>
+		{
+			var movie = await ImportMovieFromCaptureAsync( fullPath, dstPath );
+
+			if ( movie is null ) return;
+
+			await MainThread.Wait();
+
+			ImportMovie( movie, time );
+		} );
+	}
+
+	private static async Task<MovieResource?> ImportMovieFromCaptureAsync( string srcPath, string dstPath )
+	{
+		try
+		{
+			var assetPath = Path.Combine( Sandbox.Project.Current.GetAssetsPath(), dstPath );
+			var assetDir = Path.GetDirectoryName( assetPath )!;
+
+			Directory.CreateDirectory( assetDir );
+
+			var json = await File.ReadAllTextAsync( srcPath );
+			var node = Json.ParseToJsonObject( json );
+
+			// Don't bother if the movie is empty
+
+			if ( node[nameof( MovieResource.Compiled )] is null ) return null;
+
+			// Need to install cloud assets referenced by the movie
+
+			if ( node["__references"]?.Deserialize<string[]>() is { Length: > 0 } references )
+			{
+				Log.Info( $"Installing {references.Length} cloud references used by movie." );
+
+				await MainThread.Wait();
+				await Task.WhenAll( references.Select( Cloud.Load ) );
+			}
+
+			// Copy the .movie to Assets/ and register it
+
+			await File.WriteAllTextAsync( assetPath, json );
+			await MainThread.Wait();
+
+			var asset = AssetSystem.RegisterFile( assetPath );
+			if ( asset is null )
+			{
+				Log.Warning( $"Failed to register movie asset at '{assetPath}'." );
+				return null;
+			}
+
+			await asset.CompileIfNeededAsync();
+			await MainThread.Wait();
+
+			var resource = asset.LoadResource<MovieResource>();
+			if ( resource is null )
+			{
+				Log.Warning( $"Failed to load MovieResource from asset '{assetPath}'." );
+				return null;
+			}
+
+			await resource.WaitForLoadAsync();
+
+			return resource;
+		}
+		catch ( Exception ex )
+		{
+			Log.Warning( ex, "Exception when attempting to import a movie." );
+			return null;
+		}
+	}
+
+	private readonly record struct ImportMenuItem( string Path, Action Action );
+
+	private static Regex CaptureNameRegex { get; } = new( @"^(?:(?<game>[^.]+)\.)?(?:(?<map>[^.]+)\.)?(?<date>[0-9]{4}\.[0-9]{2}\.[0-9]{2})\.(?<time>[0-9]{2}\.[0-9]{2}\.[0-9]{2})(?:\.(?<index>[0-9]+))?\.movie$" );
+
+	private static string GetCapturePath( string name )
+	{
+		if ( CaptureNameRegex.Match( name ) is not { Success: true } match )
+		{
+			return name;
+		}
+
+		var path = $"{match.Groups["date"].Value} - {match.Groups["time"].Value}";
+
+		if ( match.Groups["map"].Success )
+		{
+			path = $"{match.Groups["map"].Value}/{path}";
+		}
+
+		if ( match.Groups["game"].Success )
+		{
+			path = $"{match.Groups["game"].Value}/{path}";
+		}
+
+		if ( match.Groups["index"].Success )
+		{
+			path = $"{path} - {match.Groups["index"].Value}";
+		}
+
+		return $"{path}.movie";
+	}
+
 	public void CreateImportMenu( Menu parent, MovieTime time = default )
 	{
-		var movies = ResourceLibrary.GetAll<MovieResource>().ToArray();
+		var allMovies = new List<ImportMenuItem>();
+
+		allMovies.AddRange( ResourceLibrary.GetAll<MovieResource>()
+			.Where( CanReferenceMovie )
+			.Select( x => new ImportMenuItem( $"Assets/{x.ResourcePath}", () => ImportMovie( x, time ) ) ) );
+
+		var captureDir = new DirectoryInfo( "movies" );
+
+		if ( captureDir.Exists )
+		{
+			allMovies.AddRange( captureDir.EnumerateFiles( "*.movie", SearchOption.AllDirectories )
+				.Select( x => new ImportMenuItem( $"In-Game Captures/{GetCapturePath( x.Name )}",
+					() => ImportMovieFromCapture( x.FullName, time ) ) ) );
+		}
+
+		if ( allMovies.Count == 0 ) return;
 
 		var importMenu = parent.AddMenu( "Import Movie", "sim_card_download" );
 
-		importMenu.AddOptions( movies.Where( CanReferenceMovie ),
-			x => $"{x.ResourcePath}:video_file",
-			x => ImportMovie( x, time ) );
+		importMenu.AddOptions( allMovies,
+			x => $"{x.Path}:video_file",
+			x => x.Action() );
 	}
 
 	public void SaveConfig()

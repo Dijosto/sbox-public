@@ -1,139 +1,105 @@
-﻿namespace Sandbox;
+namespace Sandbox;
 
 public static partial class Gizmo
 {
 	public sealed partial class GizmoControls
 	{
-		private static bool ArrowPoint( string name, Vector3 direction, float length, Color color, out float distance, ref bool pressed )
+		sealed class BoxDrag
 		{
-			distance = 0.0f;
-			var rotation = Rotation.LookAt( direction, Vector3.Up );
-			using var x = Scope( name, direction * length, rotation );
-			var worldBoxScale = Transform.UniformScale;
-			using var scaler = PushFixedScale();
-			length /= Transform.UniformScale;
-
-			const float sphereRadius = 1.3f;
-			const float hoverSphereRadius = sphereRadius * 1.25f;
-			float actualSphereRadius = IsHovered ? hoverSphereRadius : sphereRadius;
-
-			float arrowHeadRadius = sphereRadius * 0.9f;
-			float hoverArrowHeadRadius = arrowHeadRadius * 1.25f;
-			float actualArrowHeadRadius = IsHovered ? hoverArrowHeadRadius : arrowHeadRadius;
-			float actualArrowHeadLength = actualArrowHeadRadius * 2;
-
-			var db = Gizmo.Hitbox.DepthBias;
-			Gizmo.Hitbox.DepthBias = 0.01f;
-
-			Hitbox.Sphere( new Sphere( 0, hoverSphereRadius * Transform.UniformScale ) );
-
-			Vector3 arrowFrom = Vector3.Forward * -(actualArrowHeadLength + actualSphereRadius);
-			Vector3 arrowTo = Vector3.Forward * -actualSphereRadius;
-			Hitbox.Sphere( new Sphere( arrowFrom / 2, hoverArrowHeadRadius * Transform.UniformScale ) );
-
-			Gizmo.Hitbox.DepthBias = db;
-			color = IsHovered || Pressed.This ? Colors.Active : color;
-			Draw.IgnoreDepth = true;
-			Draw.Color = color;
-			Draw.SolidSphere( Vector3.Zero, actualSphereRadius );
-
-			// Draw an arrow pointing inward from the box to the sphere
-			Draw.Arrow( arrowFrom, arrowTo, actualArrowHeadLength, actualArrowHeadRadius );
-
-			if ( Pressed.This )
-			{
-				pressed = true;
-
-				Transform = Transform.ToWorld( new Transform( Vector3.Backward * (length * 2.0f) ) );
-				using ( PushFixedScale() )
-				{
-					Transform = Transform.WithRotation( Rotation.LookAt( Transform.Rotation.Forward, Camera.Rotation.Forward ) );
-					var delta = GetMouseDelta( Vector3.Zero, Vector3.Up );
-					distance = Vector3.Forward.Dot( GetMouseDelta( Vector3.Zero, Vector3.Up ) );
-					distance /= worldBoxScale;
-				}
-			}
-
-			return distance != 0.0f;
+			internal string Path;
+			internal BBox Start;
+			internal BBox Delta;
 		}
 
-		public bool BoundingBox( string name, BBox value, out BBox outValue )
-		{
-			return BoundingBox( name, value, out outValue, out _ );
-		}
+		public bool UpdateBoundingBox( string name, BBox value, out BBox outValue )
+			=> UpdateBoundingBox( name, value, out outValue, out _, out _ );
 
-		public bool BoundingBox( string name, BBox value, out BBox outValue, out bool outPressed )
+		public bool UpdateBoundingBox( string name, BBox value, out BBox outValue, out bool outPressed, out Vector3 outResizeAxis )
 		{
 			outValue = value;
-
-			using ( Scope( name ) )
+			outPressed = false;
+			outResizeAxis = default;
+			using var scope = PushScope( name );
+			var path = Active.current.PressedPath;
+			if ( path is null || !path.StartsWith( Path ) || (!IsLeftMouseDown && !Active.HasReleaseInput) ) return false;
+			var direction = path.AsSpan( Path.Length ) switch
 			{
-				Transform = Transform.ToWorld( new Transform( value.Center ) );
-
-				var halfSize = value.Size * 0.5f;
-				var resized = false;
-				var resizeDist = 0.0f;
-				var resizeAxis = Vector3.Zero;
-				var pressed = false;
-
-				if ( ArrowPoint( "Forward", Vector3.Forward, halfSize.x, Colors.Forward, out var forwardDist, ref pressed ) )
-				{
-					resized = true;
-					resizeDist = forwardDist;
-					resizeAxis = Vector3.Forward;
-				}
-
-				if ( ArrowPoint( "Backward", Vector3.Backward, halfSize.x, Colors.Forward, out var backwardDist, ref pressed ) )
-				{
-					resized = true;
-					resizeDist = backwardDist;
-					resizeAxis = Vector3.Backward;
-				}
-
-				if ( ArrowPoint( "Up", Vector3.Up, halfSize.z, Colors.Up, out var upDist, ref pressed ) )
-				{
-					resized = true;
-					resizeDist = upDist;
-					resizeAxis = Vector3.Up;
-				}
-
-				if ( ArrowPoint( "Down", Vector3.Down, halfSize.z, Colors.Up, out var downDist, ref pressed ) )
-				{
-					resized = true;
-					resizeDist = downDist;
-					resizeAxis = Vector3.Down;
-				}
-
-				if ( ArrowPoint( "Left", Vector3.Left, halfSize.y, Colors.Left, out var leftDist, ref pressed ) )
-				{
-					resized = true;
-					resizeDist = leftDist;
-					resizeAxis = Vector3.Left;
-				}
-
-				if ( ArrowPoint( "Right", Vector3.Right, halfSize.y, Colors.Left, out var rightDist, ref pressed ) )
-				{
-					resized = true;
-					resizeDist = rightDist;
-					resizeAxis = Vector3.Right;
-				}
-
-				outPressed = pressed;
-
-				if ( resized && !resizeDist.AlmostEqual( 0 ) )
-				{
-					var center = value.Center + resizeAxis * (resizeDist * 0.5f);
-					halfSize = value.Size + resizeAxis.Abs() * resizeDist;
-					outValue = BBox.FromPositionAndSize( center, halfSize );
-
-					return true;
-				}
+				"/Forward/WorldScale" => Vector3.Forward,
+				"/Backward/WorldScale" => Vector3.Backward,
+				"/Up/WorldScale" => Vector3.Up,
+				"/Down/WorldScale" => Vector3.Down,
+				"/Left/WorldScale" => Vector3.Left,
+				"/Right/WorldScale" => Vector3.Right,
+				_ => Vector3.Zero
+			};
+			if ( direction == Vector3.Zero ) return false;
+			outPressed = true;
+			var drag = Active.GetValue<BoxDrag>( "gizmo.bounding-box.drag" );
+			if ( drag is null )
+			{
+				drag = new BoxDrag();
+				Active.SetValue( "gizmo.bounding-box.drag", drag );
+			}
+			if ( WasLeftMousePressed || drag.Path != path )
+			{
+				drag.Path = path;
+				drag.Start = value;
+				drag.Delta = default;
 			}
 
-			return false;
+			var scale = Transform.UniformScale;
+			var opposite = value.Center - direction * value.Size * 0.5f;
+			Transform = Transform.ToWorld( new Transform( opposite, Rotation.LookAt( direction, Vector3.Up ) ) );
+			Transform = Transform.WithRotation( Rotation.LookAt( Transform.Rotation.Forward, Camera.Rotation.Forward ) );
+			Path = path;
+			var distance = Vector3.Forward.Dot( GetMouseDelta( 0, Vector3.Up ) ) / scale;
+			if ( distance.AlmostEqual( 0 ) ) return false;
+			outResizeAxis = direction;
+			drag.Delta.Maxs += Vector3.Max( direction, Vector3.Zero ) * distance;
+			drag.Delta.Mins += Vector3.Min( direction, Vector3.Zero ) * distance;
+			var mins = drag.Start.Mins + drag.Delta.Mins;
+			var maxs = drag.Start.Maxs + drag.Delta.Maxs;
+			if ( Settings.SnapToGrid != IsCtrlPressed )
+			{
+				mins = Snap( mins, drag.Delta.Mins );
+				maxs = Snap( maxs, drag.Delta.Maxs );
+			}
+			outValue = new BBox { Mins = mins, Maxs = maxs };
+			return true;
+		}
+	}
+
+	public sealed partial class GizmoDraw
+	{
+		public void BoundingBox( string name, BBox value )
+		{
+			using var scope = PushScope( name, value.Center );
+			var halfSize = value.Size * 0.5f;
+			BoxFace( "Forward", Vector3.Forward, halfSize.x, Colors.Forward );
+			BoxFace( "Backward", Vector3.Backward, halfSize.x, Colors.Forward );
+			BoxFace( "Up", Vector3.Up, halfSize.z, Colors.Up );
+			BoxFace( "Down", Vector3.Down, halfSize.z, Colors.Up );
+			BoxFace( "Left", Vector3.Left, halfSize.y, Colors.Left );
+			BoxFace( "Right", Vector3.Right, halfSize.y, Colors.Left );
+		}
+
+		void BoxFace( string name, Vector3 direction, float length, Color color )
+		{
+			using var scope = PushScope( name, direction * length, Rotation.LookAt( direction, Vector3.Up ) );
+			using var scaler = GizmoControls.PushFixedScaleScope();
+			if ( !Pressed.This && length.AlmostEqual( 0 ) ) return;
+			const float radius = 1.3f;
+			var sphereRadius = IsHovered ? radius * 1.25f : radius;
+			var arrowRadius = sphereRadius * 0.9f;
+			var arrowLength = arrowRadius * 2;
+			Hitbox.DepthBias = 0.01f;
+			Hitbox.Sphere( new Sphere( 0, radius * 1.25f ) );
+			var from = Vector3.Forward * -(arrowLength + sphereRadius);
+			Hitbox.Sphere( new Sphere( from / 2, radius * 0.9f * 1.25f ) );
+			IgnoreDepth = true;
+			Color = IsHovered || Pressed.This ? Colors.Active : color;
+			SolidSphere( Vector3.Zero, sphereRadius );
+			Arrow( from, Vector3.Forward * -sphereRadius, arrowLength, arrowRadius );
 		}
 	}
 }
-
-
-

@@ -2,7 +2,11 @@
 
 namespace Sandbox
 {
-	public class VertexBuffer
+	/// <summary>
+	/// Builds vertices and indices for drawing geometry or creating a mesh.
+	/// </summary>
+	[Expose]
+	public partial class VertexBuffer
 	{
 		/// <summary>
 		/// List of all vertices in this buffer.

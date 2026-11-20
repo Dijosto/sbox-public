@@ -1,5 +1,6 @@
-﻿using Sandbox.UI;
+﻿using System.Globalization;
 using System.IO;
+using System.Text.RegularExpressions;
 
 namespace Editor;
 
@@ -106,7 +107,9 @@ public partial class AssetList : ListView, AssetSystem.IEventListener
 				// Add the other selected assets too..
 				foreach ( var item in SelectedItems.OfType<AssetEntry>() )
 				{
-					if ( ae == item ) continue;
+					if ( string.Equals( ae.AbsolutePath, item.AbsolutePath, StringComparison.OrdinalIgnoreCase ) )
+						continue;
+
 					drag.Data.Text += "\n" + item.FileInfo.FullName;
 				}
 
@@ -236,7 +239,7 @@ public partial class AssetList : ListView, AssetSystem.IEventListener
 
 		bool active = Paint.HasPressed;
 		bool highlight = !active && (Paint.HasSelected || Paint.HasPressed);
-		bool hover = !highlight && Paint.HasMouseOver;
+		bool hover = !highlight && (Paint.HasMouseOver || item.Dropping);
 
 		var rect = item.Rect.Shrink( 2 );
 
@@ -326,7 +329,7 @@ public partial class AssetList : ListView, AssetSystem.IEventListener
 		{
 			DrawSelectedBackground( item );
 		}
-		else if ( Paint.HasMouseOver )
+		else if ( Paint.HasMouseOver || item.Dropping )
 		{
 			DrawHoverBackground( item );
 		}
@@ -370,10 +373,10 @@ public partial class AssetList : ListView, AssetSystem.IEventListener
 		var columns = new Dictionary<string, string>
 		{
 			{ "Name", FullPathMode ? asset.Asset?.RelativePath : asset.Name },
-			{ "Date", asset.Date },
+			{ "Date", FormatDateTime( asset.LastModified ) },
 			{ "Type", asset.TypeName },
-			{ "Size", asset.Size },
-			{ "Path", asset?.Asset?.RelativePath ?? "" }
+			{ "Size", asset.Size?.SizeFormat() },
+			{ "Path", asset.Asset?.RelativePath }
 		};
 
 		if ( FullPathMode )
@@ -386,9 +389,38 @@ public partial class AssetList : ListView, AssetSystem.IEventListener
 		DrawAssetIcon( item, asset );
 	}
 
+	private static string _dateTimeFormat;
+
+	/// <summary>
+	/// Get normalised DateTime string that keeps the system date format
+	/// </summary>
+	private static string FormatDateTime( DateTime? timestamp )
+	{
+		if ( timestamp is not DateTime dt )
+			return "";
+
+		CultureInfo culture = CultureInfo.CurrentCulture;
+		if ( _dateTimeFormat is null )
+		{
+			string datePattern = culture.DateTimeFormat.ShortDatePattern;
+			datePattern = Regex.Replace( datePattern, @"(?<!d)d(?!d)", "dd" );
+			datePattern = Regex.Replace( datePattern, @"(?<!M)M(?!M)", "MM" );
+			datePattern = Regex.Replace( datePattern, @"(?<!y)y{1,2}(?!y)", "yyyy" );
+
+			string timePattern = culture.DateTimeFormat.ShortTimePattern;
+			timePattern = Regex.Replace( timePattern, @"(?<!h)h(?!h)", "hh" );
+			timePattern = Regex.Replace( timePattern, @"(?<!H)H(?!H)", "HH" );
+			timePattern = Regex.Replace( timePattern, @"(?<!m)m(?!m)", "mm" );
+
+			_dateTimeFormat = $"{datePattern} {timePattern}";
+		}
+
+		return dt.ToString( _dateTimeFormat, culture );
+	}
+
 	private void DrawColumns( VirtualWidget item, Dictionary<string, string> columns )
 	{
-		int columnCount = (SingleColumnMode ? 1 : columns.Count());
+		int columnCount = SingleColumnMode ? 1 : columns.Count();
 
 		var defaultColWidth = item.Rect.Width / columnCount;
 		var textRect = item.Rect;
@@ -493,11 +525,11 @@ public partial class AssetList : ListView, AssetSystem.IEventListener
 		get => _viewMode;
 	}
 
-	protected override void OnWheel( WheelEvent e )
+	protected override void OnMouseWheel( WheelEvent e )
 	{
 		if ( e.HasCtrl )
 		{
-			var d = (e.Delta > 0 ? 1 : -1);
+			var d = e.Delta > 0 ? 1 : -1;
 			var lastViewMode = ViewMode;
 
 			if ( d == 1 && ViewMode == AssetListViewMode.LargeIcons )
@@ -512,7 +544,18 @@ public partial class AssetList : ListView, AssetSystem.IEventListener
 			return;
 		}
 
-		base.OnWheel( e );
+		base.OnMouseWheel( e );
+	}
+
+	protected override void OnMousePress( MouseEvent e )
+	{
+		if ( e.LeftMouseButton && GetItemAt( e.LocalPosition ) is null )
+		{
+			UnselectAll();
+			Update();
+		}
+
+		base.OnMousePress( e );
 	}
 
 	void BuildAllIcons()
@@ -572,7 +615,7 @@ public partial class AssetList : ListView, AssetSystem.IEventListener
 				{
 					if ( item is DirectoryEntry directoryEntry )
 					{
-						System.IO.Directory.Delete( directoryEntry.DirectoryInfo.FullName, true );
+						DeleteDirectory( directoryEntry.DirectoryInfo.FullName );
 					}
 					else if ( item is AssetEntry entry )
 					{
@@ -585,6 +628,44 @@ public partial class AssetList : ListView, AssetSystem.IEventListener
 		);
 
 		confirm.Show();
+	}
+
+	/// <summary>
+	/// Ask for confirmation, then delete a folder and everything in it.
+	/// </summary>
+	internal static void ConfirmDeleteFolder( DirectoryInfo directory, Action onDeleted = null )
+	{
+		var destination = OperatingSystem.IsWindows() ? "moved to your Recycle Bin" : "permanently deleted";
+
+		var confirm = new PopupWindow(
+			"Deleting 1 items...",
+			$"Are you sure you wish to delete folder \"{directory.Name}\"?\nEVERYTHING including recursive directories and files will be {destination}.", "No",
+			new Dictionary<string, Action>() { { "Yes", () => {
+				if ( DeleteDirectory( directory.FullName ) )
+					onDeleted?.Invoke();
+			} } }
+		);
+
+		confirm.Show();
+	}
+
+	/// <summary>
+	/// Sends a folder to the Recycle Bin on Windows, other platforms don't have one so it's deleted outright.
+	/// </summary>
+	static bool DeleteDirectory( string path )
+	{
+		if ( OperatingSystem.IsWindows() )
+			EditorUtility.SendToRecycleBin( path );
+		else
+			System.IO.Directory.Delete( path, true );
+
+		if ( System.IO.Directory.Exists( path ) )
+		{
+			Log.Warning( $"Couldn't delete folder {path}" );
+			return false;
+		}
+
+		return true;
 	}
 
 	[Shortcut( "editor.duplicate", "CTRL+D" )]
@@ -601,7 +682,7 @@ public partial class AssetList : ListView, AssetSystem.IEventListener
 	{
 		Action<string> CreateNew = ( string s ) =>
 		{
-			File.WriteAllText( s, File.ReadAllText( asset.GetSourceFile( true ) ) );
+			EditorUtility.CopyAsset( asset, s, overwrite: true, rebuildFromSource: true );
 
 			var copy = AssetSystem.RegisterFile( s );
 			MainAssetBrowser.Instance?.Local.UpdateAssetList();
@@ -705,24 +786,32 @@ public partial class AssetList : ListView, AssetSystem.IEventListener
 	private void OnDropGameObject( DragEvent ev )
 	{
 		if ( Browser?.CurrentLocation == null ) return;
-		if ( ev.Data.Object is not GameObject[] gos || gos.Length != 1 ) return;
+		if ( ev.Data.Object is not GameObject[] gos ) return;
 
-		var target = gos[0];
-		var location = Path.Combine( Browser.CurrentLocation.Path, $"{target.Name}.prefab" );
+		bool assetListRequiresRefresh = false;
 
-		if ( AssetSystem.FindByPath( location ) != null )
+		foreach ( GameObject target in gos )
 		{
-			Log.Warning( "A prefab already exists at " + location );
-			return;
+			var location = Path.Combine( Browser.CurrentLocation.Path, $"{target.Name}.prefab" );
+
+			if ( AssetSystem.FindByPath( location ) != null )
+			{
+				Log.Warning( "A prefab already exists at " + location );
+				continue;
+			}
+
+			var session = SceneEditorSession.Resolve( target );
+			using var scene = session.Scene.Push();
+			using ( session.UndoScope( "Convert GameObject To Prefab" ).WithGameObjectChanges( target, GameObjectUndoFlags.All ).Push() )
+			{
+				EditorUtility.Prefabs.ConvertGameObjectToPrefab( target, location );
+				EditorUtility.InspectorObject = target;
+			}
+
+			assetListRequiresRefresh = true;
 		}
 
-		var session = SceneEditorSession.Resolve( target );
-		using var scene = session.Scene.Push();
-		using ( session.UndoScope( "Convert GameObject To Prefab" ).WithGameObjectChanges( target, GameObjectUndoFlags.All ).Push() )
-		{
-			EditorUtility.Prefabs.ConvertGameObjectToPrefab( target, location );
-			EditorUtility.InspectorObject = target;
-		}
+		if ( !assetListRequiresRefresh ) return;
 
 		Refresh();
 	}
@@ -767,6 +856,19 @@ public partial class AssetList : ListView, AssetSystem.IEventListener
 		// Prevent OnDragDrop from trying to move the files again
 		hasJustMoved = true;
 		return;
+	}
+
+	protected override void OnDragHoverItem( DragEvent ev, VirtualWidget item )
+	{
+		ev.Action = DropAction.Ignore;
+
+		if ( !ev.Data.HasFileOrFolder )
+			return;
+
+		if ( item.Object is not DirectoryEntry )
+			return;
+
+		ev.Action = ev.HasCtrl ? DropAction.Copy : DropAction.Move;
 	}
 
 	[Shortcut( "editor.select-all", "CTRL+A" )]

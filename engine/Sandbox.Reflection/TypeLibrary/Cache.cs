@@ -1,20 +1,28 @@
-﻿namespace Sandbox.Internal;
+﻿using System.Collections.Concurrent;
+
+namespace Sandbox.Internal;
 
 public partial class TypeLibrary
 {
-	private readonly Dictionary<int, object> _cacheDictionary = new();
+	private readonly ConcurrentDictionary<int, object> _cacheDictionary = new();
+
+	// ConcurrentDictionary does not allow null values, so we box null results with this sentinel.
+	private static readonly object NullSentinel = new();
 
 	/// <summary>
-	/// Get or cache the result
+	/// Get or cache the result. Pass a static factory and its inputs as state, so a cache hit doesn't allocate.
 	/// </summary>
-	T Cached<T>( int key, Func<T> factory )
+	T Cached<T, TState>( int key, TState state, Func<TState, T> factory )
 	{
-		if ( _cacheDictionary.TryGetValue( key, out var obj ) && obj is T cached )
-			return cached;
+		// GetOrAdd is thread-safe; the factory may be called more than once under contention,
+		// but only one result is stored and all callers receive the same stored value.
+		var result = _cacheDictionary.GetOrAdd( key, static ( _, s ) =>
+		{
+			var val = s.Factory( s.State );
+			return val is null ? NullSentinel : (object)val;
+		}, (State: state, Factory: factory) );
 
-		var val = factory();
-		_cacheDictionary[key] = val;
-		return val;
+		return result == NullSentinel ? default! : (T)result;
 	}
 
 	/// <summary>

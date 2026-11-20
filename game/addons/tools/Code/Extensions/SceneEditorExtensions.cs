@@ -4,6 +4,14 @@ public static class SceneEditorExtensions
 {
 	private static readonly Pixmap EyeCursor = Pixmap.FromFile( "toolimages:scene_view/cursor_eye.png" );
 
+	public static float GetGizmoSize( Vector3 position, float size )
+	{
+		var dpiScale = Gizmo.Camera.Attributes.GetFloat( "EditorGizmoDpiScale" );
+		return size * (Gizmo.Camera.Ortho
+			? Gizmo.Camera.OrthoHeight * MathF.Max( dpiScale, 1.0f ) / MathF.Max( Gizmo.Camera.Size.y, 1.0f )
+			: Gizmo.Camera.Position.Distance( position ) / 1000.0f);
+	}
+
 	/// <summary>
 	/// Helper to easily set up all of the inputs for this camera and widget. This is assuming
 	/// that the passed in widget is the render panel.
@@ -38,8 +46,6 @@ public static class SceneEditorExtensions
 		}
 	}
 
-	record struct CameraStorage( Vector3 velocity, Vector3? targetPosition );
-
 	/// <summary>
 	/// Locks the cursor to a specific widget. If we go outside it, this function will
 	/// wrap the cursor around nicely.
@@ -66,6 +72,13 @@ public static class SceneEditorExtensions
 		return (float)Math.Round( value / step ) * step;
 	}
 
+	public static bool IsDraggingCamera => Application.MouseButtons.HasFlag( MouseButtons.Middle );
+
+	public static bool IsPilotingCamera => Application.MouseButtons.HasFlag( MouseButtons.Right )
+		|| EditorToolManager.CurrentModeName == CameraEditorTool.PilotModeName;
+
+	public static bool IsControllingCamera => IsDraggingCamera || IsPilotingCamera;
+
 	/// <summary>
 	/// Helper to easily set up all of the inputs for this camera and widget. This is assuming
 	/// that the passed in widget is the render panel.
@@ -79,10 +92,10 @@ public static class SceneEditorExtensions
 		var cameraVelocity = self.GetValue<Vector3>( "CameraVelocity" );
 
 		bool moved = false;
-		var rightMouse = Application.MouseButtons.HasFlag( MouseButtons.Right );
-		var middleMouse = Application.MouseButtons.HasFlag( MouseButtons.Middle );
+		var rightMouse = IsPilotingCamera;
+		var middleMouse = IsDraggingCamera;
 
-		if ( ((rightMouse && !camera.Orthographic) || middleMouse) && self.Input.IsHovered )
+		if ( (rightMouse || middleMouse) && self.Input.IsHovered )
 		{
 			EditorShortcuts.AllowShortcuts = false;
 			canvas.Focus();
@@ -94,6 +107,8 @@ public static class SceneEditorExtensions
 
 			if ( self.ControlMode != "firstperson" )
 			{
+				EditorShortcuts.ReleaseAll();
+
 				delta = 0;
 				self.ControlMode = "firstperson";
 				self.StompCursorPosition( Application.CursorPosition );
@@ -140,7 +155,7 @@ public static class SceneEditorExtensions
 				else
 					canvas.PixmapCursor = EyeCursor;
 			}
-			else if ( middleMouse )
+			else if ( middleMouse || (rightMouse && camera.Orthographic) )
 			{
 				cameraVelocity = default;
 				cameraTarget = default;
@@ -200,24 +215,24 @@ public static class SceneEditorExtensions
 
 		if ( self.Input.IsHovered && !rightMouse && Math.Abs( Application.MouseWheelDelta.y ) > 0.001f )
 		{
-			const float zoomSpeed = 24.0f;
 			if ( camera.Orthographic )
 			{
-				var canvasCursor = Application.CursorPosition - canvas.ScreenPosition;
+				var canvasCursor = canvas.FromScreen( Application.CursorPosition ) * canvas.DpiScale;
 				Vector3 worldBefore = camera.ScreenToWorld( canvasCursor );
 
-				camera.OrthographicHeight -= Application.MouseWheelDelta.y * zoomSpeed * 2 * (camera.OrthographicHeight / canvas.Height);
-				camera.OrthographicHeight = camera.OrthographicHeight.Clamp( 32.0f, 8192.0f );
+				var zoomFactor = MathF.Pow( 1.2f, -Application.MouseWheelDelta.y );
+				camera.OrthographicHeight = (camera.OrthographicHeight * zoomFactor).Clamp( 1.0f, 16384.0f );
 
 				Vector3 worldAfter = camera.ScreenToWorld( canvasCursor );
 				camera.WorldPosition -= worldAfter - worldBefore;
 			}
 			else
 			{
-				camera.WorldPosition += camera.WorldRotation.Forward * Application.MouseWheelDelta.y * zoomSpeed;
+				camera.WorldPosition += camera.WorldRotation.Forward * Application.MouseWheelDelta.y * 24.0f;
 			}
 
 			cameraTarget = default;
+			moved = true;
 		}
 
 		if ( cameraTarget.HasValue )
@@ -260,15 +275,14 @@ public static class SceneEditorExtensions
 		canvas.Focus();
 
 		var delta = Application.CursorDelta * 0.1f;
-		var angles = camera.WorldRotation.Angles();
 
 		if ( LockCursorToCanvas( canvas ) )
 			delta = Vector2.Zero;
 
-		var orbitPosition = camera.WorldPosition + camera.WorldRotation.Forward * distance;
-
 		if ( rightMouse )
 		{
+			var orbitPosition = camera.WorldPosition + camera.WorldRotation.Forward * distance;
+
 			float zoomDelta = (delta.x + delta.y) * EditorPreferences.OrbitZoomSpeed;
 
 			if ( EditorPreferences.InvertOrbitZoom )
@@ -287,35 +301,59 @@ public static class SceneEditorExtensions
 				canvas.Cursor = CursorShape.Blank;
 			else
 				canvas.Cursor = CursorShape.SizeV;
-		}
-		else if ( !camera.Orthographic )
-		{
-			angles.roll = 0;
-			angles.yaw -= delta.x;
-			angles.pitch += delta.y;
-			angles = angles.Normal;
-			angles.pitch = angles.pitch.Clamp( -89, 89 );
 
-			camera.WorldRotation = angles;
+			distance = distance.Clamp( 0, 10000 );
+			camera.WorldPosition = orbitPosition + camera.WorldRotation.Backward * distance;
+			self.ClearCameraSmoothing();
 
-			if ( EditorPreferences.HideOrbitCursor )
-				canvas.Cursor = CursorShape.Blank;
-			else
-				canvas.Cursor = CursorShape.ClosedHand;
+			return true;
 		}
-		else
-		{
+
+		if ( camera.Orthographic )
 			return false;
-		}
+
+		// Shared with the scene orientation gizmo drag so both orbit identically.
+		self.OrbitCameraAroundPivot( camera, delta, ref distance );
+
+		if ( EditorPreferences.HideOrbitCursor )
+			canvas.Cursor = CursorShape.Blank;
+		else
+			canvas.Cursor = CursorShape.ClosedHand;
+
+		return true;
+	}
+
+	/// <summary>
+	/// Orbits a camera around a pivot point in a set amount of units in front of it.
+	/// Shared by ALT+drag orbit and the scene orientation gizmo
+	/// </summary>
+	public static void OrbitCameraAroundPivot( this Gizmo.Instance self, CameraComponent camera, Vector2 delta, ref float distance )
+	{
+		var orbitPosition = camera.WorldPosition + camera.WorldRotation.Forward * distance;
+
+		var angles = camera.WorldRotation.Angles();
+		angles.roll = 0;
+		angles.yaw -= delta.x;
+		angles.pitch += delta.y;
+		angles = angles.Normal;
+		angles.pitch = angles.pitch.Clamp( -89, 89 );
+
+		camera.WorldRotation = angles;
 
 		distance = distance.Clamp( 0, 10000 );
 		camera.WorldPosition = orbitPosition + camera.WorldRotation.Backward * distance;
 
+		self.ClearCameraSmoothing();
+	}
+
+	/// <summary>
+	/// Clears the first-person camera smoothing target/velocity so it won't lerp against a camera transform that was set directly (like by orbiting)
+	/// </summary>
+	public static void ClearCameraSmoothing( this Gizmo.Instance self )
+	{
 		// I hate this but we need to stomp the camera lerp in first person camera when we switch back
 		self.SetValue<Vector3?>( "CameraTarget", default );
 		self.SetValue<Vector3>( "CameraVelocity", default );
-
-		return true;
 	}
 
 	/// <summary>

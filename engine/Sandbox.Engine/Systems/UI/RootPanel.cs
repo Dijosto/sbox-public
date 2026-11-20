@@ -1,4 +1,6 @@
-﻿using Sandbox.Engine;
+using Sandbox.Engine;
+using Sandbox.Rendering;
+using System.Diagnostics;
 
 namespace Sandbox.UI;
 
@@ -25,9 +27,15 @@ public partial class RootPanel : Panel
 
 	/// <summary>
 	/// If set to true this panel won't be rendered to the screen like a normal panel.
-	/// This is true when the panel is drawn via other means (like as a world panel).
+	/// Its command list is still prepared during the UI update for rendering elsewhere.
 	/// </summary>
 	public bool RenderedManually { get; set; }
+
+	/// <summary>
+	/// Whether this root participates in UI updates, rendering and input.
+	/// Roots without a scene, such as overlays, remain active when a scene is suspended.
+	/// </summary>
+	internal bool IsActive => IsValid && Scene?.IsSuspended != true;
 
 	/// <summary>
 	/// True if this is a world panel, so should be skipped when determining cursor visibility etc
@@ -49,15 +57,49 @@ public partial class RootPanel : Panel
 	/// </summary>
 	internal Vector2 MousePos;
 
-	public RootPanel()
+	/// <summary>
+	/// Single flat command list used by the flat rendering path.
+	/// All panels record into this one list instead of per-panel lists.
+	/// </summary>
+	internal readonly CommandList PanelCommandList;
+
+	/// <summary>
+	/// The UI system this root belongs to. Told to us when we're created and never changes - a root
+	/// can't move between surfaces.
+	/// </summary>
+	internal override UISystem UISystem => system;
+
+	readonly UISystem system;
+
+	/// <summary>
+	/// Scratch stack for <see cref="Panel.TickInternal()"/>, empty outside of a tick.
+	/// </summary>
+	internal readonly List<Panel> TickStack = [];
+
+	/// <summary>
+	/// A root in the game's UI. This is the one addon code wants.
+	/// </summary>
+	public RootPanel() : this( GlobalContext.Current.UISystem )
+	{
+	}
+
+	/// <summary>
+	/// A root in a particular UI system - a surface creates its root this way.
+	/// </summary>
+	internal RootPanel( UISystem system )
 	{
 		Style.Width = Length.Percent( 100 );
 		Style.Height = Length.Percent( 100 );
 
-		GlobalContext.Current.UISystem.AddRoot( this );
+		PanelCommandList = new CommandList( $"UI Root: {GetType().Name}" );
+		_onRenderStarted = RenderStarted;
+		_onRenderCompleted = RenderCompleted;
+
+		this.system = system;
+		system.AddRoot( this );
 		AddToLists();
 
-		StyleSheet.Load( "/styles/rootpanel.scss" );
+		StyleSheet.Load( "/styles/base/rootpanel.scss" );
 	}
 
 	public override void Delete( bool immediate = true )
@@ -68,8 +110,11 @@ public partial class RootPanel : Panel
 	public override void OnDeleted()
 	{
 		base.OnDeleted();
+		fixedOverlays.Clear();
+		PanelCommandList.Enabled = false;
+		PanelCommandList.DisposePainter(); // tasks can keep a deleted root alive
 
-		GlobalContext.Current.UISystem.RemoveRoot( this );
+		UISystem.RemoveRoot( this );
 	}
 
 	internal override void AddToLists()
@@ -150,6 +195,7 @@ public partial class RootPanel : Panel
 
 	internal void PreLayout()
 	{
+		var started = Stopwatch.GetTimestamp();
 		var cascade = new LayoutCascade
 		{
 			Scale = Scale,
@@ -176,22 +222,45 @@ public partial class RootPanel : Panel
 		PushRootValues();
 
 		PreLayout( cascade );
+		_ = FixedOverlays;
+		_layoutTime = Stopwatch.GetElapsedTime( started );
 	}
 
 	internal void CalculateLayout()
 	{
-		if ( YogaNode == null )
+		if ( LayoutTree == null )
 			return;
 
+		// Dirtiness propagates to the root, so a clean root means nothing to do
+		if ( !LayoutTree.IsDirty )
+			return;
+
+		var started = Stopwatch.GetTimestamp();
 		using var perfScope = Performance.Scope( "CalculateLayout" );
 		PushRootValues();
-		YogaNode.CalculateLayout();
+		LayoutTree.CalculateLayout();
+		_layoutTime += Stopwatch.GetElapsedTime( started );
 	}
 
 	internal void PostLayout()
 	{
+		var started = Stopwatch.GetTimestamp();
 		PushRootValues();
 		FinalLayout( Vector2.Zero );
+		foreach ( var panel in FixedOverlays )
+		{
+			if ( !panel.IsVisible && !panel.HasIntro ) continue;
+			try
+			{
+				panel.FinalLayout( PanelBounds.Position );
+			}
+			catch ( Exception e )
+			{
+				Log.Warning( e );
+			}
+		}
+
+		_layoutTime += Stopwatch.GetElapsedTime( started );
 	}
 
 	internal void PushRootValues()
@@ -201,21 +270,34 @@ public partial class RootPanel : Panel
 		Length.RootScale = ScaleToScreen;
 	}
 
+	/// <summary>
+	/// Tab and Shift+Tab that nothing below us handled move focus through the tree.
+	/// </summary>
+	public override void OnButtonTyped( ButtonEvent e )
+	{
+		if ( e.Button == "tab" && e.Pressed && UISystem.MoveFocus( UISystem.CurrentFocus, e.HasShift ) )
+			return;
+
+		base.OnButtonTyped( e );
+	}
+
 	public override void OnLayout( ref Rect layoutRect )
 	{
 		layoutRect = PanelBounds;
 	}
 
-	internal void Render( float opacity = 1.0f )
+	internal void Render()
 	{
-		ThreadSafe.AssertIsMainThread();
-		GlobalContext.Current.UISystem.Renderer.Render( this, opacity );
+		if ( !IsActive ) return;
+
+		PanelCommandList.ExecuteOnRenderThread();
 	}
 
 	/// <summary>
-	/// Render this panel manually. This gives more flexibility to where UI is rendered, to texture for example.
+	/// Execute the command list prepared during the latest UI update in the current render block.
 	/// <see cref="RenderedManually"/> must be set to true.
 	/// </summary>
+	/// <param name="opacity">Opacity multiplier for this execution.</param>
 	public void RenderManual( float opacity = 1.0f )
 	{
 		Graphics.AssertRenderBlock();
@@ -223,19 +305,27 @@ public partial class RootPanel : Panel
 		if ( !RenderedManually && !IsWorldPanel )
 			throw new Exception( $"{nameof( RenderedManually )} must be set to true to render this panel manually." );
 
-		Render( opacity );
+		var attributes = Graphics.Attributes;
+		var previousOpacity = attributes.GetFloat( "UIPanelOpacity", 1 );
+		var previousCombo = attributes.GetComboBool( "D_PANEL_OPACITY" );
+
+		attributes.Set( "UIPanelOpacity", opacity );
+		attributes.SetCombo( "D_PANEL_OPACITY", opacity != 1 );
+		try
+		{
+			Render();
+		}
+		finally
+		{
+			attributes.Set( "UIPanelOpacity", previousOpacity );
+			attributes.SetCombo( "D_PANEL_OPACITY", previousCombo );
+		}
 	}
 
 	[Event( "ui.skiptransitions" )]
 	internal void SkipAllTransitions()
 	{
 		SkipTransitions();
-	}
-
-	[Event( "language.changed" )]
-	internal void OnLanguageChanged()
-	{
-		LanguageChanged();
 	}
 
 	/// <summary>
@@ -264,58 +354,65 @@ public partial class RootPanel : Panel
 
 		var timer = FastTimer.StartNew();
 		int count = styleRuleUpdates.Count;
-		int locks = 0;
+		_styleRuleChanges = 0;
 
-		var l = new object();
-
-		//
-		// Anything in BuildRules should be thread safe
-		//
-#if true
-		{
-			Parallel.ForEach( styleRuleUpdates, panel =>
-			{
-				if ( !panel.IsValid )
-					return;
-
-				if ( panel.Style.BuildRulesInThread() )
-				{
-					lock ( l )
-					{
-						locks++;
-						panel.SetNeedsPreLayout();
-					}
-				}
-
-				panel.MarkStylesRebuilt();
-
-			} );
-
-		}
-#else
+		// A handful of panels is quicker inline than through the parallel machinery
+		if ( count < 32 )
 		{
 			foreach ( var panel in styleRuleUpdates )
-			{
-				if ( !panel.IsValid )
-					return;
-
-				if ( panel.Style.BuildRulesInThread() )
-				{
-					lock ( l )
-					{
-						locks++;
-						panel.SetNeedsPreLayout();
-					}
-				}
-			};
+				BuildStyleRule( panel );
 		}
-#endif
+		else
+		{
+			// Copied to a list so threads can split it by index
+			_styleRuleList.AddRange( styleRuleUpdates );
+
+			try
+			{
+				JobDispatcher.For( _styleRuleList.Count, this, static ( root, i ) => root.BuildStyleRule( root._styleRuleList[i] ) );
+			}
+			finally
+			{
+				_styleRuleList.Clear();
+			}
+		}
 
 		styleRuleUpdates.Clear();
 
 		if ( timer.ElapsedMilliSeconds > 0.5 )
 		{
-			Log.Trace( $"BuildStyleRules {count:n0} ({locks}) took {timer.ElapsedMilliSeconds}ms" );
+			Log.Trace( $"BuildStyleRules {count:n0} ({_styleRuleChanges}) took {timer.ElapsedMilliSeconds}ms" );
+		}
+	}
+
+	readonly object _styleRuleLock = new();
+	int _styleRuleChanges;
+	readonly List<Panel> _styleRuleList = new();
+
+	/// <summary>
+	/// Re-evaluate one panel's rules. Safe to run from a worker thread.
+	/// </summary>
+	void BuildStyleRule( Panel panel )
+	{
+		try
+		{
+			if ( !panel.IsValid() || panel.Style is null )
+				return;
+
+			if ( panel.Style.BuildRulesInThread() )
+			{
+				lock ( _styleRuleLock )
+				{
+					_styleRuleChanges++;
+					panel.SetNeedsPreLayout();
+				}
+			}
+
+			panel.MarkStylesRebuilt();
+		}
+		catch ( Exception e )
+		{
+			Log.Warning( e, e.Message );
 		}
 	}
 }

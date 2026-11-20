@@ -153,6 +153,8 @@ public partial class StartupWindow : Window
 	{
 		if ( !CloseOnLaunch.Value ) return;
 
+		LauncherPreferences.Cookie.Set( "startscreen.geometry", SaveGeometry() );
+
 		Destroy();
 	}
 }

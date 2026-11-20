@@ -43,8 +43,6 @@ public partial class SvgPanel : Panel
 	}
 	internal string _color;
 
-	public override bool HasContent => texture != null;
-
 	Texture texture;
 	int sizeHash;
 
@@ -86,15 +84,14 @@ public partial class SvgPanel : Panel
 		texture = await Texture.LoadAsync( url );
 	}
 
-	internal override void DrawContent( PanelRenderer renderer, ref RenderState state )
+	public override void OnDraw( Painter painter )
 	{
-		if ( texture == null )
-			return;
-
-		if ( renderer is PanelRenderer pr )
-		{
-			pr.DrawBackgroundTexture( this, texture, state, Length.Cover );
-		}
+		DrawTexture( painter, texture, Length.Cover );
 	}
 
+	internal override bool TryGetContentBounds( out Rect bounds )
+	{
+		bounds = Box.Rect;
+		return IsDrawnBy( typeof( SvgPanel ) );
+	}
 }

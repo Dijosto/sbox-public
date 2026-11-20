@@ -44,8 +44,13 @@ native class CSceneLightObject as NativeEngine.CSceneLightObject : CSceneObject
 	void SetLightCookie( ITexture f );
 	ITexture GetLightCookie();
 
+	void SetLightModulatorRange( uint offset, uint count );
+
 	int GetShadowCascades();
 	void SetShadowCascades( int v );
+
+	float GetShadowCascadeSplitRatio();
+	void SetShadowCascadeSplitRatio( float v );
 
 	float GetCascadeDistanceScale();
 	void SetCascadeDistanceScale( float dist );
@@ -77,4 +82,6 @@ native class CSceneLightObject as NativeEngine.CSceneLightObject : CSceneObject
 
 	void SetLightSourceDim0( float v );
 	void SetLightSourceDim1( float v );
+
+	int GetLightType();
 }

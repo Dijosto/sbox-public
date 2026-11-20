@@ -1,5 +1,6 @@
 ﻿using System;
 using Sandbox.MovieMaker.Compiled;
+using Sandbox.MovieMaker.Properties;
 
 namespace Sandbox.MovieMaker;
 
@@ -15,19 +16,27 @@ public static class ClipExtensions
 	/// </summary>
 	public static int GetDepth( this ITrack track ) => track.Parent is null ? 0 : track.Parent.GetDepth() + 1;
 
-	public static (IReferenceTrack ReferenceTrack, IReadOnlyList<string> PropertyNames) GetPath( this ITrack track )
+	public static (IReferenceTrack ReferenceTrack, IReadOnlyList<string> PropertyNames) GetPath( this ITrack track, bool full = true )
 	{
 		var names = new List<string>();
 
-		while ( track is not IReferenceTrack )
+		while ( track.Parent is not null && (full || track is not IReferenceTrack) )
 		{
 			names.Add( track.Name );
-			track = track.Parent ?? throw new Exception( "Expected root tracks to be reference tracks." );
+
+			track = track.Parent!;
 		}
 
 		names.Reverse();
 
-		return ((IReferenceTrack)track, names);
+		return (track as IReferenceTrack ?? throw new Exception( "Expected root tracks to be reference tracks." ), names);
+	}
+
+	public static string GetPathString( this ITrack track, bool full = true )
+	{
+		var path = track.GetPath( full );
+		string[] propertyNames = [path.ReferenceTrack.Name, .. path.PropertyNames];
+		return string.Join( " \u2192 ", propertyNames );
 	}
 
 	/// <summary>
@@ -96,6 +105,9 @@ public static class ClipExtensions
 		return (CompiledPropertyTrack<T>?)((IMovieClip)clip).GetProperty<T>( refTrackId, path );
 	}
 
+	public static CompiledPropertyTrack<BindingReference<T>>? GetReferenceProperty<T>( this MovieClip clip, params string[] path )
+		where T : class, IValid => clip.GetProperty<BindingReference<T>>( path );
+
 	private static bool HasMatchingFullPath( this ITrack track, IReadOnlyList<string> path )
 	{
 		if ( track.GetDepth() != path.Count - 1 ) return false;
@@ -138,34 +150,29 @@ public static class ClipExtensions
 	/// </summary>
 	public static bool Update( this IMovieClip clip, MovieTime time, TrackBinder? binder = null )
 	{
-		var anyChanges = false;
+		var updateBuilder = new MovieUpdateBuilder( binder );
 
-		foreach ( var track in clip.GetTracks( time ).OfType<IPropertyTrack>() )
-		{
-			anyChanges |= track.Update( time, binder );
-		}
+		updateBuilder.Add( clip, time );
 
-		return anyChanges;
+		return updateBuilder.Apply();
 	}
 
 	/// <summary>
 	/// If we have a mapped property for <paramref name="track"/>, set the property value to whatever value
 	/// is stored in the track at the given <paramref name="time"/>.
 	/// </summary>
+	[Obsolete( $"Use {nameof( MovieUpdateBuilder )}" )]
 	public static bool Update( this IPropertyTrack track, MovieTime time, TrackBinder? binder = null )
 	{
-		binder ??= TrackBinder.Default;
+		var updateBuilder = new MovieUpdateBuilder( binder );
 
-		return binder.Get( track ).Update( track, time );
+		updateBuilder.Add( track, time );
+
+		return updateBuilder.Apply();
 	}
 
 	/// <inheritdoc cref="Update(IPropertyTrack,MovieTime,TrackBinder?)"/>
-	public static bool Update<T>( this IPropertyTrack<T> track, MovieTime time, TrackBinder? binder = null )
-	{
-		binder ??= TrackBinder.Default;
-
-		binder.Get( track ).Update( track, time );
-
-		return true;
-	}
+	[Obsolete( $"Use {nameof( MovieUpdateBuilder )}" )]
+	public static bool Update<T>( this IPropertyTrack<T> track, MovieTime time, TrackBinder? binder = null ) =>
+		((IPropertyTrack)track).Update( time, binder );
 }

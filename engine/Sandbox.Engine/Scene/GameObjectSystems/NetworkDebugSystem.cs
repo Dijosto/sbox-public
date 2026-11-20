@@ -1,19 +1,31 @@
-﻿using Sandbox.Utility;
+using Sandbox.Engine;
+using Sandbox.Utility;
+using System.Diagnostics;
 
 namespace Sandbox;
 
 [Expose]
-sealed class NetworkDebugSystem : GameObjectSystem<NetworkDebugSystem>
+sealed partial class NetworkDebugSystem : GameObjectSystem<NetworkDebugSystem>
 {
-	[ConVar( "net_debug_culling", ConVarFlags.Protected )]
+	[ConVar( "net_debug_culling", ConVarFlags.Protected | ConVarFlags.Cheat )]
 	private static bool DebugCulling { get; set; }
+
+	[ConVar( "net_diag_record", ConVarFlags.Protected, Help = "Record network RPC stats for use with net_diag_dump" )]
+	private static bool NetworkRecord { get; set; }
 
 	public NetworkDebugSystem( Scene scene ) : base( scene )
 	{
 		Listen( Stage.FinishUpdate, 0, Tick, "Tick" );
 	}
 
-	internal readonly Dictionary<string, MessageStats> Stats = new();
+	internal Dictionary<string, MessageStats> InboundStats;
+	internal Dictionary<string, MessageStats> OutboundStats;
+	internal Dictionary<Guid, Dictionary<string, MessageStats>> ConnectionStats;
+
+	internal Dictionary<string, MessageStats> SyncVarInboundStats;
+	internal Dictionary<string, MessageStats> SyncVarOutboundStats;
+	internal Dictionary<Guid, Dictionary<string, MessageStats>> SyncVarConnectionStats;
+	private readonly Stopwatch _trackingTimer = new();
 
 	internal enum MessageType
 	{
@@ -53,34 +65,145 @@ sealed class NetworkDebugSystem : GameObjectSystem<NetworkDebugSystem>
 		public int TotalCalls { get; private set; }
 		public int TotalBytes { get; private set; }
 		public int BytesPerMessage { get; private set; }
+		public int PeakBytes { get; private set; }
 		private CircularBuffer<int> History { get; set; } = new( 10 );
+		private int _historySum;
 
 		public void Add( int messageSize )
 		{
 			TotalCalls++;
 			TotalBytes += messageSize;
+			if ( messageSize > PeakBytes ) PeakBytes = messageSize;
+
+			if ( History.IsFull ) _historySum -= History.Front();
 			History.PushBack( messageSize );
-			BytesPerMessage = (int)History.Average( x => x );
+			_historySum += messageSize;
+			BytesPerMessage = _historySum / History.Size;
 		}
 	}
 
 	/// <summary>
-	/// Track an incoming message so that we can gather data about how frequently it is called
-	/// and the size of the messages.
+	/// How long stats have been accumulating since the last reset (or first tracked message).
 	/// </summary>
-	internal void Track<T>( string name, T message )
+	internal TimeSpan TrackingElapsed => _trackingTimer.Elapsed;
+
+	/// <summary>
+	/// Reset all accumulated RPC tracking stats.
+	/// </summary>
+	internal void Reset()
 	{
-		if ( DebugOverlay.overlay_network_calls == 0 )
+		InboundStats = null;
+		OutboundStats = null;
+		ConnectionStats = null;
+		SyncVarInboundStats = null;
+		SyncVarOutboundStats = null;
+		SyncVarConnectionStats = null;
+		_trackingTimer.Reset();
+	}
+
+	private void EnsureInitialized()
+	{
+		if ( _trackingTimer.IsRunning )
 			return;
 
-		var toBytes = Game.TypeLibrary.ToBytes( message );
+		InboundStats = new();
+		OutboundStats = new();
+		ConnectionStats = new();
+		SyncVarInboundStats = new();
+		SyncVarOutboundStats = new();
+		SyncVarConnectionStats = new();
+		_trackingTimer.Start();
+	}
 
-		if ( !Stats.TryGetValue( name, out var stat ) )
+	/// <summary>
+	/// Track a network message for diagnostic purposes.
+	/// </summary>
+	internal void Track<T>( string name, T message, bool outbound = false, Connection source = default )
+	{
+		if ( !TracksCalls )
+			return;
+
+		var bs = ByteStream.Create( 256 );
+		int msgSize;
+		try
 		{
-			stat = Stats[name] = new();
+			GlobalContext.Current.TypeLibrary.ToBytes( message, ref bs );
+			msgSize = bs.Length;
+		}
+		finally
+		{
+			bs.Dispose();
 		}
 
-		stat.Add( toBytes.Length );
+		Track( name, msgSize, outbound, source, Diagnostics.DevTools.NetworkLog.Kind.Object );
+	}
+
+	/// <summary>
+	/// Whether calls are being tracked, so callers can skip building their names.
+	/// </summary>
+	internal bool TracksCalls => NetworkRecord || Diagnostics.DevTools.IsCollecting( "network" );
+
+	/// <summary>
+	/// Track a network message of a known size for diagnostic purposes.
+	/// </summary>
+	internal void Track( string name, int msgSize, bool outbound = false, Connection source = default ) => Track( name, msgSize, outbound, source, Diagnostics.DevTools.NetworkLog.Kind.Rpc );
+
+	void Track( string name, int msgSize, bool outbound, Connection source, Diagnostics.DevTools.NetworkLog.Kind kind )
+	{
+		if ( !TracksCalls )
+			return;
+
+		EnsureInitialized();
+		Diagnostics.DevTools.NetworkLog.Message( kind, name, msgSize, outbound, outbound ? null : source );
+
+		var stats = outbound ? OutboundStats : InboundStats;
+
+		if ( !stats.TryGetValue( name, out var stat ) )
+			stat = stats[name] = new();
+
+		stat.Add( msgSize );
+
+		// Per-connection breakdown for inbound messages
+		if ( !outbound && source is not null )
+		{
+			if ( !ConnectionStats.TryGetValue( source.Id, out var connStats ) )
+				connStats = ConnectionStats[source.Id] = new();
+
+			if ( !connStats.TryGetValue( name, out var connStat ) )
+				connStat = connStats[name] = new();
+
+			connStat.Add( msgSize );
+		}
+	}
+
+	/// <summary>
+	/// Track a sync var property update for diagnostic purposes.
+	/// </summary>
+	internal void TrackSync( string name, int bytes, bool outbound = false, Connection source = default )
+	{
+		if ( !TracksCalls )
+			return;
+
+		EnsureInitialized();
+		Diagnostics.DevTools.NetworkLog.Message( Diagnostics.DevTools.NetworkLog.Kind.SyncVar, name, bytes, outbound, outbound ? null : source );
+
+		var stats = outbound ? SyncVarOutboundStats : SyncVarInboundStats;
+
+		if ( !stats.TryGetValue( name, out var stat ) )
+			stat = stats[name] = new();
+
+		stat.Add( bytes );
+
+		if ( !outbound && source is not null )
+		{
+			if ( !SyncVarConnectionStats.TryGetValue( source.Id, out var connStats ) )
+				connStats = SyncVarConnectionStats[source.Id] = new();
+
+			if ( !connStats.TryGetValue( name, out var connStat ) )
+				connStat = connStats[name] = new();
+
+			connStat.Add( bytes );
+		}
 	}
 
 	/// <summary>
@@ -89,13 +212,23 @@ sealed class NetworkDebugSystem : GameObjectSystem<NetworkDebugSystem>
 	/// </summary>
 	internal void Record<T>( MessageType type, T message )
 	{
-		if ( DebugOverlay.overlay_network_graph == 0 )
+		if ( !Diagnostics.DevTools.IsCollecting( "network" ) )
 			return;
 
-		var toBytes = Game.TypeLibrary.ToBytes( message );
+		var bs = ByteStream.Create( 256 );
+		int msgSize;
+		try
+		{
+			GlobalContext.Current.TypeLibrary.ToBytes( message, ref bs );
+			msgSize = bs.Length;
+		}
+		finally
+		{
+			bs.Dispose();
+		}
 
-		if ( !_currentTick.BytesPerType.TryAdd( type, toBytes.Length ) )
-			_currentTick.BytesPerType[type] += toBytes.Length;
+		if ( !_currentTick.BytesPerType.TryAdd( type, msgSize ) )
+			_currentTick.BytesPerType[type] += msgSize;
 	}
 
 	/// <summary>
@@ -104,7 +237,7 @@ sealed class NetworkDebugSystem : GameObjectSystem<NetworkDebugSystem>
 	/// </summary>
 	internal void Record( MessageType type, int size )
 	{
-		if ( DebugOverlay.overlay_network_graph == 0 )
+		if ( !Diagnostics.DevTools.IsCollecting( "network" ) )
 			return;
 
 		if ( !_currentTick.BytesPerType.TryAdd( type, size ) )
@@ -118,26 +251,35 @@ sealed class NetworkDebugSystem : GameObjectSystem<NetworkDebugSystem>
 			DrawPvs();
 		}
 
+		DrawDormancy();
+
 		if ( !_nextSampleTime )
 			return;
 
 		Samples.Enqueue( _currentTick );
 
+		// Once the history is full, the oldest sample is reused for the next
 		if ( Samples.Count > MaxSamples )
-			Samples.Dequeue();
+		{
+			_currentTick = Samples.Dequeue();
+			_currentTick.BytesPerType.Clear();
+		}
+		else
+		{
+			_currentTick = new Sample();
+		}
 
-		_currentTick = new Sample();
 		_nextSampleTime = SampleRate;
 	}
 
 	void DrawPvs()
 	{
-		using var _ = Gizmo.Scope();
+		using var _ = Gizmo.PushScope();
 		Gizmo.Draw.IgnoreDepth = true;
 
 		foreach ( var no in Scene.networkedObjects )
 		{
-			using ( Gizmo.ObjectScope( no, no.GameObject.WorldTransform ) )
+			using ( Gizmo.PushObjectScope( no, no.GameObject.WorldTransform ) )
 			{
 				var bounds = no.GameObject.GetLocalBounds();
 				var isVisible = Scene.IsPointVisibleToConnection( Connection.Local, no.GameObject.WorldPosition );

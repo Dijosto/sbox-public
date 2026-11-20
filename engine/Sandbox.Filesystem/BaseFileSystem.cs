@@ -1,4 +1,5 @@
 ﻿using System.IO;
+using System.IO.Enumeration;
 using System.Text.Json;
 using Zio.FileSystems;
 
@@ -39,20 +40,40 @@ public class BaseFileSystem
 	internal bool PendingDispose = false;
 	internal bool TraceChanges = false;
 
+	// Zio's finalizer does no cleanup for sub/readonly/physical filesystems, it only throws on the finalizer thread if a Dispose failed part way
+	internal static void SuppressZioFinalizer( Zio.IFileSystem fs ) => GC.SuppressFinalize( fs );
+
 	internal virtual void Dispose()
 	{
+		Zio.IFileSystem disposedSystem;
+		Zio.IFileSystemWatcher disposedWatcher;
+
 		lock ( FileWatch.WithChanges )
 		{
-			system?.Dispose();
+			WatchEnabled = false;
+			PendingDispose = true;
+			disposedSystem = system;
 			system = null;
 
-			watcher?.Dispose();
+			disposedWatcher = watcher;
 			watcher = null;
 
 			foreach ( var watcherSbox in watchers.ToArray() ) watcherSbox.Dispose();
 			watchers.Clear();
 
 			changedFiles.Clear();
+			FileWatch.WithChanges.Remove( this );
+		}
+
+		// Disposal can join the filesystem's event thread. Let any in-flight callback
+		// acquire WithChanges and observe the disposed state before waiting for that thread.
+		try
+		{
+			disposedWatcher?.Dispose();
+		}
+		finally
+		{
+			disposedSystem?.Dispose();
 		}
 	}
 
@@ -63,10 +84,18 @@ public class BaseFileSystem
 	{
 		folder = FixPath( folder );
 
-		foreach ( var path in system.EnumeratePaths( folder, pattern, recursive ? SearchOption.AllDirectories : SearchOption.TopDirectoryOnly, Zio.SearchTarget.Directory ) )
+		List<string> foundDirs = new();
+
+		try
 		{
-			yield return path.FullName.Substring( folder.Length ).Trim( '/' );
+			foreach ( var path in system.EnumeratePaths( folder, pattern, recursive ? SearchOption.AllDirectories : SearchOption.TopDirectoryOnly, Zio.SearchTarget.Directory ) )
+			{
+				foundDirs.Add( path.FullName.Substring( folder.Length ).Trim( '/' ) );
+			}
 		}
+		catch ( System.IO.DirectoryNotFoundException ) { } // If directory not found, doesn't matter
+
+		return foundDirs;
 	}
 
 	/// <summary>
@@ -83,10 +112,16 @@ public class BaseFileSystem
 
 		List<string> foundFiles = new();
 
+		bool hasPattern = !string.IsNullOrWhiteSpace( pattern ) && pattern != "*";
+
 		try
 		{
-			foreach ( var path in system.EnumeratePaths( folder, pattern, recursive ? SearchOption.AllDirectories : SearchOption.TopDirectoryOnly, Zio.SearchTarget.File ) )
+			foreach ( var path in system.EnumeratePaths( folder, "*", recursive ? SearchOption.AllDirectories : SearchOption.TopDirectoryOnly, Zio.SearchTarget.File ) )
 			{
+				// zio's pattern matching is case sensitive, which we don't want
+				if ( hasPattern && !FileSystemName.MatchesSimpleExpression( pattern, Path.GetFileName( path.FullName ), ignoreCase: true ) )
+					continue;
+
 				var found = path.FullName.Substring( folder.Length ).Trim( '/' );
 				foundFiles.Add( found );
 			}
@@ -131,9 +166,9 @@ public class BaseFileSystem
 	/// </summary>
 	public bool FileExists( string path )
 	{
-		ArgumentNullException.ThrowIfNullOrEmpty( path, "path" );
 		Assert.NotNull( system );
 
+		if ( string.IsNullOrEmpty( path ) ) return false;
 		if ( path.Contains( ":" ) ) return false;
 
 		return system.FileExists( FixPath( path ) );
@@ -214,7 +249,7 @@ public class BaseFileSystem
 	internal string GetRelativePath( string path )
 	{
 		if ( string.IsNullOrWhiteSpace( path ) ) return null;
-		return GetRelativePath( system, path.ToLowerInvariant() );
+		return GetRelativePath( system, path )?.ToLowerInvariant();
 	}
 
 	/// <summary>
@@ -228,6 +263,37 @@ public class BaseFileSystem
 			writer.Write( contents );
 		}
 	}
+
+	/// <summary>Publish a complete file with a same-directory rename, preserving the previous file on write failure.</summary>
+	internal void WriteAllTextAtomic( string path, string contents )
+	{
+		var temporary = $"{path}.{Guid.NewGuid():N}.tmp";
+		try
+		{
+			using ( var stream = OpenWrite( temporary ) )
+			{
+				using var writer = new StreamWriter( stream, new UTF8Encoding( false ), leaveOpen: true );
+				writer.Write( contents );
+				writer.Flush();
+				if ( stream is FileStream file ) file.Flush( flushToDisk: true );
+			}
+			if ( FileExists( path ) ) system.ReplaceFile( FixPath( temporary ), FixPath( path ), null, false );
+			else system.MoveFile( FixPath( temporary ), FixPath( path ) );
+		}
+		finally
+		{
+			try
+			{
+				if ( FileExists( temporary ) ) DeleteFile( temporary );
+			}
+			catch ( Exception e ) when ( e is IOException or UnauthorizedAccessException )
+			{
+				// A leftover temporary file must not hide the original write failure.
+			}
+		}
+	}
+
+	internal void MoveFile( string source, string destination ) => system.MoveFile( FixPath( source ), FixWritePath( destination ) );
 
 	/// <summary>
 	/// Write the contents to the path. The file will be over-written if the file exists
@@ -313,8 +379,35 @@ public class BaseFileSystem
 	{
 		// Log.Trace( $"CreateFileSystem( {path} ) [{GetFullPath(path)}]" );
 
-		var sub = new Zio.FileSystems.SubFileSystem( system, FixPath( path ), false );
+		// SubFileSystem roots itself at the path we hand it and expects everything the filesystem
+		// underneath gives back to sit under that, so it has to be spelled the way that one
+		// spells it - ask for "Code" on a disk that has "code" and it throws at us.
+		var sub = new Zio.FileSystems.SubFileSystem( system, ResolveCasing( path ), false, false );
+		SuppressZioFinalizer( sub );
 		return new BaseFileSystem( sub );
+	}
+
+	/// <summary>
+	/// <paramref name="path"/> spelled the way whatever is underneath us spells it, so a mis-cased
+	/// path that names something real comes back as the real thing. A filesystem with nothing
+	/// single to resolve against - an aggregate of several - hands it straight back.
+	/// </summary>
+	internal string ResolveCasing( string path )
+	{
+		path = FixPath( path );
+
+		try
+		{
+			return system.ConvertPathFromInternal( system.ConvertPathToInternal( path ) ).FullName;
+		}
+		catch ( System.InvalidOperationException )
+		{
+			return path;
+		}
+		catch ( System.NotSupportedException )
+		{
+			return path;
+		}
 	}
 
 
@@ -324,9 +417,10 @@ public class BaseFileSystem
 	/// </summary>
 	public System.IO.Stream OpenWrite( string path, FileMode mode = FileMode.Create )
 	{
+		var fixedPath = FixWritePath( path );
 		CreatePathForFile( path );
 
-		return system.OpenFile( FixPath( path ), mode, FileAccess.Write );
+		return system.OpenFile( fixedPath, mode, FileAccess.Write );
 	}
 
 	/// <summary>
@@ -369,6 +463,11 @@ public class BaseFileSystem
 	/// Convert object to json and write it to the specified file
 	/// </summary>
 	public void WriteJson<T>( string filename, T data )
+
+
+
+
+
 	{
 		var text = System.Text.Json.JsonSerializer.Serialize( data, JsonSerializerOptions );
 		WriteAllText( filename, text );
@@ -382,24 +481,43 @@ public class BaseFileSystem
 		return (int)FindFile( path, recursive: recursive ).Sum( x => system.GetFileLength( Path.Combine( path, x ) ) );
 	}
 
+	bool watchUnavailable;
+
 	internal FileWatch Watch( string pathglob = null )
 	{
-		watcher?.Dispose();
-		watcher = null;
-
-		if ( watcher == null )
+		// One watcher for the whole filesystem, shared by every FileWatch handed out. It used
+		// to be disposed and rebuilt on each call, which the null check below was clearly not
+		// expecting: on Linux that means a fresh set of inotify instances per call - one per
+		// mounted filesystem in the aggregate - and the editor watches a stylesheet at a time
+		// until it hits the 128 instance limit and the whole thing falls over.
+		if ( watcher == null && !watchUnavailable )
 		{
-			watcher = system.Watch( "/" );
-			watcher.NotifyFilter = Zio.NotifyFilters.Attributes | Zio.NotifyFilters.Size | Zio.NotifyFilters.CreationTime | Zio.NotifyFilters.LastWrite | Zio.NotifyFilters.FileName | Zio.NotifyFilters.DirectoryName | Zio.NotifyFilters.Security;
-			watcher.IncludeSubdirectories = true;
+			try
+			{
+				watcher = system.Watch( "/" );
+				watcher.NotifyFilter = Zio.NotifyFilters.Attributes | Zio.NotifyFilters.Size | Zio.NotifyFilters.CreationTime | Zio.NotifyFilters.LastWrite | Zio.NotifyFilters.FileName | Zio.NotifyFilters.DirectoryName | Zio.NotifyFilters.Security;
+				watcher.IncludeSubdirectories = true;
 
-			watcher.Changed += OnDirectoryContentsChanged;
-			watcher.Deleted += OnDirectoryContentsChanged;
-			watcher.Created += OnDirectoryContentsChanged;
-			watcher.Renamed += OnDirectoryContentsRenamed;
-			watcher.Error += OnDirectoryContentsError;
+				watcher.Changed += OnDirectoryContentsChanged;
+				watcher.Deleted += OnDirectoryContentsChanged;
+				watcher.Created += OnDirectoryContentsChanged;
+				watcher.Renamed += OnDirectoryContentsRenamed;
+				watcher.Error += OnDirectoryContentsError;
 
-			watcher.EnableRaisingEvents = true;
+				watcher.EnableRaisingEvents = true;
+			}
+			catch ( System.IO.IOException e )
+			{
+				// Linux gives every filesystem watch its own inotify instance and caps how many
+				// of those a user can have - 128 out of the box, which the editor can exhaust
+				// across all the filesystems it mounts. Watching is what makes assets hot
+				// reload, so losing it is worth a warning, but it isn't worth refusing to boot.
+				watcher?.Dispose();
+				watcher = null;
+				watchUnavailable = true;
+
+				Log.Warning( $"Couldn't watch {this} for changes, so nothing under it will hot reload ({e.Message})" );
+			}
 		}
 
 		FileWatch w = (pathglob != null) ? new FileWatch( this, pathglob ) : new FileWatch( this );
@@ -430,6 +548,9 @@ public class BaseFileSystem
 
 		lock ( FileWatch.WithChanges )
 		{
+			if ( !WatchEnabled || system is null )
+				return;
+
 			if ( changedFiles.Contains( path ) )
 				return;
 
@@ -545,7 +666,17 @@ public class BaseFileSystem
 			if ( fs.GetFileSystems().Contains( filesystem.system ) )
 				return;
 
-			fs.AddFileSystem( filesystem.system );
+			try
+			{
+				fs.AddFileSystem( filesystem.system );
+			}
+			catch ( System.IO.IOException e )
+			{
+				// Adding to an aggregate that's being watched starts a watcher for the new
+				// filesystem, and that's what runs us out of inotify instances - see Watch().
+				// The mount itself is what matters here; losing the watch costs hot reload.
+				Log.Warning( $"Mounted {filesystem} but couldn't watch it for changes ({e.Message})" );
+			}
 		}
 	}
 
@@ -554,7 +685,13 @@ public class BaseFileSystem
 		if ( filesystem == null ) return;
 		if ( filesystem.system == null ) return;
 
-		(system as Zio.FileSystems.AggregateFileSystem).RemoveFileSystem( filesystem.system );
+		if ( system is Zio.FileSystems.AggregateFileSystem fs )
+		{
+			if ( !fs.GetFileSystems().Contains( filesystem.system ) )
+				return;
+
+			fs.RemoveFileSystem( filesystem.system );
+		}
 	}
 
 	/// <summary>
@@ -590,6 +727,14 @@ public class BaseFileSystem
 
 		if ( path[0] == '/' ) return path;
 		return string.Concat( "/", path );
+	}
+
+	static string FixWritePath( string path )
+	{
+		path = FixPath( path );
+		if ( SafePath.IsReservedDeviceName( Path.GetFileName( path.AsSpan() ) ) ) throw new ArgumentException( "File name cannot be a reserved device name!", "path" );
+
+		return path;
 	}
 
 	/// <summary>

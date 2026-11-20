@@ -1,16 +1,23 @@
 ﻿using System.Diagnostics.CodeAnalysis;
+using System.Linq.Expressions;
+using System.Reflection;
 using static Sandbox.Internal.GlobalGameNamespace;
 
 namespace Sandbox.MovieMaker.Properties;
 
 #nullable enable
 
+internal static class MemberProperty
+{
+	public static bool UseDelegate { get; set; } = true;
+}
+
 /// <summary>
 /// Movie property that references a field or property contained in another <see cref="ITrackTarget"/>.
 /// For example, a property in a <see cref="Component"/>.
 /// </summary>
 /// <typeparam name="T">Value type stored in the property.</typeparam>
-file sealed record MemberProperty<T>( ITrackTarget Parent, MemberDescription Member ) : ITrackProperty<T>
+file sealed record MemberProperty<T>( ITrackTarget Parent, MemberDescription Member ) : ITrackProperty<T>, IHotloadManaged
 {
 	public string Name => IsValid ? Member.Name : "[removed]";
 
@@ -20,11 +27,9 @@ file sealed record MemberProperty<T>( ITrackTarget Parent, MemberDescription Mem
 	public bool IsValid => Member is { MemberInfo: not null };
 
 	/// <summary>
-	/// Default behaviour is to check if the parent is active. We need a special case for properties bound to
-	/// <see cref="GameObject.Enabled"/> or <see cref="Component.Enabled"/>, otherwise we'd never be able to record them
-	/// being false.
+	/// Default behaviour is to check if the parent is active.
 	/// </summary>
-	public bool IsActive => IsValid && (Parent.IsActive || Name == nameof( GameObject.Enabled ) && Parent is ITrackReference { IsBound: true });
+	public bool IsActive => IsValid && Parent.IsActive;
 	public bool CanWrite => IsValid && Member switch
 	{
 		PropertyDescription propDesc => propDesc.CanWrite,
@@ -32,16 +37,16 @@ file sealed record MemberProperty<T>( ITrackTarget Parent, MemberDescription Mem
 		_ => false
 	};
 
+	[field: SkipHotload]
+	private Func<object, T> GetValueDelegate
+	{
+		get => field ??= GetValueDelegateCache[Member.MemberInfo];
+		set;
+	}
+
 	public T Value
 	{
-		// TODO: we can avoid boxing / reflection here when we're in engine code using System.Linq.Expressions
-
-		get => IsValid && Parent.Value is { } target ? Member switch
-		{
-			PropertyDescription propDesc => (T)propDesc.GetValue( target ),
-			FieldDescription fieldDesc => (T)fieldDesc.GetValue( target ),
-			_ => throw new NotImplementedException()
-		} : default!;
+		get => IsValid && Parent.Value is { } target ? GetValue( target ) : default!;
 
 		set
 		{
@@ -57,20 +62,65 @@ file sealed record MemberProperty<T>( ITrackTarget Parent, MemberDescription Mem
 		}
 	}
 
+	private T GetValue( object target )
+	{
+		if ( MemberProperty.UseDelegate )
+		{
+			return GetValueDelegate( target );
+		}
+
+		return Member switch
+		{
+			PropertyDescription propDesc => (T)propDesc.GetValue( target ),
+			FieldDescription fieldDesc => (T)fieldDesc.GetValue( target ),
+			_ => throw new NotImplementedException()
+		};
+	}
+
+	private bool IsEnabledProperty => Parent is ITrackReference && Member.Name == nameof( GameObject.Enabled ) && typeof( T ) == typeof( bool );
+
+	bool ITrackProperty.HasDefaultValue => IsEnabledProperty;
+	T ITrackProperty<T>.DefaultValue => IsEnabledProperty ? (T)(object)false : default!;
+
+	[SkipHotload]
+	private static readonly ReflectionCache<MemberInfo, Func<object, T>> GetValueDelegateCache = new( BuildGetValueDelegate );
+
+	private static Func<object, T> BuildGetValueDelegate( MemberInfo member )
+	{
+		// TODO: special case if the parent is a value type, to avoid boxing?
+
+		var parameter = Expression.Parameter( typeof( object ), "target" );
+		var convert = Expression.Convert( parameter, member.DeclaringType! );
+		var access = Expression.MakeMemberAccess( convert, member );
+
+		return Expression.Lambda<Func<object, T>>( access, parameter ).Compile();
+	}
+
 	private void SetInternal( object target, object? value )
 	{
+		// TODO: these special cases should be somewhere else!
+
 		if ( IsBoneTransformProperty( out var boneObject ) )
 		{
 			boneObject.Flags |= GameObjectFlags.ProceduralBone;
 		}
 
+		if ( value is null && TryGetNullReplacement( out var newValue ) )
+		{
+			value = newValue;
+		}
+
 		switch ( Member )
 		{
 			case PropertyDescription propDesc:
+				if ( Equals( propDesc.GetValue( target ), value ) ) return;
+
 				propDesc.SetValue( target, value );
 				return;
 
 			case FieldDescription fieldDesc:
+				if ( Equals( fieldDesc.GetValue( target ), value ) ) return;
+
 				fieldDesc.SetValue( target, value );
 				return;
 
@@ -90,6 +140,28 @@ file sealed record MemberProperty<T>( ITrackTarget Parent, MemberDescription Mem
 		boneObject = go;
 		return true;
 	}
+
+	private bool TryGetNullReplacement( [NotNullWhen( true )] out object? newValue )
+	{
+		// If this property represents GameObject.Parent, and the target object was created
+		// by TrackBinder.CreateTargets with a specific rootParent, get that rootParent to use
+		// instead of a null parent.
+
+		newValue = null;
+
+		if ( Name is not nameof( GameObject.Parent ) ) return false;
+		if ( Parent is not ITrackReference<GameObject> { Value: { } go } ) return false;
+		if ( go.GetComponentInParent<MoviePlayer>( includeDisabled: true ) is not { } player ) return false;
+		if ( !player.IsCreatedTarget( go ) ) return false;
+
+		newValue = player.CreatedTargetsRoot!;
+		return true;
+	}
+
+	void IHotloadManaged.Persisted()
+	{
+		GetValueDelegate = null!;
+	}
 }
 
 [Expose]
@@ -99,7 +171,7 @@ file sealed class MemberPropertyFactory : ITrackPropertyFactory
 
 	IEnumerable<string> ITrackPropertyFactory.GetPropertyNames( ITrackTarget parent )
 	{
-		if ( TypeLibrary.GetType( parent.TargetType ) is not { } typeDesc ) return Enumerable.Empty<string>();
+		if ( Sandbox.Engine.GlobalContext.Current.TypeLibrary.GetType( parent.TargetType ) is not { } typeDesc ) return Enumerable.Empty<string>();
 		if ( !CanMakeTrackFromProperties( typeDesc.TargetType ) ) return Enumerable.Empty<string>();
 
 		return typeDesc.Members
@@ -109,7 +181,7 @@ file sealed class MemberPropertyFactory : ITrackPropertyFactory
 
 	private MemberDescription? GetMember( ITrackTarget parent, string name )
 	{
-		if ( TypeLibrary.GetType( parent.TargetType ) is not { } typeDesc ) return null;
+		if ( Sandbox.Engine.GlobalContext.Current.TypeLibrary.GetType( parent.TargetType ) is not { } typeDesc ) return null;
 		if ( !CanMakeTrackFromProperties( typeDesc.TargetType ) ) return null;
 
 		return typeDesc.Members
@@ -117,7 +189,15 @@ file sealed class MemberPropertyFactory : ITrackPropertyFactory
 			.FirstOrDefault( CanMakeTrackFromMember );
 	}
 
-	public string GetCategoryName( ITrackTarget parent, string name ) => "Members";
+	public DisplayInfo GetDisplayInfo( ITrackTarget parent, string name )
+	{
+		if ( GetMember( parent, name ) is { } member )
+		{
+			return new DisplayInfo( member.Title, Category: member.Group ?? member.DeclaringType.Title, Description: member.Description, Icon: member.Icon );
+		}
+
+		return new DisplayInfo( name.ToTitleCase(), Category: "Members" );
+	}
 
 	public Type? GetTargetType( ITrackTarget parent, string name )
 	{
@@ -131,52 +211,84 @@ file sealed class MemberPropertyFactory : ITrackPropertyFactory
 
 	public ITrackProperty<T> CreateProperty<T>( ITrackTarget parent, string name )
 	{
-		return new MemberProperty<T>( parent, GetMember( parent, name )! );
+		var member = GetMember( parent, name )!;
+
+		return new MemberProperty<T>( parent, member );
 	}
 
 	// TODO: Because Type.IsPrimitive isn't allowed
-	private static HashSet<Type> PrimitiveTypes { get; } = new()
+	private static HashSet<Type> PrimitiveTypes { get; } =
+	[
+		typeof( bool ),
+		typeof( byte ),
+		typeof( sbyte ),
+		typeof( char ),
+		typeof( decimal ),
+		typeof( double ),
+		typeof( float ),
+		typeof( int ),
+		typeof( uint ),
+		typeof( long ),
+		typeof( ulong ),
+		typeof( short ),
+		typeof( ushort )
+	];
+
+	private static HashSet<Type> SystemTypes { get; } =
+	[
+		typeof( string ),
+		typeof( GameObject )
+	];
+
+	private static HashSet<Type> IgnoredTypes { get; } =
+	[
+#pragma warning disable CS0618
+		typeof( AnimationGraph ),
+#pragma warning restore CS0618
+		typeof( Animation.Graph )
+	];
+
+	private static HashSet<Type> MathPrimitiveTypes { get; } =
+	[
+		typeof( Color ),
+		typeof( Color32 ),
+		typeof( ColorHsv ),
+		typeof( Vector2 ),
+		typeof( Vector3 ),
+		typeof( Vector4 ),
+		typeof( Vector2Int ),
+		typeof( Vector3Int ),
+		typeof( Angles ),
+		typeof( Rotation ),
+		typeof( Curve ),
+		typeof( Gradient ),
+		typeof( ParticleGradient ),
+		typeof( ParticleFloat ),
+		typeof( ParticleVector3 ),
+		typeof( Transform ),
+		typeof( TextRendering.Scope )
+	];
+
+	private static HashSet<Type> AccessorTypes { get; } =
+	[
+		typeof( SkinnedModelRenderer.MorphAccessor ),
+#pragma warning disable CS0618
+		typeof( SkinnedModelRenderer.ParameterAccessor ),
+#pragma warning restore CS0618
+		typeof( SkinnedModelRenderer.SequenceAccessor ),
+		typeof( GameTags ),
+		typeof( TagSet ),
+		typeof( RenderOptions )
+	];
+
+	private static Dictionary<Type, HashSet<string>> AllowedComponentProperties { get; } = new()
 	{
-		typeof(bool),
-		typeof(byte),
-		typeof(sbyte),
-		typeof(char),
-		typeof(decimal),
-		typeof(double),
-		typeof(float),
-		typeof(int),
-		typeof(uint),
-		typeof(long),
-		typeof(ulong),
-		typeof(short),
-		typeof(ushort)
-	};
-
-	private static HashSet<Type> MathPrimitiveTypes { get; } = new()
-	{
-		typeof(Color),
-		typeof(Color32),
-		typeof(ColorHsv),
-
-		typeof(Vector2),
-		typeof(Vector3),
-		typeof(Vector4),
-
-		typeof(Vector2Int),
-		typeof(Vector3Int),
-
-		typeof(Angles),
-		typeof(Rotation),
-
-		typeof(Transform),
-		typeof(TextRendering.Scope)
-	};
-
-	private static HashSet<Type> AccessorTypes { get; } = new()
-	{
-		typeof(SkinnedModelRenderer.MorphAccessor),
-		typeof(SkinnedModelRenderer.ParameterAccessor),
-		typeof(SkinnedModelRenderer.SequenceAccessor)
+		{
+			typeof( Component ),
+			[
+				nameof( Component.Enabled )
+			]
+		}
 	};
 
 	private static bool CanMakeTrackFromProperties( Type type )
@@ -191,7 +303,7 @@ file sealed class MemberPropertyFactory : ITrackPropertyFactory
 
 		if ( AccessorTypes.Contains( type ) ) return true;
 
-		return false;
+		return Sandbox.Engine.GlobalContext.Current.TypeLibrary.GetType( type ) is { IsDynamicAssembly: true };
 	}
 
 	private static bool CanMakeTrackFromMember( MemberDescription member )
@@ -217,6 +329,11 @@ file sealed class MemberPropertyFactory : ITrackPropertyFactory
 		if ( member.TypeDescription.TargetType.IsAssignableTo( typeof( Component ) ) )
 		{
 			// if ( !member.HasAttribute( typeof(PropertyAttribute) ) ) return false;
+
+			if ( AllowedComponentProperties.TryGetValue( member.DeclaringType.TargetType, out var allowList ) )
+			{
+				return allowList.Contains( member.Name );
+			}
 		}
 
 		if ( !canWrite )
@@ -225,15 +342,14 @@ file sealed class MemberPropertyFactory : ITrackPropertyFactory
 			// because we can modify its properties
 
 			if ( valueType.IsValueType ) return false;
+			if ( valueType == typeof( string ) ) return false;
 
 			// Filtering out scene object stuff to avoid the list getting cluttered
 
 			// TODO: should we support this kind of indirection?
 
-			if ( valueType == typeof( GameObject ) ) return false;
+			if ( valueType.IsAssignableTo( typeof( GameObject ) ) ) return false;
 			if ( valueType.IsAssignableTo( typeof( Component ) ) ) return false;
-
-			return true;
 		}
 
 		return IsValidPropertyType( valueType );
@@ -243,17 +359,18 @@ file sealed class MemberPropertyFactory : ITrackPropertyFactory
 	{
 		if ( PrimitiveTypes.Contains( type ) ) return true;
 		if ( MathPrimitiveTypes.Contains( type ) ) return true;
+		if ( SystemTypes.Contains( type ) ) return true;
+		if ( IgnoredTypes.Contains( type ) ) return false;
 
 		if ( type.IsConstructedGenericType && type.GetGenericTypeDefinition() == typeof( List<> ) )
 		{
 			return IsValidPropertyType( type.GetGenericArguments()[0] );
 		}
 
-		if ( TypeLibrary.GetType( type ) is null ) return false;
+		if ( Sandbox.Engine.GlobalContext.Current.TypeLibrary.GetType( type ) is null ) return false;
+		if ( type.IsValueType ) return true;
 		if ( type.IsAssignableTo( typeof( Component ) ) ) return true;
 		if ( type.IsAssignableTo( typeof( Resource ) ) ) return true;
-		if ( type == typeof( GameObject ) ) return true;
-		if ( type == typeof( string ) ) return true;
 
 		// For any other type not covered above,
 		// only support it if it has sub-properties we can control

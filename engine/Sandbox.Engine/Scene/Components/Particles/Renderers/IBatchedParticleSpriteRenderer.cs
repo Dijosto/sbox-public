@@ -22,6 +22,10 @@ internal interface IBatchedParticleSpriteRenderer : ISpriteRenderGroup
 	Vector3 WorldScale { get; }
 	Rotation WorldRotation { get; }
 	bool FaceVelocity { get; }
+	bool VelocityStretch => false;
+	ParticleFloat StretchTime => 0;
+	Vector2 StretchLengthLimits => new( 0, 2000 );
+	float StretchFadeIn => 0;
 	float RotationOffset { get; }
 	bool MotionBlur { get; }
 	bool LeadingTrail { get; }
@@ -31,11 +35,26 @@ internal interface IBatchedParticleSpriteRenderer : ISpriteRenderGroup
 	bool Lighting { get; }
 	Vector2 Pivot { get; }
 	float DepthFeather { get; }
+	float CameraFadeNear { get; }
+	float CameraFadeFar { get; }
 	float FogStrength { get; }
 	FilterMode TextureFilter { get; }
 
 	// Implemented by derived classes
 	Texture RenderTexture { get; }
+
+	/// <summary>
+	/// Normal map used for scene-color refraction, or null for ordinary sprites and text.
+	/// </summary>
+	Texture RefractionNormalTexture => null;
+
+	/// <summary>
+	/// Refraction offset in render pixels. Renderers opt in by supplying their own strength.
+	/// </summary>
+	ParticleFloat RefractionStrength => 0.0f;
+
+	/// <summary>A text block in this frame's glyph buffers, for text renderers. Default when there's nothing to draw.</summary>
+	GpuFontText.Placement TextSprite => default;
 
 	// Additional properties needed for some renderers
 	BillboardAlignment Alignment { get; }
@@ -43,7 +62,7 @@ internal interface IBatchedParticleSpriteRenderer : ISpriteRenderGroup
 	/// <summary>
 	/// Result of particle processing operation
 	/// </summary>
-	internal readonly record struct ParticleProcessResult( int SpriteCount, int SplotCount );
+	internal readonly record struct ParticleProcessResult( int SpriteCount, int SplotCount, BBox Bounds );
 
 	/// <summary>
 	/// Efficiently converts particle data directly into GPU-ready SpriteData format.
@@ -58,42 +77,67 @@ internal interface IBatchedParticleSpriteRenderer : ISpriteRenderGroup
 		var count = particles.Length;
 
 		if ( count == 0 || destinationBuffer.Length < count )
-			return new( 0, 0 );
+			return new( 0, 0, default );
 
-		// Get texture from the renderer-specific implementation
+		// Get texture from the renderer-specific implementation, or the text block drawn from its outlines
 		var texture = RenderTexture ?? Texture.White;
+		var textSprite = TextSprite;
+		bool isText = Type == ParticleType.Text;
+		if ( isText && textSprite.Width == 0 )
+			return new( 0, 0, default );
 
 		// Precompute constants
 		var scale = MathF.Abs( (Scale / 2f) * WorldScale.x );
 		var objectAngles = WorldRotation;
 		var billboardModeUint = (uint)(SpriteRenderer.BillboardMode)Alignment;
 		var isObjectAlignment = Alignment == BillboardAlignment.Object;
+		var needVelocityAlignmentFix = Alignment == BillboardAlignment.LookAtCamera || Alignment == BillboardAlignment.RotateToCamera;
 
 		var blurAmountRemapped = BlurAmount.Remap( 0, 1, 0, 6, false );
 		var blurSpacingRemapped = BlurSpacing.Remap( 0, 1, 0, 1, false );
 		var leadingTrailMultiplier = LeadingTrail ? 2f : 1f;
-		var rotationOffsetValue = FaceVelocity ? RotationOffset : -1.0f;
+		var velocityStretch = VelocityStretch;
+		var stretchTime = StretchTime;
+		var stretchLimits = StretchLengthLimits;
+		var stretchFadeIn = StretchFadeIn;
+		var rotationOffsetValue = FaceVelocity && !velocityStretch ? RotationOffset : -1.0f;
 
 		var samplerIndex = SamplerState.GetBindlessIndex( sampler with { Filter = TextureFilter } );
 		var sequenceData = texture.SequenceData;
 		var lightingValue = Lighting ? 1 : 0;
 		var textureHandle = texture?.Index ?? Texture.Invalid.Index;
+		var normalTextureHandle = RefractionNormalTexture?.Index ?? 0;
+		var refractionStrength = RefractionStrength;
 
-		var motionBlurEnabled = MotionBlur;
+		var motionBlurEnabled = MotionBlur && !velocityStretch;
 		const float blurReciprocal = 0.02f;
 
 		var packedFogAndAlpha = SpriteData.PackFogAndAlphaCutout( this.FogStrength, 0.001f );
 		var depthFeather = DepthFeather;
+		var packedCameraFade = SpriteData.PackCameraFade( CameraFadeNear, CameraFadeFar );
 		var blurOpacity = BlurOpacity;
 		var origin = Pivot;
 		var renderFlags = SpriteFlags.None;
 		if ( ParticleEffect.SnapToFrame ) renderFlags |= SpriteFlags.SnapToFrame;
+		if ( isText ) renderFlags |= SpriteFlags.Text;
+		if ( velocityStretch ) renderFlags |= SpriteFlags.VelocityStretch;
 
-		// Calculate aspect ratio - different for text vs sprite
-		var aspect = texture.Size.x / texture.Size.y;
+		// A text sprite carries its block's placement where a sprite carries its texture, see sprite_ps.shader
+		var size = isText ? new Vector2( textSprite.Width, textSprite.Height ) : texture.Size;
+		var aspect = size.x / size.y;
+		if ( isText )
+		{
+			textureHandle = textSprite.InstanceOffset;
+			samplerIndex = textSprite.TileOffset;
+		}
+		float textSize = BitConverter.Int32BitsToSingle( (int)size.x | ((int)size.y << 16) );
 
 		int validCount = 0;
 		int totalSplotCount = 0;
+		var boundsMin = new Vector3( float.MaxValue, float.MaxValue, float.MaxValue );
+		var boundsMax = new Vector3( float.MinValue, float.MinValue, float.MinValue );
+		var pivotMaxX = MathF.Max( origin.x, 1f - origin.x );
+		var pivotMaxY = MathF.Max( origin.y, 1f - origin.y );
 
 		fixed ( SpriteData* destinationPtr = destinationBuffer )
 		{
@@ -130,10 +174,28 @@ internal interface IBatchedParticleSpriteRenderer : ISpriteRenderGroup
 				var scaleX = p.Size.x * scale;
 				var scaleY = p.Size.y * scale;
 
-				if ( Type == ParticleType.Text || (sequenceData == Vector4.Zero && aspect != 1) )
+				if ( isText || (sequenceData == Vector4.Zero && aspect != 1) )
 				{
 					scaleX *= aspect;
 				}
+
+				var particlePos = new Vector3( pos.x, pos.y, pos.z );
+				if ( velocityStretch )
+				{
+					var length = vel.Length * MathF.Max( 0, stretchTime.Evaluate( p, 7193 ) );
+					if ( stretchFadeIn > 0 ) length *= Math.Clamp( p.Age / stretchFadeIn, 0, 1 );
+					if ( length <= 0 ) continue;
+					length = Math.Clamp( length, MathF.Max( 0, stretchLimits.x ), MathF.Max( 0, MathF.Max( stretchLimits.x, stretchLimits.y ) ) );
+					length *= scale * 2;
+					scaleY = length * 0.5f;
+					scaleX = MathF.Min( scaleX, scaleY );
+					particlePos -= vel.Normal * scaleY;
+				}
+
+				float halfSize = MathF.Max( pivotMaxX * 2f * scaleX, pivotMaxY * 2f * scaleY );
+				var expand = new Vector3( halfSize, halfSize, halfSize );
+				boundsMin = Vector3.Min( boundsMin, particlePos - expand );
+				boundsMax = Vector3.Max( boundsMax, particlePos + expand );
 
 				var rgbe = p.Color.ToRgbe();
 				var alpha = (byte)((p.Color.a * p.Alpha).Clamp( 0.0f, 1.0f ) * 255.0f);
@@ -146,12 +208,22 @@ internal interface IBatchedParticleSpriteRenderer : ISpriteRenderGroup
 				// we are packing the exponent in the second half of the lighting flag
 				uint packedExponent = (uint)((byte)lightingValue | rgbe.a << 16);
 
+				var velocity = vel;
+				if ( needVelocityAlignmentFix )
+				{
+					// Keep the last orientation when the particle stops moving, matches the shader's velocity threshold
+					if ( velocity.LengthSquared > 0.001f )
+						p.LastVelocity = velocity;
+					else
+						velocity = p.LastVelocity;
+				}
+
 				var spritePtr = destinationPtr + validCount;
 
-				spritePtr->Position = new Vector3( pos.x, pos.y, pos.z );
+				spritePtr->Position = particlePos;
 				spritePtr->Rotation = new Vector3( angles.pitch, angles.yaw, angles.roll );
 				spritePtr->Scale = new Vector2( scaleX, scaleY );
-				spritePtr->Velocity = new Vector3( vel.x, vel.y, vel.z );
+				spritePtr->Velocity = velocity;
 				spritePtr->MotionBlur = new Vector4( leadingTrailMultiplier, blurAmountRemapped, blurSpacingRemapped, blurOpacity );
 				spritePtr->TextureHandle = textureHandle;
 				spritePtr->TintColor = tintColor.RawInt;
@@ -161,11 +233,14 @@ internal interface IBatchedParticleSpriteRenderer : ISpriteRenderGroup
 				spritePtr->FogStrengthCutout = packedFogAndAlpha;
 				spritePtr->Lighting = packedExponent;
 				spritePtr->DepthFeather = depthFeather;
+				spritePtr->CameraFade = packedCameraFade;
+				spritePtr->NormalTextureHandle = normalTextureHandle;
+				spritePtr->RefractionStrength = MathF.Max( refractionStrength.Evaluate( p, 6271 ), 0.0f );
 				spritePtr->SamplerIndex = samplerIndex;
 				spritePtr->Splots = splots;
 				spritePtr->RotationOffset = rotationOffsetValue;
-				spritePtr->Sequence = p.Sequence & 255;
-				spritePtr->SequenceTime = sequenceTime;
+				spritePtr->Sequence = isText ? textSprite.TilesX : p.Sequence & 255;
+				spritePtr->SequenceTime = isText ? textSize : sequenceTime;
 				spritePtr->BlendSheetUV = sequenceData;
 				spritePtr->Offset = origin;
 
@@ -173,6 +248,6 @@ internal interface IBatchedParticleSpriteRenderer : ISpriteRenderGroup
 			}
 		}
 
-		return new( validCount, totalSplotCount );
+		return new( validCount, totalSplotCount, validCount == 0 ? default : new BBox( boundsMin, boundsMax ) );
 	}
 }

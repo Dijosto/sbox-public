@@ -1,4 +1,5 @@
-﻿using System.Runtime.CompilerServices;
+﻿using System.Reflection;
+using System.Runtime.CompilerServices;
 using System.Threading;
 
 namespace Sandbox.Services;
@@ -20,7 +21,7 @@ public static partial class Stats
 		if ( package is null )
 			return Task.CompletedTask;
 
-		return Api.Stats.FlushWithBookmarkAsync( package, false, token );
+		return Api.Stats.FlushAsync( package, token );
 	}
 
 	/// <summary>
@@ -33,7 +34,7 @@ public static partial class Stats
 		if ( package is null )
 			return;
 
-		_ = Api.Stats.FlushWithBookmarkAsync( package, false, default );
+		_ = Api.Stats.FlushAsync( package, default );
 	}
 
 	/// <summary>
@@ -46,13 +47,13 @@ public static partial class Stats
 		if ( package is null )
 			return Task.CompletedTask;
 
-		return Api.Stats.FlushWithBookmarkAsync( package, true, token );
+		return Api.Stats.FlushAsync( package, token );
 	}
 
 	[MethodImpl( MethodImplOptions.NoInlining )]
 	public static void Increment( string name, double amount )
 	{
-		var package = Application.GameIdent;
+		var package = AssemblyMetadata.GetPackageIdent( Assembly.GetCallingAssembly() ) ?? Application.GameIdent;
 		if ( package is null ) return;
 
 		Api.Stats.AddIncrement( package, name, amount, null );
@@ -67,7 +68,7 @@ public static partial class Stats
 	[MethodImpl( MethodImplOptions.NoInlining )]
 	public static void Increment( string name, double amount, Dictionary<string, object> data )
 	{
-		var package = Application.GameIdent;
+		var package = AssemblyMetadata.GetPackageIdent( Assembly.GetCallingAssembly() ) ?? Application.GameIdent;
 		if ( package is null ) return;
 
 		Api.Stats.AddIncrement( package, name, amount, GetObjectDictionary( data ) );
@@ -76,16 +77,12 @@ public static partial class Stats
 		localStats?.Predict( name, amount );
 	}
 
-	private static Dictionary<string, object> GetObjectDictionary( object data )
+	internal static Dictionary<string, object> GetObjectDictionary( object data )
 	{
 		if ( data is null )
 			return null;
 
-		if ( data is Dictionary<string, object> o )
-		{
-			return o;
-		}
-
+		// Snapshot now, in the caller's context. The pending queue can be serialized later from the menu
 		try
 		{
 			var json = System.Text.Json.JsonSerializer.Serialize( data );
@@ -101,7 +98,7 @@ public static partial class Stats
 	[MethodImpl( MethodImplOptions.NoInlining )]
 	public static void SetValue( string name, double amount, string context = null, object data = null )
 	{
-		var package = Application.GameIdent;
+		var package = AssemblyMetadata.GetPackageIdent( Assembly.GetCallingAssembly() ) ?? Application.GameIdent;
 		if ( package is null ) return;
 
 		Api.Stats.SetValue( package, name, amount, GetObjectDictionary( data ) );
@@ -113,7 +110,7 @@ public static partial class Stats
 	[MethodImpl( MethodImplOptions.NoInlining )]
 	public static void SetValue( string name, double amount, Dictionary<string, object> data )
 	{
-		var package = Application.GameIdent;
+		var package = AssemblyMetadata.GetPackageIdent( Assembly.GetCallingAssembly() ) ?? Application.GameIdent;
 		if ( package is null ) return;
 
 		Api.Stats.SetValue( package, name, amount, GetObjectDictionary( data ) );

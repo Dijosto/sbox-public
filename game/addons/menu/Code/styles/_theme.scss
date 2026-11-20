@@ -1,0 +1,135 @@
+$font-default: "Inter";
+$font-heading: "Poppins";
+
+$primary-blue: #3273eb;
+$primary-green: #63d96b;
+$primary-yellow: #ffbd32;
+
+$default-50: #C2C9DB;
+$default-100: #B5BED4;
+$default-200: #9BA7C4;
+$default-300: #8291B5;
+$default-800: #283043;
+$default-900: #191D2A;
+
+$default-text: #fafaff;
+$default-text-light: $default-50;
+
+$text-eyebrow: 10px;
+$text-small: 12px;
+$text-regular: 14px;
+$text-medium: 16px;
+$text-large: 16px;
+$text-heading: 16px;
+
+$default-border: rgba( $default-50, 0.1 );
+
+$rounding-xsmall: 2px;
+$rounding-small: 4px;
+$rounding-large: 8px;
+
+$easing: ease;
+
+$screen-w-xl: 2560px;
+
+// A 16:9 screen's width - the UI's scaled by height, 1080 tall, so this is 16:9 at any resolution
+$screen-w-16x9: 1920px;
+
+label {
+    &.medium {
+        font-size: $text-medium;
+        font-family: $font-heading;
+        font-weight: 600;
+    }
+
+    &.large {
+        font-size: $text-large;
+        font-family: $font-heading;
+        font-weight: 700;
+        text-transform: uppercase;
+    }
+
+    &.small {
+        font-weight: 600;
+        font-size: $text-small;
+    }
+
+    &.heading {
+        color: $default-text-light;
+        font-size: $text-heading;
+        font-family: $font-heading;
+        font-weight: 700;
+    }
+
+    &.eyebrow {
+        font-family: $font-heading;
+        font-size: $text-eyebrow;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+        color: $default-100;
+        font-weight: 700;
+    }
+}
+
+icon {
+    font-family: "Material Icons";
+    font-size: $text-regular;
+    color: $default-text;
+
+    &.medium {
+        font-size: $text-medium;
+        font-family: "Material Icons";
+    }
+
+    &.large {
+        font-size: $text-large;
+    }
+
+    &.small {
+        font-size: $text-small;
+    }
+
+    &.heading {
+        color: $default-text-light;
+        font-size: $text-medium;
+    }
+
+    &.eyebrow {
+        font-size: $text-eyebrow;
+        color: $default-100;
+    }
+}
+
+row {
+    align-items: center;
+    gap: 4px;
+}
+
+column {
+    flex-direction: column;
+    gap: 4px;
+}
+
+div.grow {
+    flex-grow: 1;
+}
+
+separator {
+    background-color: rgba( $default-50, 0.1 );
+
+    &.vertical {
+        height: 100%;
+        width: 1px;
+        margin: 0 4px;
+    }
+
+    &.horizontal {
+        height: 1px;
+        margin: 4px 0;
+    }
+}
+
+TextEntry {
+    caret-color: $default-300;
+}
+

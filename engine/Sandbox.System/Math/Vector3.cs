@@ -11,6 +11,7 @@ using System.Text.Json.Serialization;
 /// </summary>
 [JsonConverter( typeof( Sandbox.Internal.JsonConvert.Vector3Converter ) )]
 [StructLayout( LayoutKind.Sequential )]
+[Description( "A 3-dimensional vector. Typically represents a position, size, or direction in 3D space." )]
 public partial struct Vector3 : System.IEquatable<Vector3>, IParsable<Vector3>, IInterpolator<Vector3>
 {
 	internal System.Numerics.Vector3 _vec;
@@ -193,6 +194,12 @@ public partial struct Vector3 : System.IEquatable<Vector3>, IParsable<Vector3>, 
 	/// </summary>
 	[JsonIgnore]
 	public readonly bool IsInfinity => float.IsInfinity( x ) || float.IsInfinity( y ) || float.IsInfinity( z );
+
+	/// <summary>
+	/// Returns true if x, y and z are all finite, so neither NaN nor infinity
+	/// </summary>
+	[JsonIgnore]
+	public readonly bool IsFinite => float.IsFinite( x ) && float.IsFinite( y ) && float.IsFinite( z );
 
 	/// <summary>
 	/// Returns true if the squared length is less than 1e-8 (which is really near zero)
@@ -761,6 +768,12 @@ public partial struct Vector3 : System.IEquatable<Vector3>, IParsable<Vector3>, 
 	{
 		return $"{x:0.####},{y:0.####},{z:0.####}";
 	}
+
+	/// <summary>
+	/// Formats the vector using the specified numeric format and the current culture,
+	/// following <see cref="System.Numerics.Vector3.ToString(string)"/>.
+	/// </summary>
+	public readonly string ToString( string format ) => _vec.ToString( format );
 
 	/// <inheritdoc cref="Parse(string)" />
 	public static Vector3 Parse( string str, IFormatProvider provider )

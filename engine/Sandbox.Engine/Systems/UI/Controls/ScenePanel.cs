@@ -2,6 +2,8 @@
 #pragma warning disable CS0612
 #pragma warning disable CS0618
 
+using Sandbox.Rendering;
+
 namespace Sandbox.UI
 {
 	/// <summary>
@@ -42,11 +44,32 @@ namespace Sandbox.UI
 		/// <summary>
 		/// The Scene this panel renders.
 		/// </summary>
-		public Scene RenderScene { get; set; }
+		public Scene RenderScene
+		{
+			get => _renderScene;
+			set
+			{
+				if ( ReferenceEquals( _renderScene, value ) )
+					return;
+
+				// Clean up the existing scene if we own it
+				if ( _ownsScene && _renderScene.IsValid() )
+				{
+					_renderScene.Destroy();
+				}
+
+				_renderScene = value;
+				_ownsScene = false;
+			}
+		}
+
+		private Scene _renderScene;
+		private bool _ownsScene;
 
 		public ScenePanel()
 		{
-			RenderScene = new() { WantsSystemScene = false };
+			_renderScene = new() { WantsSystemScene = false, IsUnlisted = true };
+			_ownsScene = true;
 
 			Camera.FieldOfView = 60;
 			Camera.BackgroundColor = Color.Transparent;
@@ -73,35 +96,11 @@ namespace Sandbox.UI
 			if ( !RenderScene.IsValid() )
 				return;
 
-			using ( RenderScene.Push() )
+			using ( RenderScene.PushScope() )
 			{
 				RenderScene.GameTick( RealTime.Delta );
 			}
-		}
 
-		internal bool shouldRenderNextFrame = true;
-
-		/// <summary>
-		/// Render the panel again next frame. This is meant to be used with RenderOnce, where
-		/// you might want to render on demand or only once.
-		/// </summary>
-		public void RenderNextFrame() => shouldRenderNextFrame = true;
-
-		public override bool HasContent => RenderScene.IsValid() || World != null;
-
-		public override void Delete( bool immediate = false )
-		{
-			RenderTexture?.Dispose();
-			RenderTexture = null;
-
-			RenderScene?.Destroy();
-			RenderScene = null;
-
-			base.Delete( immediate );
-		}
-
-		internal override void DrawContent( PanelRenderer renderer, ref RenderState state )
-		{
 			if ( Box.RectInner.Size.x <= 0 ) return;
 			if ( Box.RectInner.Size.y <= 0 ) return;
 
@@ -115,26 +114,112 @@ namespace Sandbox.UI
 			if ( RenderTexture == null ) return;
 
 			// Texture changed - force an update
-			if ( oldRt != RenderTexture ) shouldRender = true;
+			if ( oldRt != RenderTexture )
+			{
+				shouldRender = true;
+			}
 
 			if ( shouldRender )
 			{
 				// reset
 				shouldRenderNextFrame = false;
+				QueueRender();
+			}
+		}
 
-				if ( Camera.World.IsValid() )
-				{
-					Camera.RenderToTexture( RenderTexture, null, default );
-				}
-				else if ( RenderScene.IsValid() && RenderScene.Camera.IsValid() )
-				{
-					RenderScene.PreCameraRender(); // TODO WTF?... terrible hack to get around Graphics.IsActive guard in RenderToTexture
-					RenderScene.Camera.RenderToTexture( RenderTexture );
-				}
+		// Panels wanting a render this frame. Rendered together during client output so
+		// they join the frame's view bracket instead of each blocking mid UI tick.
+		static readonly List<ScenePanel> _pendingRenders = new();
+		bool _renderQueued;
+
+		void QueueRender()
+		{
+			if ( _renderQueued ) return;
+
+			_renderQueued = true;
+			_pendingRenders.Add( this );
+		}
+
+		/// <summary>
+		/// Render every scene panel that queued a render this frame. Called once per frame
+		/// during client output.
+		/// </summary>
+		internal static void RenderPending()
+		{
+			if ( _pendingRenders.Count == 0 )
+				return;
+
+			foreach ( var panel in _pendingRenders )
+			{
+				panel._renderQueued = false;
+
+				if ( !panel.IsValid() ) continue;
+				if ( panel.RenderTexture == null ) continue;
+
+				panel.RenderNow();
 			}
 
-			renderer.DrawBackgroundTexture( this, RenderTexture, state, Length.Contain );
+			_pendingRenders.Clear();
+		}
 
+		void RenderNow()
+		{
+			if ( Camera.World.IsValid() )
+			{
+				Camera.RenderToTexture( RenderTexture, null, default );
+			}
+			else if ( RenderScene.IsValid() && RenderScene.Camera.IsValid() )
+			{
+				RenderScene.PreCameraRender(); // TODO WTF?... terrible hack to get around Graphics.IsActive guard in RenderToTexture
+				RenderScene.Camera.RenderToTexture( RenderTexture );
+			}
+		}
+
+		internal bool shouldRenderNextFrame = true;
+
+		/// <summary>
+		/// Render the panel again next frame. This is meant to be used with RenderOnce, where
+		/// you might want to render on demand or only once.
+		/// </summary>
+		public void RenderNextFrame() => shouldRenderNextFrame = true;
+
+		public override void Delete( bool immediate = false )
+		{
+			ReleaseRenderResources();
+
+			base.Delete( immediate );
+		}
+
+		public override void OnDeleted()
+		{
+			base.OnDeleted();
+
+			// Deleting a parent only calls OnDeleted on its children, never Delete,
+			// so a ScenePanel inside a deleted tree has to release its scene here too.
+			ReleaseRenderResources();
+			Camera.Dispose();
+		}
+
+		void ReleaseRenderResources()
+		{
+			RenderTexture?.Dispose();
+			RenderTexture = null;
+
+			// Only destroy the scene if we created it ourselves, if the user created it themselves then they should be the one destroying it
+			if ( _ownsScene )
+			{
+				_renderScene?.Destroy();
+			}
+
+			_renderScene = null;
+		}
+
+		public override void OnDraw( Painter painter )
+		{
+			if ( Box.RectInner.Size.x <= 0 ) return;
+			if ( Box.RectInner.Size.y <= 0 ) return;
+
+			DrawTexture( painter, RenderTexture, Length.Contain );
 		}
 
 		public override void SetProperty( string name, string value )

@@ -1,4 +1,4 @@
-﻿
+
 namespace Sandbox;
 
 /// <summary>
@@ -7,7 +7,7 @@ namespace Sandbox;
 [Expose]
 sealed class HitboxSystem : GameObjectSystem<HitboxSystem>, GameObjectSystem.ITraceProvider
 {
-	[ConVar( "debug_hitbox", ConVarFlags.Protected )]
+	[ConVar( "debug_hitbox", ConVarFlags.Protected | ConVarFlags.Cheat )]
 	static bool Debug { get; set; }
 
 	private PhysicsWorld _physicsWorld;
@@ -47,12 +47,12 @@ sealed class HitboxSystem : GameObjectSystem<HitboxSystem>, GameObjectSystem.ITr
 
 			// these could be foreach parallel!!
 
-			foreach ( var group in Scene.GetAllComponents<ModelHitboxes>() )
+			foreach ( var group in Scene.Query<ModelHitboxes>() )
 			{
 				group.UpdatePositions();
 			}
 
-			foreach ( var group in Scene.GetAllComponents<ManualHitbox>() )
+			foreach ( var group in Scene.Query<ManualHitbox>() )
 			{
 				group.UpdatePositions();
 			}
@@ -117,7 +117,7 @@ sealed class HitboxSystem : GameObjectSystem<HitboxSystem>, GameObjectSystem.ITr
 
 	private void DrawDebug( ModelHitboxes hitboxes )
 	{
-		using var _ = Gizmo.Scope();
+		using var _ = Gizmo.PushScope();
 		Gizmo.Draw.Color = Color.Orange;
 
 		hitboxes.UpdatePositions();
@@ -130,7 +130,7 @@ sealed class HitboxSystem : GameObjectSystem<HitboxSystem>, GameObjectSystem.ITr
 
 	private void DrawDebug( ManualHitbox hitbox )
 	{
-		using var _ = Gizmo.Scope();
+		using var _ = Gizmo.PushScope();
 		Gizmo.Draw.Color = Color.Orange;
 
 		hitbox.UpdatePositions();
@@ -143,7 +143,7 @@ sealed class HitboxSystem : GameObjectSystem<HitboxSystem>, GameObjectSystem.ITr
 
 	private void DrawDebug( Hitbox hitbox )
 	{
-		using ( Gizmo.ObjectScope( hitbox, hitbox.Body.Transform ) )
+		using ( Gizmo.PushObjectScope( hitbox, hitbox.Body.Transform ) )
 		{
 			foreach ( var shape in hitbox.Body.Shapes )
 			{

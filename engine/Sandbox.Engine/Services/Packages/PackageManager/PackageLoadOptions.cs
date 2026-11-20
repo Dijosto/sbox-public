@@ -31,6 +31,12 @@ internal struct PackageLoadOptions
 	public string PackageIdent { get; set; }
 
 	/// <summary>
+	/// The package itself, when the caller already has it - otherwise it's looked up by <see cref="PackageIdent"/>.
+	/// Installing it from the workshop puts the item's meta on this object.
+	/// </summary>
+	public Package Package { get; set; }
+
+	/// <summary>
 	/// A group tag for this package, so we can unload all packages using this tag
 	/// </summary>
 	public string ContextTag { get; set; }
@@ -39,10 +45,6 @@ internal struct PackageLoadOptions
 	/// For cancelling the task
 	/// </summary>
 	public CancellationToken CancellationToken { get; set; }
-
-	/// <summary>
-	/// </summary>
-	public bool AllowLocalPackages { get; set; } = true;
 
 	/// <summary>
 	/// If true we will only download the code files (.bin) and not the assets.
@@ -55,6 +57,11 @@ internal struct PackageLoadOptions
 	/// <c>NativeEngine.g_pResourceSystem.ReloadSymlinkedResidentResources()</c> once manually afterwards.
 	/// </summary>
 	public bool ReloadResources { get; set; } = true;
+
+	/// <summary>
+	/// Set when installing a package's dependencies. The top-level install is already prefetching their files.
+	/// </summary>
+	internal bool IsDependency { get; set; }
 
 	/// <summary>
 	/// Loading progress callbacks

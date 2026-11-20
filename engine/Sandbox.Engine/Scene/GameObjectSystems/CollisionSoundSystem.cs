@@ -5,7 +5,7 @@
 /// unnesssary sounds playing, when they're going to be making the same sound anyway.
 /// </summary>
 [Expose]
-public sealed class CollisionSoundSystem : GameObjectSystem<CollisionSoundSystem>, ISceneCollisionEvents
+public sealed partial class CollisionSoundSystem : GameObjectSystem<CollisionSoundSystem>, ISceneCollisionEvents, IScenePhysicsEvents
 {
 	record struct PendingSound( Surface Surface, Vector3 Position, float Speed, bool Networked );
 
@@ -14,6 +14,7 @@ public sealed class CollisionSoundSystem : GameObjectSystem<CollisionSoundSystem
 	public CollisionSoundSystem( Scene scene ) : base( scene )
 	{
 		Listen( Stage.FinishUpdate, 100, ProcessQueue, "CollisionSoundSystem Queue" );
+		Listen( Stage.FinishUpdate, 110, UpdateFriction, "CollisionSoundSystem Friction" );
 	}
 
 	/// <summary>
@@ -80,6 +81,8 @@ public sealed class CollisionSoundSystem : GameObjectSystem<CollisionSoundSystem
 	/// </summary>
 	void ProcessQueue()
 	{
+		using var _ = PerformanceStats.Timings.Audio.Scope();
+
 		if ( lastRan < 0.05f ) return;
 		lastRan = 0;
 
@@ -107,5 +110,11 @@ public sealed class CollisionSoundSystem : GameObjectSystem<CollisionSoundSystem
 		if ( surface == null ) return;
 
 		surface.PlayCollisionSound( pos, speed );
+	}
+
+	public override void Dispose()
+	{
+		DisposeFriction();
+		base.Dispose();
 	}
 }

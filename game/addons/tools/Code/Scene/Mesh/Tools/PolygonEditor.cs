@@ -5,7 +5,7 @@ namespace Editor.MeshEditor;
 /// <summary>
 /// Draw a polygon mesh.
 /// </summary>
-[Title( "Polygon" ), Icon( "pentagon" )]
+[Title( "Polygon" ), Icon( "meshtools/primitve_tools/polygon.png" )]
 public sealed class PolygonEditor( PrimitiveTool tool ) : PrimitiveEditor( tool )
 {
 	Plane _plane;
@@ -14,6 +14,11 @@ public sealed class PolygonEditor( PrimitiveTool tool ) : PrimitiveEditor( tool 
 	Model _previewModel;
 	bool _valid;
 	Material _activeMaterial = tool.ActiveMaterial;
+	bool _dragging;
+	Vector3 _dragStart;
+	List<Vector3> _dragBefore;
+	int _dragIndex = -1;
+	int _undoStartCount;
 
 	public override bool CanBuild => _points.Count >= 3 && _valid;
 	public override bool InProgress => _points.Count > 0;
@@ -49,7 +54,7 @@ public sealed class PolygonEditor( PrimitiveTool tool ) : PrimitiveEditor( tool 
 			return mesh;
 		}
 
-		var offset = Vector3.Up * Height;
+		var offset = _plane.Normal * Height;
 		var topPoints = new Vector3[count];
 		for ( var i = 0; i < count; i++ ) topPoints[i] = basePoints[i] + offset;
 
@@ -73,7 +78,6 @@ public sealed class PolygonEditor( PrimitiveTool tool ) : PrimitiveEditor( tool 
 		return mesh;
 	}
 
-
 	void BuildPreview()
 	{
 		var mesh = Build();
@@ -82,6 +86,8 @@ public sealed class PolygonEditor( PrimitiveTool tool ) : PrimitiveEditor( tool 
 
 	public override void OnCreated( MeshComponent component )
 	{
+		PopUndo();
+
 		_points.Clear();
 		_valid = false;
 
@@ -95,10 +101,10 @@ public sealed class PolygonEditor( PrimitiveTool tool ) : PrimitiveEditor( tool 
 
 	public override void OnUpdate( SceneTrace trace )
 	{
+		UpdateConstructionFrame( trace, true );
+		using var scope = Gizmo.Scope( "ConstructionFrame", ConstructionFrame );
 		if ( Application.IsKeyDown( KeyCode.Escape ) )
-		{
 			Cancel();
-		}
 
 		if ( _activeMaterial != Tool.ActiveMaterial )
 		{
@@ -108,28 +114,24 @@ public sealed class PolygonEditor( PrimitiveTool tool ) : PrimitiveEditor( tool 
 
 		if ( !Gizmo.Pressed.Any )
 		{
-			if ( _points.Count > 0 )
-			{
-				DrawingStage();
-			}
-			else
-			{
-				StartStage( trace );
-			}
+			if ( _points.Count > 0 ) DrawingStage();
+			else StartStage( trace );
 		}
 
 		DrawGizmos();
 	}
 
-	public override void OnCancel()
-	{
-		Cancel();
-	}
+	public override void OnCancel() => Cancel();
 
 	void Cancel()
 	{
+		PopUndo();
+
 		_points.Clear();
 		_valid = false;
+		_dragging = false;
+		_dragIndex = -1;
+		_dragBefore = null;
 	}
 
 	void DrawGizmos()
@@ -140,9 +142,7 @@ public sealed class PolygonEditor( PrimitiveTool tool ) : PrimitiveEditor( tool 
 		var valid = _previewModel.IsValid() && !_previewModel.IsError;
 
 		if ( valid )
-		{
 			Gizmo.Draw.Model( _previewModel );
-		}
 
 		if ( _points.Count < 3 ) valid = true;
 
@@ -152,14 +152,13 @@ public sealed class PolygonEditor( PrimitiveTool tool ) : PrimitiveEditor( tool 
 		{
 			var a = _points[i];
 			var b = _points[(i + 1) % _points.Count];
-
 			Gizmo.Draw.Line( a, b );
 		}
 
 		for ( int i = 0; i < _points.Count; i++ )
 		{
 			var point = _points[i];
-			var size = 3.0f * Gizmo.Camera.Position.Distance( point ) / 1000.0f;
+			var size = GetPointSize( point, 3.0f );
 
 			using ( Gizmo.Scope( $"point {i}" ) )
 			{
@@ -168,17 +167,38 @@ public sealed class PolygonEditor( PrimitiveTool tool ) : PrimitiveEditor( tool 
 
 				if ( Gizmo.Pressed.This )
 				{
-					if ( _plane.TryTrace( Gizmo.CurrentRay, out var newPoint, true ) )
+					if ( !_dragging )
+					{
+						_dragging = true;
+						_dragIndex = i;
+						_dragStart = _points[i];
+						_dragBefore = [.. _points];
+					}
+
+					if ( _plane.TryTrace( LocalRay, out var newPoint, true ) )
 					{
 						newPoint = GridSnap( newPoint, _plane.Normal );
-						if ( !point.AlmostEqual( newPoint ) )
-						{
-							_points[i] = newPoint;
-							point = newPoint;
 
+						if ( !_points[_dragIndex].AlmostEqual( newPoint ) )
+						{
+							_points[_dragIndex] = newPoint;
+							point = newPoint;
 							OnPointsChanged();
 						}
 					}
+				}
+				else if ( _dragging && _dragIndex == i )
+				{
+					_dragging = false;
+
+					var start = _dragStart;
+					var end = _points[_dragIndex];
+
+					if ( !start.AlmostEqual( end ) )
+						PushUndo( "Move Polygon Point", _dragBefore );
+
+					_dragIndex = -1;
+					_dragBefore = null;
 				}
 
 				Gizmo.Draw.Color = Gizmo.IsHovered ? Color.Yellow : Color.White;
@@ -189,37 +209,46 @@ public sealed class PolygonEditor( PrimitiveTool tool ) : PrimitiveEditor( tool 
 
 	void AddPoint( Vector3 point )
 	{
+		var before = new List<Vector3>( _points );
+
 		_points.Add( point );
 		OnPointsChanged();
+
+		PushUndo( "Add Polygon Point", before );
 	}
 
 	void RemovePoint()
 	{
 		if ( _points.Count == 0 ) return;
+
+		var before = new List<Vector3>( _points );
+
 		_points.RemoveAt( _points.Count - 1 );
 		OnPointsChanged();
+
+		PushUndo( "Remove Polygon Point", before );
 	}
 
 	void OnPointsChanged()
 	{
-		_valid = _points.Count < 3 || Mesh.TriangulatePolygon( CollectionsMarshal.AsSpan( _points ) ).Length >= 3;
+		_valid = _points.Count < 3 ||
+			Mesh.TriangulatePolygon( CollectionsMarshal.AsSpan( _points ) ).Length >= 3;
+
 		BuildPreview();
 	}
 
 	void DrawingStage()
 	{
-		if ( !_plane.TryTrace( Gizmo.CurrentRay, out var point, true ) ) return;
+		if ( !_plane.TryTrace( LocalRay, out var point, true ) ) return;
 
 		point = GridSnap( point, _plane.Normal );
 
 		if ( Gizmo.WasLeftMousePressed )
-		{
 			AddPoint( point );
-		}
 
 		if ( !Gizmo.HasHovered )
 		{
-			var size = 3.0f * Gizmo.Camera.Position.Distance( point ) / 1000.0f;
+			var size = GetPointSize( point, 3.0f );
 			Gizmo.Draw.Color = Color.White;
 			Gizmo.Draw.SolidSphere( point, size );
 			Gizmo.Draw.Line( _points.Last(), point );
@@ -230,66 +259,70 @@ public sealed class PolygonEditor( PrimitiveTool tool ) : PrimitiveEditor( tool 
 	{
 		_previewModel = null;
 
-		var tr = trace.Run();
-
-		if ( !tr.Hit )
-		{
-			var plane = new Plane( Vector3.Up, 0.0f );
-			if ( plane.TryTrace( Gizmo.CurrentRay, out var point, true ) )
-			{
-				tr.Hit = true;
-				tr.Normal = plane.Normal;
-				tr.EndPosition = point;
-			}
-		}
-
-		if ( !tr.Hit ) return;
-
-		tr.EndPosition = GridSnap( tr.EndPosition, tr.Normal );
+		if ( !TryGetPlacement( trace, out var point, out var normal ) ) return;
+		point = GridSnap( point, normal );
 
 		if ( Gizmo.WasLeftMousePressed )
 		{
-			_plane = new Plane( tr.EndPosition, tr.Normal );
-			_points.Add( tr.EndPosition );
+			_plane = new Plane( point, normal );
+
+			if ( _points.Count == 0 )
+				_undoStartCount = SceneEditorSession.Active.UndoSystem.Back.Count;
+
+			AddPoint( point );
 		}
 
 		if ( !Gizmo.HasHovered )
 		{
-			var size = 3.0f * Gizmo.Camera.Position.Distance( tr.EndPosition ) / 1000.0f;
+			var size = GetPointSize( point, 3.0f );
 			Gizmo.Draw.Color = Color.White;
-			Gizmo.Draw.SolidSphere( tr.EndPosition, size );
+			Gizmo.Draw.SolidSphere( point, size );
 		}
 	}
 
-	public override Widget CreateWidget()
+	void PushUndo( string name, List<Vector3> before )
 	{
-		return new PolygonEditorWidget( this );
+		var after = _points.ToArray();
+		var editor = this;
+
+		PushUndo( name,
+			undo: () =>
+			{
+				editor._points.Clear();
+				editor._points.AddRange( before );
+				editor.OnPointsChanged();
+			},
+			redo: () =>
+			{
+				editor._points.Clear();
+				editor._points.AddRange( after );
+				editor.OnPointsChanged();
+			}
+		);
 	}
 
-	[WideMode]
+	public override Widget CreateWidget() => new PolygonEditorWidget( this );
+
+	[WideMode, Description( "Extrudes the polygon by this distance." )]
 	public float Height
 	{
 		get;
 		set
 		{
 			if ( field == value ) return;
-
 			field = value;
-
 			BuildPreview();
 		}
 	}
 
-	[WideMode]
+	[WideMode, Description( "Create inward-facing sides instead of a solid shape." )]
 	public bool Hollow
 	{
 		get;
 		set
 		{
 			if ( field == value ) return;
-
 			field = value;
-
 			BuildPreview();
 		}
 	}
@@ -301,18 +334,13 @@ public sealed class PolygonEditor( PrimitiveTool tool ) : PrimitiveEditor( tool 
 		public PolygonEditorWidget( PolygonEditor editor )
 		{
 			_editor = editor;
-
 			Layout.Margin = 0;
 
-			{
-				var group = AddGroup( "Polygon Properties" );
-				var row = group.AddRow();
-				var so = editor.GetSerialized();
-				row.Add( ControlSheetRow.Create( so.GetProperty( nameof( editor.Height ) ) ) );
-				row.Add( ControlSheetRow.Create( so.GetProperty( nameof( editor.Hollow ) ) ) ).FixedWidth = 60;
-			}
-
-			Layout.AddStretchCell();
+			var group = AddGroup( "Polygon Properties" );
+			var row = group.AddRow();
+			var so = editor.GetSerialized();
+			row.Add( ControlSheetRow.Create( so.GetProperty( nameof( editor.Height ) ) ) );
+			row.Add( ControlSheetRow.Create( so.GetProperty( nameof( editor.Hollow ) ) ) ).FixedWidth = 60;
 		}
 
 		[Shortcut( "editor.delete", "DEL", typeof( SceneViewWidget ) )]
@@ -334,6 +362,7 @@ public sealed class PolygonEditor( PrimitiveTool tool ) : PrimitiveEditor( tool 
 		{
 			var u = vertices[i];
 			var v = vertices[(i + 1) % count];
+
 			normal.x += (u.y - v.y) * (u.z + v.z);
 			normal.y += (u.z - v.z) * (u.x + v.x);
 			normal.z += (u.x - v.x) * (u.y + v.y);

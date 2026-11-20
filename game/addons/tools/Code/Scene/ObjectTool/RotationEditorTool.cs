@@ -1,4 +1,4 @@
-﻿namespace Editor;
+namespace Editor;
 
 /// <summary>
 /// Rotate selected GameObjects.<br/> <br/> 
@@ -12,7 +12,7 @@
 public class RotationEditorTool : EditorTool
 {
 	Dictionary<GameObject, Transform> startPoints = new Dictionary<GameObject, Transform>();
-	Angles moveDelta;
+	Rotation moveDelta;
 	Vector3 handlePosition;
 	Rotation handleRotation;
 
@@ -23,42 +23,48 @@ public class RotationEditorTool : EditorTool
 		var nonSceneGos = Selection.OfType<GameObject>().Where( go => go.GetType() != typeof( Sandbox.Scene ) );
 		if ( nonSceneGos.Count() == 0 ) return;
 
-		var bbox = BBox.FromPoints( nonSceneGos.Select( x => x.WorldPosition ) );
+		var positions = nonSceneGos.Select( x => x.WorldPosition ).ToArray();
+		var centroid = positions.Aggregate( Vector3.Zero, ( sum, p ) => sum + p ) / positions.Length;
 
-		if ( !Gizmo.Pressed.Any && Gizmo.HasMouseFocus )
+		if ( Gizmo.WasLeftMousePressed || (!Gizmo.Pressed.Any && Gizmo.HasMouseFocus) )
 		{
 			startPoints.Clear();
 			moveDelta = Rotation.Identity;
-			handleRotation = nonSceneGos.FirstOrDefault().WorldRotation;
-			handlePosition = bbox.Center;
+			handleRotation = nonSceneGos.FirstOrDefault()?.WorldRotation ?? Rotation.Identity;
+			handlePosition = centroid;
 			undoScope?.Dispose();
 			undoScope = null;
 		}
 
-		var basis = Gizmo.Settings.GlobalSpace ? Rotation.Identity : handleRotation;
+		var basis = Gizmo.Settings.GlobalSpace ? WorkPlane.Current.Rotation : handleRotation;
 
 		// Stop updating the handle position if we're dragging
 
-		var origin = Gizmo.Pressed.Any ? handlePosition : bbox.Center;
+		var origin = Gizmo.Pressed.Any ? handlePosition : centroid;
+		var rotateAsGroup = nonSceneGos.Count() > 1 && Gizmo.Settings.GlobalSpace;
 
 		using ( Gizmo.Scope( "Tool", new Transform( origin, basis ) ) )
 		{
 			Gizmo.Hitbox.DepthBias = 0.01f;
 
-			if ( Gizmo.Control.Rotate( "rotation", out var angleDelta ) )
+			if ( Gizmo.Control.UpdateRotation( "rotation", Rotation.Identity, out Rotation rotationDelta ) )
 			{
 				StartDrag( nonSceneGos );
 
-				moveDelta += angleDelta;
-
-				var snapped = Gizmo.Snap( moveDelta, angleDelta );
+				moveDelta = Gizmo.Snap( rotationDelta );
 
 				foreach ( var entry in startPoints )
 				{
-					var rot = basis * snapped * basis.Inverse;
-					var position = entry.Value.Position - handlePosition;
-					position *= rot;
-					position += handlePosition;
+					var rot = basis * moveDelta * basis.Inverse;
+					var position = entry.Value.Position;
+
+					if ( rotateAsGroup )
+					{
+						position -= handlePosition;
+						position *= rot;
+						position += handlePosition;
+					}
+
 					rot *= entry.Value.Rotation;
 					var scale = entry.Value.Scale;
 
@@ -79,6 +85,14 @@ public class RotationEditorTool : EditorTool
 					entry.Key.DispatchEdited( nameof( GameObject.LocalRotation ) );
 				}
 			}
+			if ( !Gizmo.Settings.GlobalSpace )
+				Gizmo.Transform = Gizmo.Transform.WithRotation( basis * moveDelta );
+			Gizmo.Draw.Rotate( "rotation" );
+		}
+		if ( Gizmo.WasLeftMouseReleased )
+		{
+			undoScope?.Dispose();
+			undoScope = null;
 		}
 	}
 

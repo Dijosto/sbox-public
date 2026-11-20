@@ -15,6 +15,20 @@ internal partial class GlobalContext
 	public Assembly LocalAssembly { get; set; }
 
 	/// <summary>
+	/// Publishes script assemblies through this context's package loader, installing the
+	/// incoming catalog after ordinary hotload has migrated references.
+	/// </summary>
+	internal Action<Assembly, Assembly, Action> ReplaceScriptAssembly { get; set; }
+
+	/// <summary>
+	/// Rebuilds existing script types before their C# dependencies migrate, without creating a scripting context.
+	/// </summary>
+	internal ScriptSystem.AssemblyHotload PrepareScriptHotload( IReadOnlyList<Assembly> incoming, Action<Assembly, Assembly> replace )
+	{
+		return scripting?.PrepareHotload( incoming, replace );
+	}
+
+	/// <summary>
 	/// The input context for this game instance, which contains the current input state and bindings.
 	/// </summary>
 	public InputContext InputContext { get; set; }
@@ -38,6 +52,7 @@ internal partial class GlobalContext
 	{
 		get
 		{
+			Bootstrap.AssertTypeLibraryReady();
 			if ( _disabledReason is not null )
 			{
 				throw new InvalidOperationException( $"{nameof( TypeLibrary )} is currently inaccessible. Reason: {_disabledReason}" );
@@ -45,13 +60,117 @@ internal partial class GlobalContext
 
 			return _typeLibrary;
 		}
-		set => _typeLibrary = value;
+		set
+		{
+			if ( _typeLibrary == value ) return;
+			DisposeScripting();
+			_typeLibrary = value;
+		}
+	}
+
+	private ScriptSystem scripting;
+
+	/// <summary>
+	/// Network clients use the host's script set, even when local packages contain script source.
+	/// </summary>
+	internal bool ReceivesNetworkScripts => scripting?.ReceivesNetworkFiles == true
+		|| (this == Game && Networking.IsClient);
+
+	/// <summary>
+	/// Resumes ready scripts in this context's scene scope without creating an unused scripting system.
+	/// </summary>
+	internal void TickScripting() => scripting?.Tick();
+
+	internal ScriptSystem Scripting
+	{
+		get
+		{
+			_ = TypeLibrary;
+			return scripting ??= new ScriptSystem( this );
+		}
+	}
+
+	private void DisposeScripting()
+	{
+		scripting?.Dispose();
+		scripting = null;
+	}
+
+	NodeLibrary nodeLibrary;
+	readonly List<(System.Reflection.Assembly Assembly, bool LogErrors)> pendingNodeAssemblies = new();
+	bool flushingNodeAssemblies;
+
+	/// <summary>
+	/// For actiongraph. Assemblies queued with <see cref="AddNodeAssemblyLater"/> are added the first time it's read.
+	/// </summary>
+	public NodeLibrary NodeLibrary
+	{
+		get
+		{
+			if ( pendingNodeAssemblies.Count > 0 ) FlushPendingNodeAssemblies();
+			return nodeLibrary;
+		}
+		set
+		{
+			lock ( pendingNodeAssemblies ) pendingNodeAssemblies.Clear();
+			nodeLibrary = value;
+		}
+	}
+
+	internal bool HasNodeLibrary => nodeLibrary is not null;
+
+	internal void ResetNodeLibrary()
+	{
+		lock ( pendingNodeAssemblies ) pendingNodeAssemblies.Clear();
+		nodeLibrary.Reset();
 	}
 
 	/// <summary>
-	/// For actiongraph
+	/// Adding an assembly to the node library is slow, and only matters once action graphs are read or written.
 	/// </summary>
-	public NodeLibrary NodeLibrary { get; set; }
+	internal void AddNodeAssemblyLater( System.Reflection.Assembly assembly, bool logErrors = true )
+	{
+		lock ( pendingNodeAssemblies ) pendingNodeAssemblies.Add( (assembly, logErrors) );
+	}
+
+	/// <summary>
+	/// Take an assembly out of the node library without adding everything still queued first, which is what reading
+	/// <see cref="NodeLibrary"/> would do: a game closed before anything read its action graphs added them all on the way out.
+	/// </summary>
+	internal void RemoveNodeAssembly( System.Reflection.Assembly assembly )
+	{
+		lock ( pendingNodeAssemblies ) pendingNodeAssemblies.RemoveAll( x => x.Assembly == assembly );
+		nodeLibrary?.RemoveAssembly( assembly );
+	}
+
+	void FlushPendingNodeAssemblies()
+	{
+		lock ( pendingNodeAssemblies )
+		{
+			if ( flushingNodeAssemblies ) return;
+			flushingNodeAssemblies = true;
+
+			try
+			{
+				foreach ( var (assembly, logErrors) in pendingNodeAssemblies.ToArray() )
+				{
+					var result = nodeLibrary.AddAssembly( assembly );
+					if ( !logErrors ) continue;
+
+					foreach ( var error in result.Errors )
+					{
+						Log.Error( $"{error.Key}: {error.Value}" );
+					}
+				}
+
+				pendingNodeAssemblies.Clear();
+			}
+			finally
+			{
+				flushingNodeAssemblies = false;
+			}
+		}
+	}
 
 	/// <summary>
 	/// All of the mounted assets
@@ -104,6 +223,13 @@ internal partial class GlobalContext
 	public LanguageContainer Language { get; set; }
 
 	/// <summary>
+	/// Per-context lookup of loaded <see cref="Sandbox.Surface"/> instances by their physics index.
+	/// Kept here so Menu and Game contexts each maintain their own set, preventing
+	/// game-session teardown from clearing surfaces owned by the persistent menu context.
+	/// </summary>
+	internal Dictionary<int, Sandbox.Surface> Surfaces { get; } = new();
+
+	/// <summary>
 	/// The global context for the game, which holds references to various systems and libraries used throughout the game.
 	/// </summary>
 	public GlobalContext()
@@ -118,11 +244,20 @@ internal partial class GlobalContext
 	/// </summary>
 	public void Reset()
 	{
+		DisposeScripting();
 		var oldCts = CancellationTokenSource;
-		CancellationTokenSource = new CancellationTokenSource();
 
-		oldCts?.Cancel();
+		try
+		{
+			oldCts?.Cancel();
+		}
+		catch ( Exception e )
+		{
+			Log.Warning( e, "Exception in cancellation callback during context reset" );
+		}
+
 		oldCts?.Dispose();
+		CancellationTokenSource = new CancellationTokenSource();
 
 		ActiveScene = null;
 
@@ -138,6 +273,38 @@ internal partial class GlobalContext
 
 		ResourceSystem?.Clear();
 		ResourceSystem = new ResourceSystem();
+
+		Surfaces.Clear();
+	}
+
+	/// <summary>
+	/// Called once at process shutdown. Clears and nulls all held references
+	/// without re-allocating — use <see cref="Reset"/> for the between-game teardown.
+	/// </summary>
+	public void Shutdown()
+	{
+		DisposeScripting();
+		CancellationTokenSource?.Cancel();
+		CancellationTokenSource?.Dispose();
+		CancellationTokenSource = null;
+
+		UISystem?.Clear();
+		UISystem = null;
+
+		InputContext = null;
+
+		ResourceSystem?.Clear();
+		ResourceSystem = null;
+
+		Surfaces.Clear();
+
+		EventSystem?.Dispose();
+		EventSystem = null;
+
+		Cookies?.Dispose();
+		Cookies = null;
+
+		ActiveScene = null;
 	}
 
 	string _disabledReason;
@@ -156,7 +323,15 @@ internal partial class GlobalContext
 
 	internal void OnHotload()
 	{
-		ResourceSystem.OnHotload();
-		UISystem.OnHotload();
+		scripting?.InvalidateBindings();
+		ReflectionQueryCache.ClearTypeCache();
+
+		if ( !Application.IsUnitTest )
+			VertexLayout.FreeAll();
+
+		// These systems might be null in unit tests
+
+		ResourceSystem?.OnHotload();
+		UISystem?.OnHotload();
 	}
 }

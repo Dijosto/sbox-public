@@ -1,5 +1,6 @@
 ﻿using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
+using System.Collections.Concurrent;
 using System.Text.Json;
 
 namespace Sandbox;
@@ -24,7 +25,7 @@ public class CodeArchive
 	/// <summary>
 	/// Hashes of source files, used for incremental compiles. Not serialized right now.
 	/// </summary>
-	public Dictionary<string, ulong> FileHashMap { get; } = new( StringComparer.OrdinalIgnoreCase );
+	public ConcurrentDictionary<string, ulong> FileHashMap { get; } = new( StringComparer.OrdinalIgnoreCase );
 
 	/// <summary>
 	/// Represents a file to send to the compiler along with all the code. This is usually
@@ -84,13 +85,57 @@ public class CodeArchive
 
 		bs.Write( CompilerName );
 		bs.Write( JsonSerializer.Serialize( Configuration ) );
-		bs.Write( JsonSerializer.Serialize( References ) );
-		bs.Write( JsonSerializer.Serialize( SyntaxTrees.Select( x => new AdditionalFile( x.GetText().ToString(), x.FilePath ) ) ) );
-		bs.Write( JsonSerializer.Serialize( AdditionalFiles ) );
-		bs.Write( JsonSerializer.Serialize( FileMap ) );
+		bs.Write( JsonSerializer.Serialize( References.Order( StringComparer.Ordinal ) ) );
+
+		var trees = SyntaxTrees.ToList();
+		trees.Sort( CompareSourceOrder );
+
+		var fileMap = new Dictionary<string, string>();
+		var sources = new List<AdditionalFile>( trees.Count );
+		var seen = new HashSet<string>( StringComparer.OrdinalIgnoreCase );
+		foreach ( var tree in trees )
+		{
+			var localPath = SourcePath( tree );
+			var path = tree.FilePath == Generator.Processor.CompilerExtraPath ? tree.FilePath : localPath;
+			if ( !seen.Add( path ) )
+			{
+				// Two source roots can contain the same filename. Keep a distinct tree path for Roslyn.
+				path = $"/.obj/sources/{sources.Count}/{localPath}";
+			}
+
+			if ( path != localPath )
+				fileMap.Add( path, localPath );
+
+			sources.Add( new( tree.GetText().ToString(), path ) );
+		}
+
+		var razor = AdditionalFiles.Select( file => file with { LocalPath = PortablePath( file.LocalPath ) } );
+		bs.Write( JsonSerializer.Serialize( sources ) );
+		bs.Write( JsonSerializer.Serialize( razor.OrderBy( file => file.LocalPath, StringComparer.Ordinal ).ThenBy( file => file.Text, StringComparer.Ordinal ) ) );
+		bs.Write( JsonSerializer.Serialize( fileMap ) );
 
 		using var compressedBs = bs.Compress();
-		return compressedBs.ToArray();
+		var bytes = compressedBs.ToArray();
+		bytes[9] = 255; // Gzip's OS field is platform-specific. Use the portable "unknown" value.
+		return bytes;
+	}
+
+	// Partial type initializers depend on tree order. Use the same order for local builds and archives.
+	internal int CompareSourceOrder( SyntaxTree a, SyntaxTree b )
+	{
+		var order = string.CompareOrdinal( SourcePath( a ), SourcePath( b ) );
+		return order != 0 ? order : string.CompareOrdinal( a.GetText().ToString(), b.GetText().ToString() );
+	}
+
+	string SourcePath( SyntaxTree tree ) => PortablePath( FileMap.GetValueOrDefault( tree.FilePath, tree.FilePath ) );
+
+	static string PortablePath( string path )
+	{
+		path = path.Replace( '\\', '/' );
+		if ( path != Generator.Processor.CompilerExtraPath && (path.StartsWith( '/' ) || path is [_, ':', ..]) )
+			throw new InvalidOperationException( $"Missing project-relative archive path for '{path}'" );
+
+		return path;
 	}
 
 	/// <summary>

@@ -17,11 +17,6 @@ internal enum InternalMessageType : byte
 	HeartbeatPong,
 
 	/// <summary>
-	/// Is multiple chunks of the same message
-	/// </summary>
-	Chunk,
-
-	/// <summary>
 	/// Is a struct packed using TypeLibrary
 	/// </summary>
 	Packed,
@@ -71,4 +66,15 @@ internal enum InternalMessageType : byte
 	/// A response, this is a guid, then another message
 	/// </summary>
 	Response,
+
+	/// <summary>
+	/// One message for several peers reached through the host: sender id, flags, target ids, then the message.
+	/// The host passes it on with no targets to each of them.
+	/// </summary>
+	Multicast,
+
+	/// <summary>
+	/// An RPC call, see <see cref="Sandbox.Rpc"/>.
+	/// </summary>
+	Rpc,
 }

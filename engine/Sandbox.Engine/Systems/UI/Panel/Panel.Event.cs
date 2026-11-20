@@ -1,10 +1,15 @@
-﻿using System.Reflection;
+using Sandbox.Engine;
+using System.Reflection;
+using Sandbox.Utility;
 
 namespace Sandbox.UI;
 
 public partial class Panel
 {
-	internal struct EventCallback
+	/// <summary>
+	/// A listener registration with value equality and hashing that do not box in HashSetEx.
+	/// </summary>
+	internal record struct EventCallback
 	{
 		public string EventName;
 		public Action BaseAction;
@@ -16,16 +21,16 @@ public partial class Panel
 		public Panel Context;
 	}
 
-	internal List<EventCallback> EventListeners { get; set; }
+	private HashSetEx<EventCallback> _eventListeners;
 
 	/// <summary>
 	/// Called on creation and hotload to delete and re-initialize event listeners.
 	/// </summary>
 	protected virtual void InitializeEvents()
 	{
-		EventListeners?.RemoveAll( x => x.Automatic );
+		_eventListeners?.RemoveWhere( x => x.Automatic );
 
-		if ( Game.TypeLibrary == null || !Game.TypeLibrary.TryGetType( GetType(), out var typeDescription ) )
+		if ( GlobalContext.Current.TypeLibrary == null || !GlobalContext.Current.TypeLibrary.TryGetType( GetType(), out var typeDescription ) )
 			return;
 
 
@@ -94,8 +99,6 @@ public partial class Panel
 
 	internal void AddAutomaticEventListener( string name, Action<PanelEvent> e )
 	{
-		EventListeners ??= new List<EventCallback>();
-
 		var ev = new EventCallback
 		{
 			EventName = name,
@@ -103,12 +106,12 @@ public partial class Panel
 			Automatic = true
 		};
 
-		EventListeners.Add( ev );
+		AddEventListener( ev );
 	}
 
 	internal void RemoveEventListener( string name )
 	{
-		EventListeners?.RemoveAll( x => x.EventName == name );
+		_eventListeners?.RemoveWhere( x => x.EventName == name );
 	}
 
 	/// <summary>
@@ -137,8 +140,8 @@ public partial class Panel
 
 	internal void AddEventListener( EventCallback eventCallback )
 	{
-		EventListeners ??= new List<EventCallback>();
-		EventListeners.Add( eventCallback );
+		_eventListeners ??= new HashSetEx<EventCallback>();
+		_eventListeners.Add( eventCallback );
 	}
 
 	List<PanelEvent> PendingEvents;
@@ -202,6 +205,12 @@ public partial class Panel
 	}
 
 	/// <summary>
+	/// Run an event through the panel right now instead of queueing it. For events that need
+	/// an answer before returning - a hovering drag asking whether it'd be accepted.
+	/// </summary>
+	internal void DispatchEventImmediate( PanelEvent evnt ) => OnEvent( evnt );
+
+	/// <summary>
 	/// Called when various <see cref="PanelEvent"/>s happen. Handles event listeners and many standard events by default.
 	/// </summary>
 	protected virtual void OnEvent( PanelEvent e )
@@ -213,7 +222,7 @@ public partial class Panel
 			var text = GetClipboardValue( e is CutEvent );
 			if ( text != null )
 			{
-				NativeEngine.EngineGlobal.Plat_SetClipboardText( text );
+				NativeEngine.Sdl.SetClipboardText( text );
 			}
 		}
 
@@ -230,6 +239,7 @@ public partial class Panel
 			if ( e.Is( "onmousedown" ) ) OnMouseDown( mpe );
 			if ( e.Is( "onmouseup" ) ) OnMouseUp( mpe );
 			if ( e.Is( "ondoubleclick" ) ) OnDoubleClick( mpe );
+			if ( e.Is( "ontripleclick" ) ) OnTripleClick( mpe );
 			if ( e.Is( "onmousemove" ) ) OnMouseMove( mpe );
 			if ( e.Is( "onmouseover" ) ) OnMouseOver( mpe );
 			if ( e.Is( "onmouseout" ) ) OnMouseOut( mpe );
@@ -245,6 +255,10 @@ public partial class Panel
 			InternalDragEvent( de );
 		}
 
+		if ( e.Is( "ondrop" ) ) OnDrop( e );
+		if ( e.Is( "ondragenter" ) ) OnDragEnter( e );
+		if ( e.Is( "ondragleave" ) ) OnDragLeave( e );
+
 		if ( e.Is( "onfocus" ) ) OnFocus( e );
 		if ( e.Is( "onblur" ) ) OnBlur( e );
 		if ( e.Is( "onback" ) ) OnBack( e );
@@ -259,9 +273,10 @@ public partial class Panel
 		if ( !e.Propagate )
 			return;
 
-		if ( EventListeners != null )
+		if ( _eventListeners is not null )
 		{
-			foreach ( var listener in EventListeners )
+			// Listener changes become visible after the outermost dispatch finishes.
+			foreach ( var listener in _eventListeners.EnumerateLocked() )
 			{
 				if ( !e.Is( listener.EventName ) ) continue;
 
@@ -305,6 +320,12 @@ public partial class Panel
 	/// Called when the player double clicks the panel with the left mouse button.
 	/// </summary>
 	protected virtual void OnDoubleClick( MousePanelEvent e ) { }
+
+	/// <summary>
+	/// Called when this panel is clicked a third time in quick succession. Arrives after the
+	/// double click, so a selection can grow from word to line.
+	/// </summary>
+	protected virtual void OnTripleClick( MousePanelEvent e ) { }
 
 	/// <summary>
 	/// Called when the cursor moves while hovering this panel.

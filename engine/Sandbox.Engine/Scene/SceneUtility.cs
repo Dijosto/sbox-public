@@ -142,7 +142,7 @@ public static class SceneUtility
 
 		if ( template is PrefabScene prefabScene1 )
 		{
-			go.InitPrefabInstance( prefabScene1.Source.ResourcePath, false );
+			go.InitPrefabInstance( ResourceId.Get( prefabScene1.Source ), false );
 		}
 
 		go.Parent = Game.ActiveScene;
@@ -183,6 +183,8 @@ public static class SceneUtility
 	{
 		var scene = new Scene();
 		scene.Name = "RenderGameObjectToBitmap";
+		scene.PhysicsWorld?.Gravity = 0;
+
 		try
 		{
 			using var sceneScope = scene.Push();
@@ -203,7 +205,6 @@ public static class SceneUtility
 				sharpen.Scale = 0.2f;
 
 				go.AddComponent<AmbientOcclusion>( true );
-				go.AddComponent<ScreenSpaceReflections>( true ); // I don't think this'll work?
 				go.AddComponent<Bloom>( true );
 
 			}
@@ -315,9 +316,10 @@ public static class SceneUtility
 	/// make sure that their OnEnable/OnDisable and other callbacks are called in a deterministic order,
 	/// and that they can find each other during creation.
 	/// </summary>
+	[Obsolete( "Use Scene.BatchGroup() instead" )]
 	public static void RunInBatchGroup( Action action )
 	{
-		using ( CallbackBatch.Isolated() )
+		using ( Game.ActiveScene?.BatchGroup() )
 		{
 			action?.Invoke();
 		}

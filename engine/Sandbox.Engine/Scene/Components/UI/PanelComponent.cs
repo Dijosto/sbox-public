@@ -1,10 +1,11 @@
+using Sandbox.Engine;
 using Microsoft.AspNetCore.Components.Rendering;
 using Sandbox.UI;
 namespace Sandbox;
 
 [Category( "UI Panels" )]
 [Icon( "widgets" )]
-public abstract partial class PanelComponent : Component, IPanelComponent
+public abstract partial class PanelComponent : Component, IPanelComponent, Component.DontExecuteOnServer
 {
 	Panel panel;
 
@@ -39,7 +40,7 @@ public abstract partial class PanelComponent : Component, IPanelComponent
 		LoadStyleSheet();
 		UpdateParent();
 
-		var type = Game.TypeLibrary?.GetType( GetType() );
+		var type = GlobalContext.Current.TypeLibrary?.GetType( GetType() );
 		if ( type is not null )
 		{
 			panel.SourceFile = type.SourceFile;
@@ -161,7 +162,7 @@ public abstract partial class PanelComponent : Component, IPanelComponent
 
 	void LoadStyleSheet()
 	{
-		var type = Game.TypeLibrary?.GetType( GetType() );
+		var type = GlobalContext.Current.TypeLibrary?.GetType( GetType() );
 		if ( type is null )
 			return;
 

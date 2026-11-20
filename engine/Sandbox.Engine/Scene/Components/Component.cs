@@ -1,4 +1,5 @@
-﻿using Sandbox.Internal;
+﻿using Sandbox.Engine;
+using Sandbox.Internal;
 using Sandbox.Utility;
 using System.Threading;
 
@@ -10,6 +11,24 @@ namespace Sandbox;
 [Expose, ActionGraphIgnore, ActionGraphExposeWhenCached, Icon( "category" )]
 public abstract partial class Component : IJsonConvert, IComponentLister, IValid
 {
+	/// <summary>
+	/// Invokes the callback for the given <paramref name="callback"/> type.
+	/// Called internally by <see cref="CallbackBatch"/> to avoid delegate allocations.
+	/// </summary>
+	internal void InvokeCallback( CommonCallback callback )
+	{
+		switch ( callback )
+		{
+			case CommonCallback.Awake: InternalOnAwake(); break;
+			case CommonCallback.Enable: DispatchOnEnabled(); break;
+			case CommonCallback.Disable: DispatchOnDisabled(); break;
+			case CommonCallback.Destroy: OnDestroyInternal(); break;
+			case CommonCallback.Validate: OnValidateInternal(); break;
+			case CommonCallback.Dirty: OnDirtyInternal(); break;
+			case CommonCallback.Loading: LaunchLoader(); break;
+		}
+	}
+
 	/// <summary>
 	/// The scene this Component is in. This is a shortcut for `GameObject.Scene`.
 	/// </summary>
@@ -58,7 +77,7 @@ public abstract partial class Component : IJsonConvert, IComponentLister, IValid
 
 		if ( ShouldExecute )
 		{
-			CallbackBatch.Add( CommonCallback.Awake, InternalOnAwake, this, "OnAwake" );
+			CallbackBatch.Add( CommonCallback.Awake, this, "OnAwake" );
 		}
 	}
 
@@ -144,10 +163,13 @@ public abstract partial class Component : IJsonConvert, IComponentLister, IValid
 		// These issues should be FIXED. Not HIDDEN. They will cause downstream issues.
 		//
 		{
-			var name = $"{GetType().Name} on ({GameObject?.Name ?? "null"})";
-
-			Assert.NotNull( Game.ActiveScene, $"Calling awake on {name} but active scene is null - not {GameObject.Scene}" );
-			Assert.AreEqual( GameObject.Scene, Game.ActiveScene, $"Calling awake on {name} but active scene is {Game.ActiveScene}, not {GameObject.Scene}" );
+			// Only pay to build the diagnostic strings when the assert would actually fire.
+			if ( Game.ActiveScene is null || GameObject.Scene != Game.ActiveScene )
+			{
+				var name = $"{GetType().Name} on ({GameObject?.Name ?? "null"})";
+				Assert.NotNull( Game.ActiveScene, $"Calling awake on {name} but active scene is null - not {GameObject.Scene}" );
+				Assert.AreEqual( GameObject.Scene, Game.ActiveScene, $"Calling awake on {name} but active scene is {Game.ActiveScene}, not {GameObject.Scene}" );
+			}
 		}
 
 		// Disable any interpolation during OnAwake. We might be created in a Fixed Update context.
@@ -157,36 +179,52 @@ public abstract partial class Component : IJsonConvert, IComponentLister, IValid
 		}
 	}
 
-	internal virtual void OnEnabledInternal()
+	/// <summary>
+	/// Dispatches <see cref="OnEnabledInternal"/> if we haven't called it since becoming enabled.
+	/// </summary>
+	private void DispatchOnEnabled()
 	{
 		// make sure we only fire this once, and ensure the component is still enabled
-		if ( _onEnabled || !_enabledState || GameObject == null || GameObject.IsDestroyed )
-			return;
+		if ( _onEnabled || !_enabledState || GameObject == null || GameObject.IsDestroyed ) return;
 
+		_onEnabled = true;
+
+		OnEnabledInternal();
+	}
+
+	internal virtual void OnEnabledInternal()
+	{
 		// Disable any interpolation during OnEnabled. We might be created in a Fixed Update context.
 		using ( GameTransform.DisableInterpolation() )
 		{
-			_onEnabled = true;
 			OnEnabled();
 			OnComponentEnabled?.Invoke();
 		}
 	}
 
 	/// <summary>
-	/// Called after Awake or whenever the component switches to being enabled (because a gameobject heirachy active change, or the component changed)
+	/// Called after Awake or whenever the component switches to being enabled (because a gameobject hierarchy active change, or the component changed)
 	/// </summary>
 	protected virtual void OnEnabled() { }
 
-	internal virtual void OnDisabledInternal()
+	/// <summary>
+	/// Dispatches <see cref="OnDisabledInternal"/> if we haven't called it since becoming disabled.
+	/// </summary>
+	private void DispatchOnDisabled()
 	{
 		// make sure we only fire this once, and ensure the component is still disabled
-		if ( !_onEnabled || _enabledState )
-			return;
+		if ( !_onEnabled || _enabledState ) return;
 
+		_onEnabled = false;
+
+		OnDisabledInternal();
+	}
+
+	internal virtual void OnDisabledInternal()
+	{
 		// Disable any interpolation during OnDisabled.
 		using ( GameTransform.DisableInterpolation() )
 		{
-			_onEnabled = false;
 			OnDisabled();
 			OnComponentDisabled?.Invoke();
 		}
@@ -278,7 +316,7 @@ public abstract partial class Component : IJsonConvert, IComponentLister, IValid
 
 			if ( ShouldExecute )
 			{
-				CallbackBatch.Add( CommonCallback.Enable, OnEnabledInternal, this, "OnEnabled" );
+				CallbackBatch.Add( CommonCallback.Enable, this, "OnEnabled" );
 			}
 
 			Scene.RegisterComponent( this );
@@ -287,7 +325,7 @@ public abstract partial class Component : IJsonConvert, IComponentLister, IValid
 		{
 			if ( ShouldExecute )
 			{
-				CallbackBatch.Add( CommonCallback.Disable, OnDisabledInternal, this, "OnDisabled" );
+				CallbackBatch.Add( CommonCallback.Disable, this, "OnDisabled" );
 			}
 
 			Scene.UnregisterComponent( this );
@@ -332,7 +370,7 @@ public abstract partial class Component : IJsonConvert, IComponentLister, IValid
 			return;
 
 		GameObject.Components.OnDestroyedInternal( this );
-		CallbackBatch.Add( CommonCallback.Destroy, OnDestroyInternal, this, "OnDestroy" );
+		CallbackBatch.Add( CommonCallback.Destroy, this, "OnDestroy" );
 
 		if ( _enabledState )
 		{
@@ -342,7 +380,7 @@ public abstract partial class Component : IJsonConvert, IComponentLister, IValid
 
 			if ( ShouldExecute )
 			{
-				CallbackBatch.Add( CommonCallback.Disable, OnDisabledInternal, this, "OnDisabled" );
+				CallbackBatch.Add( CommonCallback.Disable, this, "OnDisabled" );
 			}
 		}
 	}
@@ -356,8 +394,8 @@ public abstract partial class Component : IJsonConvert, IComponentLister, IValid
 	[ActionGraphInclude]
 	public virtual void Reset()
 	{
-		var t = Game.TypeLibrary.GetType( GetType() );
-		var so = Game.TypeLibrary.GetSerializedObject( this );
+		var t = GlobalContext.Current.TypeLibrary.GetType( GetType() );
+		var so = GlobalContext.Current.TypeLibrary.GetSerializedObject( this );
 
 		foreach ( var field in t.Fields.Where( x => x.HasAttribute<PropertyAttribute>() ) )
 		{
@@ -396,7 +434,7 @@ public abstract partial class Component : IJsonConvert, IComponentLister, IValid
 
 	internal void Validate()
 	{
-		CallbackBatch.Add( CommonCallback.Validate, OnValidateInternal, this, "OnValidate" );
+		CallbackBatch.Add( CommonCallback.Validate, this, "OnValidate" );
 	}
 
 	internal void OnRefreshInternal()
@@ -448,11 +486,17 @@ public abstract partial class Component : IJsonConvert, IComponentLister, IValid
 	/// </summary>
 	public async void Invoke( float secondsDelay, Action action, CancellationToken ct = default )
 	{
-		await Task.DelaySeconds( secondsDelay );
+		try
+		{
+			await Task.DelaySeconds( secondsDelay, ct );
+		}
+		catch ( OperationCanceledException )
+		{
+			return;
+		}
 
 		if ( !this.IsValid() ) return;
 		if ( !this.Active ) return;
-		if ( ct.IsCancellationRequested ) return;
 
 		action.InvokeWithWarning();
 	}

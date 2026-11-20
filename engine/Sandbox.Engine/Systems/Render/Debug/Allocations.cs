@@ -1,7 +1,11 @@
-﻿namespace Sandbox;
+namespace Sandbox;
 
 internal static partial class DebugOverlay
 {
+	/// <summary>
+	/// Managed allocations by type, and GC pauses, for the dev tools's Memory tab. Tracking starts the first
+	/// time the tab samples and stops when it closes, since an allocation scope isn't free.
+	/// </summary>
 	public partial class Allocations
 	{
 		static Sandbox.Diagnostics.Allocations.Scope _scope;
@@ -19,14 +23,40 @@ internal static partial class DebugOverlay
 		static long _frameCount = 0;
 		static long _pauseTicksSum = 0;
 		static long _stutterCount = 0;
-		static long _pauseTicksMin = long.MaxValue;
 		static long _pauseTicksMax = 0;
 		static long _gen0Sum = 0;
 		static long _gen1Sum = 0;
 		static long _gen2Sum = 0;
-		static long _allocBytesSum = 0;
+		static long _allocBytesAtOpen = 0;
 
+		/// <summary>
+		/// The types that allocated the most since tracking started, biggest first.
+		/// </summary>
+		internal static IReadOnlyList<(string Name, long Bytes, long Count)> Top => _topAllocs;
 
+		/// <summary>
+		/// How long tracking has been running.
+		/// </summary>
+		internal static double WindowSeconds => _openTime < 0 ? 0 : RealTime.Now - _openTime;
+
+		internal static long AllocatedBytes => _openTime < 0 ? 0 : GC.GetTotalAllocatedBytes( precise: false ) - _allocBytesAtOpen;
+
+		internal static (long Gen0, long Gen1, long Gen2) Collections
+		{
+			get
+			{
+				var ls = Sandbox.Diagnostics.PerformanceStats.LastSecond;
+				return (_gen0Sum + ls.Gc0, _gen1Sum + ls.Gc1, _gen2Sum + ls.Gc2);
+			}
+		}
+
+		internal static double PauseSumMs => TimeSpan.FromTicks( _pauseTicksSum ).TotalMilliseconds;
+		internal static double PauseMaxMs => TimeSpan.FromTicks( _pauseTicksMax ).TotalMilliseconds;
+
+		/// <summary>
+		/// Frames with a GC pause of 2 ms or more.
+		/// </summary>
+		internal static long Stutters => _stutterCount;
 
 		internal static void Disabled()
 		{
@@ -37,17 +67,19 @@ internal static partial class DebugOverlay
 			_frameCount = 0;
 			_pauseTicksSum = 0;
 			_stutterCount = 0;
-			_pauseTicksMin = long.MaxValue;
 			_pauseTicksMax = 0;
 			_gen0Sum = 0;
 			_gen1Sum = 0;
 			_gen2Sum = 0;
-			_allocBytesSum = 0;
+			_allocBytesAtOpen = 0;
 			_accumByType.Clear();
 			_topAllocs.Clear();
 		}
 
-		internal static void Draw( ref Vector2 pos )
+		/// <summary>
+		/// Call once a frame while the tab is showing.
+		/// </summary>
+		internal static void Sample()
 		{
 			_scope ??= new();
 			_scope.Start();
@@ -57,9 +89,8 @@ internal static partial class DebugOverlay
 			{
 				_openTime = now;
 				_lastFlushTime = now;
+				_allocBytesAtOpen = GC.GetTotalAllocatedBytes( precise: false );
 			}
-
-			var ls = Sandbox.Diagnostics.PerformanceStats.LastSecond;
 
 			if ( now - _lastFlushTime >= 1.0 )
 			{
@@ -69,7 +100,6 @@ internal static partial class DebugOverlay
 				{
 					var prev = _accumByType.GetValueOrDefault( e.Name );
 					_accumByType[e.Name] = (prev.Bytes + (long)e.TotalBytes, prev.Count + (long)e.Count);
-					_allocBytesSum += (long)e.TotalBytes;
 				}
 
 				_topAllocs.Clear();
@@ -84,6 +114,7 @@ internal static partial class DebugOverlay
 
 				_scope.Clear();
 
+				var ls = Sandbox.Diagnostics.PerformanceStats.LastSecond;
 				_gen0Sum += ls.Gc0;
 				_gen1Sum += ls.Gc1;
 				_gen2Sum += ls.Gc2;
@@ -92,86 +123,8 @@ internal static partial class DebugOverlay
 			var gcPause = Sandbox.Diagnostics.PerformanceStats.GcPause;
 			_frameCount++;
 			_pauseTicksSum += gcPause;
-			if ( gcPause < _pauseTicksMin ) _pauseTicksMin = gcPause;
 			if ( gcPause > _pauseTicksMax ) _pauseTicksMax = gcPause;
 			if ( gcPause >= StutterThresholdTicks ) _stutterCount++;
-
-			var liveElapsed = now - _openTime;
-			if ( liveElapsed < 1.0 )
-				return;
-
-			var x = pos.x;
-			var y = pos.y;
-
-			var scope = new TextRendering.Scope( "", Color.White, 11, "Roboto Mono", 600 );
-			scope.Outline = new TextRendering.Outline { Color = Color.Black, Enabled = true, Size = 2 };
-
-			{
-				var lowestPauseMs = TimeSpan.FromTicks( _pauseTicksMin == long.MaxValue ? 0 : _pauseTicksMin ).TotalMilliseconds;
-				var highestPauseMs = TimeSpan.FromTicks( _pauseTicksMax ).TotalMilliseconds;
-				var sumMs = TimeSpan.FromTicks( _pauseTicksSum ).TotalMilliseconds;
-				var avgMs = _frameCount > 0 ? TimeSpan.FromTicks( _pauseTicksSum / _frameCount ).TotalMilliseconds : 0.0;
-
-				var gcMemInfo = GC.GetGCMemoryInfo();
-				var mbPerSec = liveElapsed > 0 ? _allocBytesSum / (1024.0 * 1024.0 * liveElapsed) : 0.0;
-				var mbTotal = _allocBytesSum / (1024.0 * 1024.0);
-				var elapsedSecondsInt = (int)liveElapsed;
-				var windowLabel = elapsedSecondsInt >= 60 ? $"{elapsedSecondsInt / 60}m {elapsedSecondsInt % 60}s" : $"{elapsedSecondsInt}s";
-				const string Pad = "{0,-32}";
-				scope.Text = $"GC Pauses (tracked for {windowLabel})\n" +
-					string.Format( Pad, "Gen (0/1/2):" ) + $"{_gen0Sum + ls.Gc0} / {_gen1Sum + ls.Gc1} / {_gen2Sum + ls.Gc2}\n" +
-					string.Format( Pad, "Total:" ) + $"{mbTotal:N1} MB\n" +
-					string.Format( Pad, "Rate:" ) + $"{mbPerSec:N2} MB/s\n" +
-					string.Format( Pad, "Avg:" ) + $"{avgMs:N2}ms\n" +
-					string.Format( Pad, "Min:" ) + $"{lowestPauseMs:N2}ms\n" +
-					string.Format( Pad, "Max:" ) + $"{highestPauseMs:N2}ms\n" +
-					string.Format( Pad, "Sum:" ) + $"{sumMs:N2}ms\n" +
-					string.Format( Pad, $"Frames with >{StutterThresholdTicks / TimeSpan.TicksPerMillisecond}ms GC:" ) + $"{_stutterCount} frames\n" +
-					string.Format( Pad, "GC%:" ) + $"{sumMs / (liveElapsed * 1000.0) * 100.0:N2}%\n" +
-					string.Format( Pad, "GC% since process start:" ) + $"{gcMemInfo.PauseTimePercentage:N2}%\n";
-				Hud.DrawText( scope, new Rect( x, y, 512, 13 ), TextFlag.LeftTop );
-
-				y += 154;
-			}
-
-			y += 16;
-
-			scope.TextColor = new Color( 1f, 1f, 0.5f );
-			scope.Text = $"Top {_topAllocs.Count} Allocations";
-			Hud.DrawText( scope, new Vector2( x + 20, y ), TextFlag.LeftTop );
-			y += 16;
-
-			foreach ( var e in _topAllocs )
-			{
-				scope.TextColor = GetLineColor( e.Name );
-
-				{
-					scope.Text = e.Bytes.FormatBytes();
-					Hud.DrawText( scope, new Rect( x + 20, y, 50, 13 ), TextFlag.RightTop );
-				}
-
-				{
-					scope.Text = e.Count.KiloFormat();
-					Hud.DrawText( scope, new Rect( x + 20, y, 75, 13 ), TextFlag.RightTop );
-				}
-
-				{
-					scope.Text = e.Name;
-					Hud.DrawText( scope, new Vector2( x + 100, y ), TextFlag.LeftTop );
-				}
-
-				y += 14;
-			}
-
-			pos.y = y;
-		}
-
-		static Color GetLineColor( string name )
-		{
-			if ( name.StartsWith( "System." ) ) return new Color( 0.7f, 1f, 0.7f );
-			if ( name.StartsWith( "<GetAll>" ) ) return new Color( 1f, 1f, 0.7f );
-
-			return Color.White;
 		}
 	}
 }

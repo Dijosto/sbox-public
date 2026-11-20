@@ -63,12 +63,17 @@ static class StartupLoadProject
 		}
 
 		//
-		// Add to project list if not already there
+		// Add to project list if not already there, and mark it just-opened so it's top of recent.
+		// Matters when we're launched straight from the taskbar jump list instead of the launcher.
 		//
 		{
 			var projectList = new ProjectList();
-			projectList.TryAddFromFile( path );
+			var entry = projectList.TryAddFromFile( path );
+			if ( entry != null )
+				entry.LastOpened = DateTime.Now;
 			projectList.SaveList();
+
+			TaskbarJumpList.Refresh();
 		}
 
 		//
@@ -95,10 +100,23 @@ static class StartupLoadProject
 		if ( string.IsNullOrEmpty( path ) ) throw new ArgumentException( nameof( path ) );
 		Assert.IsNull( Project.Current );
 
-		// This kinda sucks but better than overcomplicating everything.. make sure to update the steps..
 		CurrentStep = 0;
 		TotalSteps = 19; // 16 base + 3 for potential ForkedFrom (install + code extraction + asset extraction)
 
+		// Content is built once, below; loading a resource before then must not compile it
+		IAssetSystem.SuspendOnDemandCompiles( true );
+		try
+		{
+			return await OpenProjectAndBuildContent( path, ct );
+		}
+		finally
+		{
+			IAssetSystem.SuspendOnDemandCompiles( false );
+		}
+	}
+
+	static async Task<bool> OpenProjectAndBuildContent( string path, CancellationToken ct )
+	{
 		// should never be one existing once we remove all this shit
 		Project project = Project.AddFromFile( path, false );
 		var parentPackage = project.Config.GetMetaOrDefault<string>( "ParentPackage", null );
@@ -117,6 +135,10 @@ static class StartupLoadProject
 		Project.Current = project;
 		Project.Current.LastOpened = DateTime.Now;
 		project.Active = true;
+
+		// defer this until after we've loaded the project, so if we're opening a mount addon we don't do it twice
+		Sandbox.Mounting.Directory.LoadSources();
+		await EditorUtility.Projects.WaitForCompiles();
 
 		Step( "Initializing asset system" );
 		using ( var _ = Bootstrap.StartupTiming?.ScopeTimer( $"Load Project: Init AssetSystem" ) )
@@ -140,7 +162,6 @@ static class StartupLoadProject
 		{
 			await PackageManager.InstallProjects( Project.All.Where( x => x.IsBuiltIn ).ToArray() );
 		}
-
 		//
 		// If this is a forked game, install the source game with "tools" tag (downloads
 		// code + assets), then extract code and assets into the project on first open.
@@ -193,11 +214,11 @@ static class StartupLoadProject
 		{
 			await Project.SyncWithPackageManager();
 		}
-
-		// This double Load shit is stupid, creates the compilers properly now that we've installed any dependant packages
-		project.Load();
-
-		ExportSettings( project );
+		using ( var _ = Bootstrap.StartupTiming?.ScopeTimer( $"Load Project: Reload Project" ) )
+		{
+			project.Load();
+			ExportSettings( project );
+		}
 
 		Step( "Generating solution" );
 		using ( var _ = Bootstrap.StartupTiming?.ScopeTimer( $"Load Project: Generate Solution" ) )
@@ -214,7 +235,13 @@ static class StartupLoadProject
 		// Compiles and waits for the project in a bullshit way - this already starts happening way sooner
 		Step( "Compiling projects" );
 
-		if ( await EditorUtility.Projects.Updated( project ) == false )
+		bool projectUpdated;
+		using ( var _ = Bootstrap.StartupTiming?.ScopeTimer( $"Load Project: Check Compiled Projects" ) )
+		{
+			projectUpdated = await EditorUtility.Projects.Updated( project );
+		}
+
+		if ( projectUpdated == false )
 		{
 			using var _ = Bootstrap.StartupTiming?.ScopeTimer( $"Load Project: Compile" );
 			// load failed, present the user with the information
@@ -237,15 +264,23 @@ static class StartupLoadProject
 
 			Log.Info( $"AssetSystem.InstallAsync" );
 			// Install into asset system so we can use prefabs, gameresources, etc.
-			await AssetSystem.InstallAsync( parentPackage, false );
+			try
+			{
+				await AssetSystem.InstallAsync( parentPackage, false );
+			}
+			catch ( AggregateException ex )
+			{
+				// The game is already loaded. Missing editor assets should not prevent opening the project.
+				Log.Error( ex, $"Failed to install editor assets for {parentPackage}. Some assets may be unavailable." );
+			}
 
 			Log.Info( $"MountAsync" );
 			// Mount our current project, and load the source!
 			await project.Package.MountAsync( true );
 
 			// Mount our current project into the filesystem and make sure to load all assets
-			FileSystem.Mounted.CreateAndMount( project.GetAssetsPath() );
-			ResourceLoader.LoadAllGameResource( FileSystem.Mounted );
+			FileSystem.Mounted.Mount( project.AssetsFileSystem );
+			await ResourceLoader.LoadAllGameResourceAsync( FileSystem.Mounted, ct, true );
 		}
 		else
 		{
@@ -261,6 +296,15 @@ static class StartupLoadProject
 
 
 		Step( "Initializing mounts" );
+		//
+		// Register custom asset types before mounting, so that assets from mounts (like .prefab files) can be resolved by the asset system.
+		//
+		Log.Info( "Importing custom assets" );
+		using ( var _ = Bootstrap.StartupTiming?.ScopeTimer( $"Load Project: Register CustomAssetTypes" ) )
+		{
+			AssetType.UpdateCustomTypes();
+		}
+
 		using ( var _ = Bootstrap.StartupTiming?.ScopeTimer( $"Load Project: Init Mounts" ) )
 		{
 			// Mount any mounts that are required
@@ -268,12 +312,11 @@ static class StartupLoadProject
 		}
 
 		//
-		// Load the resources
+		// Import custom asset type files from content directories (including mounted ones)
 		//
 		Step( "Importing custom assets" );
-		using ( var _ = Bootstrap.StartupTiming?.ScopeTimer( $"Load Project: Register CustomAssetTypes" ) )
+		using ( var _ = Bootstrap.StartupTiming?.ScopeTimer( $"Load Project: Import CustomAssetTypes" ) )
 		{
-			AssetType.UpdateCustomTypes();
 			AssetType.ImportCustomTypeFiles();
 		}
 
@@ -284,6 +327,9 @@ static class StartupLoadProject
 			await RefreshCloudAssets( ct );
 		}
 
+		// Ticking the asset system resolves any pendeing types and dependencies
+		AssetSystem.Tick();
+
 		// Go through and compile all assets
 		using ( var _ = Bootstrap.StartupTiming?.ScopeTimer( $"Load Project: CompileAllAssets" ) )
 		{
@@ -291,9 +337,20 @@ static class StartupLoadProject
 			await CompileAllShaders();
 
 			Step( "Compiling assets" );
-			CompileAllAssets();
+			await EditorContentBuild.Startup( project );
 
 			FileWatch.Tick();
+		}
+
+		// Transient children the build published have parent links by now, so only files nothing owns are pruned
+		using ( var _ = Bootstrap.StartupTiming?.ScopeTimer( $"Load Project: PruneOrphans" ) )
+		{
+			AssetSystem.Tick();
+			AssetSystem.DeleteOrphans();
+		}
+
+		using ( var _ = Bootstrap.StartupTiming?.ScopeTimer( $"Load Project: LoadWorkingSets" ) )
+		{
 
 			// do we even need this anymore?
 			IAssetSystem.LoadWorkingSetsAndTags();
@@ -304,8 +361,7 @@ static class StartupLoadProject
 
 	static void UpdateProjectFilesystem( Project project )
 	{
-		var assetsPath = project.GetAssetsPath();
-		if ( !System.IO.Directory.Exists( assetsPath ) )
+		if ( !project.HasAssetsPath() )
 			return;
 
 		NativeEngine.FullFileSystem.AddProjectPath( project.Config.FullIdent, project.GetAssetsPath() );
@@ -343,7 +399,14 @@ static class StartupLoadProject
 		var projectDir = Path.GetFullPath( Project.Current.RootDirectory.FullName );
 
 		var sw = Stopwatch.StartNew();
-		var gr = AssetSystem.All.Where( x => x.AssetType == AssetType.Shader && x.HasSourceFile && Path.GetFullPath( x.AbsoluteSourcePath ).StartsWith( projectDir, StringComparison.OrdinalIgnoreCase ) ).ToArray();
+
+		// Ask for the source path now rather than using AbsoluteSourcePath, which is cached from the asset's last update
+		// and is still empty if its .shader turned up after that - HasSourceFile is live, so the two can disagree
+		var gr = AssetSystem.All
+			.Where( x => x.AssetType == AssetType.Shader && x.HasSourceFile )
+			.Select( x => (Asset: x, SourcePath: x.GetSourceFile( true )) )
+			.Where( x => !string.IsNullOrEmpty( x.SourcePath ) && Path.GetFullPath( x.SourcePath ).StartsWith( projectDir, StringComparison.OrdinalIgnoreCase ) )
+			.ToArray();
 		if ( gr.Length == 0 ) return;
 
 		var options = new ShaderCompileOptions();
@@ -354,37 +417,22 @@ static class StartupLoadProject
 		FastTimer timer = FastTimer.StartNew();
 		for ( int i = 0; i < gr.Length; i++ )
 		{
-			EditorSplashScreen.SetMessage( $"Compiling shader {i + 1}/{gr.Length} {gr[i].RelativePath}" );
+			var (asset, sourcePath) = gr[i];
+
+			EditorSplashScreen.SetMessage( $"Compiling shader {i + 1}/{gr.Length} {asset.RelativePath}" );
 			StepProgress( (float)i / gr.Length );
 
-			await ShaderCompile.Compile( gr[i].AbsolutePath, gr[i].RelativePath, options, default );
+			var result = await ShaderCompile.Compile( sourcePath, asset.RelativePath, options, default );
+			if ( result.Success && !result.Skipped )
+			{
+				// Resident shaders may still have combo offsets from before the compiled file was rewritten.
+				// Reload them before any further asset loading can use those offsets against the new file.
+				ConsoleSystem.Run( $"mat_reloadshaders \"{asset.RelativePath}\"" );
+			}
 		}
 		if ( sw.Elapsed.TotalSeconds > 2 )
 		{
 			Log.Info( $"Compiling shaders took {sw.Elapsed.TotalSeconds:0.000}s" );
-		}
-	}
-
-	static void CompileAllAssets()
-	{
-		var sw = Stopwatch.StartNew();
-		var gr = AssetSystem.All.Where( x => !x.IsTrivialChild && x.CanRecompile && !x.IsCompiledAndUpToDate ).ToArray();
-		if ( gr.Length == 0 ) return;
-
-		FastTimer timer = FastTimer.StartNew();
-
-		for ( int i = 0; i < gr.Length; i++ )
-		{
-			EditorSplashScreen.SetMessage( $"Compiling asset {i + 1}/{gr.Length} {gr[i].Path}" );
-			StepProgress( (float)i / gr.Length );
-
-			IToolsDll.Current?.Spin();
-			gr[i].Compile( false );
-		}
-
-		if ( sw.Elapsed.TotalSeconds > 2 )
-		{
-			Log.Info( $"Compiling assets took {sw.Elapsed.TotalSeconds:0.000}s" );
 		}
 	}
 
@@ -408,7 +456,7 @@ static class StartupLoadProject
 		foreach ( var ident in packagesToDownload )
 		{
 			// normalise into org.ident, without version, so we can easily check below
-			if ( Package.TryParseIdent( ident, out var p ) )
+			if ( Package.TryParseIdentParts( ident, out var p ) )
 				required.Add( Package.FormatIdent( p.org, p.package ) );
 		}
 
@@ -428,6 +476,9 @@ static class StartupLoadProject
 
 	private static void ExportSettings( Project project )
 	{
+		if ( project.Config.Type != "game" )
+			return;
+
 		if ( !FileSystem.ProjectSettings.FileExists( "/Input.config" ) )
 		{
 			if ( !project.Config.TryGetMeta<InputSettings>( "InputSettings", out var meta ) )
@@ -456,6 +507,11 @@ static class StartupLoadProject
 		if ( project.Config.SetMeta( "Collision", null ) )
 		{
 			project.Save();
+		}
+
+		if ( !FileSystem.ProjectSettings.FileExists( "/Platform.config" ) )
+		{
+			EditorUtility.SaveProjectSettings( new PlatformSettings(), "Platform.config" );
 		}
 	}
 

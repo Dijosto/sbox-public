@@ -53,7 +53,6 @@ partial class ViewportTools
 			{
 				var angleStep = new AngleStepWidget( so.GetProperty( nameof( EditorScene.GizmoSettings.AngleSpacing ) ) );
 				angleStep.ToolTip = "Angle Step";
-				angleStep.FixedWidth = 65;
 				group.Layout.Add( angleStep );
 			}
 		}
@@ -76,10 +75,11 @@ partial class ViewportTools
 					Max = 128.0f
 				};
 				snapStep.ToolTip = "Grid Step";
-				snapStep.FixedWidth = 65;
 				group.Layout.Add( snapStep );
 			}
 		}
+
+		BuildWorkPlaneToolbar( layout );
 	}
 
 	private void OpenGizmosMenu()
@@ -351,12 +351,14 @@ class SnapStepWidget : ControlWidget
 	public SnapStepWidget( SerializedProperty property, string suffix = null ) : base( property )
 	{
 		Layout = Layout.Row();
+		FixedWidth = 55;
+
 		LineEdit = new LineEdit( this );
 		LineEdit.TextEdited += ( text ) => property.SetValue<object>( float.TryParse( text, out float v ) ? v : text );
 		LineEdit.MinimumSize = Theme.RowHeight;
 		LineEdit.MaximumSize = new Vector2( 4096, Size.y );
 		LineEdit.ReadOnly = ReadOnly;
-		LineEdit.SetStyles( "background-color: transparent; vertical-align: middle; text-align: left;" );
+		LineEdit.SetStyles( "background-color: transparent; vertical-align: middle; text-align: left; padding-left: 2px; padding-right: 0;" );
 		Layout.Add( LineEdit );
 
 		if ( suffix != null )

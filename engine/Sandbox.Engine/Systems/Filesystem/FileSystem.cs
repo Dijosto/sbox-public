@@ -5,6 +5,7 @@ namespace Sandbox;
 /// <summary>
 /// A filesystem that can be accessed by the game.
 /// </summary>
+[Expose]
 public static class FileSystem
 {
 	/// <summary>
@@ -32,7 +33,7 @@ public static class FileSystem
 	/// <summary>
 	/// A cached keystore that can be used for anything. This is stored in a global cache folder, and may be deleted at any time.
 	/// </summary>
-	public static KeyStore Cache = KeyStore.CreateGlobalCache();
+	public static KeyStore Cache { get => field ??= KeyStore.CreateGlobalCache(); }
 
 	/// <summary>
 	/// Create a filesystem that exists only in memory

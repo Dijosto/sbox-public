@@ -178,6 +178,18 @@ public partial class AssetList
 		popup.OpenAtCursor( false );
 	}
 
+	static async Task InstallPackageFromMenu( string ident )
+	{
+		try
+		{
+			await AssetSystem.InstallAsync( ident );
+		}
+		catch ( AggregateException ex )
+		{
+			Log.Warning( ex, $"Error installing package {ident}" );
+		}
+	}
+
 	private void OpenItemContextMenu( object item )
 	{
 		var packageEntries = SelectedItems.OfType<PackageEntry>();
@@ -194,7 +206,7 @@ public partial class AssetList
 			{
 				foreach ( var entry in packageEntries )
 				{
-					AssetSystem.InstallAsync( entry.Package.FullIdent );
+					_ = InstallPackageFromMenu( entry.Package.FullIdent );
 				}
 			} );
 
@@ -210,7 +222,7 @@ public partial class AssetList
 		{
 			var dir = directories.First();
 
-			OpenFolderContextMenu( dir, false );
+			OpenFolderContextMenu( dir.DirectoryInfo.FullName, false );
 
 			return;
 		}
@@ -257,14 +269,14 @@ public partial class AssetList
 
 		if ( count > 0 )
 		{
-			if ( !asset?.IsProcedural ?? true )
+			if ( e.SelectedList.All( x => x.Asset is { CanOpenInEditor: true } ) )
 			{
-				if ( e.SelectedList.All( x => x.Asset is not null ) )
-				{
-					e.Menu.AddOption( count == 1 ? "Open in Editor" : $"Open {count} in Editor(s)", "edit",
-						() => e.SelectedList.ForEach( x => x.Asset.OpenInEditor() ) );
-				}
-				else if ( e.SelectedList.All( x => EditorUtility.IsCodeFile( x.FileInfo.FullName ) ) )
+				e.Menu.AddOption( count == 1 ? "Open in Editor" : $"Open {count} in Editor(s)", "edit",
+					() => e.SelectedList.ForEach( x => x.Asset.OpenInEditor() ) );
+			}
+			else if ( !asset?.IsProcedural ?? true )
+			{
+				if ( e.SelectedList.All( x => EditorUtility.IsCodeFile( x.FileInfo.FullName ) ) )
 				{
 					string editorName = CodeEditor.Title;
 					e.Menu.AddOption( count == 1 ? $"Open in {editorName}" : $"Open {count} in {editorName}", "edit",
@@ -341,25 +353,18 @@ public partial class AssetList
 			.Select( x => x.Asset )
 			.ToList();
 
-		if ( meshes.Count != 0 )
-		{
-			if ( meshes.Count == 1 )
-			{
-				var mdl = meshes.First();
-				e.Menu.AddOption( "Create model..", "open_in_new", () =>
-				{
-					var targetPath = EditorUtility.SaveFileDialog( "Create Model..", "vmdl", System.IO.Path.ChangeExtension( mdl.AbsolutePath, "vmdl" ) );
-					if ( targetPath is null )
-						return;
+		if ( meshes.Count == 0 )
+			return;
 
-					EditorUtility.CreateModelFromMeshFile( mdl, targetPath );
-				} );
-			}
-			else
-			{
-				// ModelDoc has native code to do this for us
-				e.Menu.AddOption( $"Create {meshes.Count()} models", "open_in_new", () => meshes.ForEach( asset => EditorUtility.CreateModelFromMeshFile( asset ) ) );
-			}
+		if ( meshes.Count == 1 )
+		{
+			e.Menu.AddOption( "Create Model", "open_in_new", () => _ = new CreateModelFromMeshDialog( meshes ) );
+		}
+		else
+		{
+			var menu = e.Menu.AddMenu( "Create Models", "open_in_new" );
+			menu.AddOption( "Separate Models", "call_split", () => _ = new CreateModelFromMeshDialog( meshes ) );
+			menu.AddOption( "Single Model", "join_inner", () => _ = new CreateSingleModelFromMeshDialog( meshes ) );
 		}
 	}
 
@@ -611,7 +616,7 @@ public partial class AssetList
 
 			if ( count > 1 )
 			{
-				var assets = e.SelectedList.Select( x => x.Asset ).ToArray();
+				var assets = e.SelectedList.Select( x => x.Asset ).Where( x => x != null ).Distinct().ToArray();
 				var o = e.Menu.AddOption( $"Batch Publish ({assets.Length})..", "cloud_upload", () => BatchPublisher.FromAssetsWithEnablePublish( assets ) );
 			}
 		}
@@ -654,8 +659,8 @@ public partial class AssetList
 
 			fcm.Menu.AddSeparator();
 
-			fcm.Menu.AddOption( "Delete", "delete", DeleteAsset, "editor.delete" );
-			fcm.Menu.AddOption( "Rename", "edit", () => OpenRenameFlyout( directoryInfo, fcm.ScreenPosition ), "editor.rename" );
+			fcm.Menu.AddOption( "Delete", "delete", DeleteAsset, "editor.delete" ).Enabled = directoryInfo.Exists;
+			fcm.Menu.AddOption( "Rename", "edit", () => OpenRenameFlyout( directoryInfo, fcm.ScreenPosition ), "editor.rename" ).Enabled = directoryInfo.Exists;
 		}
 
 		EditorEvent.Run( "folder.contextmenu", fcm );
@@ -663,17 +668,6 @@ public partial class AssetList
 		fcm.Menu.OpenAt( fcm.ScreenPosition, false );
 
 		return fcm;
-	}
-
-	void OpenFolderContextMenu( DirectoryEntry directory, bool isThisFolder )
-	{
-		var fcm = OpenFolderContextMenu( directory.DirectoryInfo.FullName, isThisFolder );
-
-		if ( !fcm.ThisFolder )
-		{
-			fcm.Menu.AddOption( "Delete", "delete", DeleteAsset, "editor.delete" );
-			fcm.Menu.AddOption( $"Rename", "edit", action: () => OpenRenameFlyout( directory, fcm.ScreenPosition ), shortcut: "editor.rename" );
-		}
 	}
 
 	static void BuildAllIconsR( List<Asset> assets )
@@ -709,7 +703,7 @@ public partial class AssetList
 	[Event( "folder.contextmenu", Priority = 50 )]
 	private static void OnFolderContextMenu_Pins( FolderContextMenu e )
 	{
-		if ( e.ThisFolder ) return;
+		if ( e.ThisFolder || !e.Target.Exists ) return;
 
 		e.Menu.AddOption( $"Pin", "push_pin", action: () => MainAssetBrowser.Instance.Local.AddPin( e.Target.FullName ) );
 	}
@@ -733,6 +727,10 @@ public partial class AssetList
 	[Event( "folder.contextmenu", Priority = 100 )]
 	private static void OnFolderContextMenu_BottomSection( FolderContextMenu e )
 	{
+		// only for folders that exist on disk
+		if ( e.Target is null || !e.Target.Exists )
+			return;
+
 		e.Menu.AddSeparator();
 
 		if ( !e.ThisFolder )
@@ -743,16 +741,13 @@ public partial class AssetList
 			o.Enabled = assets.Length > 0;
 		}
 
-		if ( e.Target != null )
+		e.Menu.AddSeparator();
+		e.Menu.AddOption( "Show in Explorer", "folder_open", () => EditorUtility.OpenFolder( e.Target.FullName ) );
+		e.Menu.AddOption( "Folder Metadata", "tune", () =>
 		{
-			e.Menu.AddSeparator();
-			e.Menu.AddOption( "Show in Explorer", "folder_open", () => EditorUtility.OpenFolder( e.Target.FullName ) );
-			e.Menu.AddOption( "Folder Metadata", "tune", () =>
-			{
-				var dialog = new FolderMetadataDialog( e.Target );
-				dialog.Show();
-			} );
-		}
+			var dialog = new FolderMetadataDialog( e.Target );
+			dialog.Show();
+		} );
 	}
 
 	#endregion

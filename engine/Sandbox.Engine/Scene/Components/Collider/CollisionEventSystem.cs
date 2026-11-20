@@ -7,96 +7,88 @@ namespace Sandbox;
 /// </summary>
 class CollisionEventSystem : IDisposable
 {
-	private readonly PhysicsBody _body;
-	private readonly GameObject _gameObject;
+	private PhysicsBody _body;
+	private GameObject _gameObject;
+	private Rigidbody _rigidbody;
+	private bool _disposed;
 
-	public Action<Collision> OnCollisionStart;
-	public Action<CollisionStop> OnCollisionStop;
-	public Action<Collision> OnCollisionUpdate;
+	public IReadOnlyCollection<Collider> Touching => _touchingColliders is null ? Array.Empty<Collider>() : _touchingColliders.Keys;
 
-	public IReadOnlyCollection<Collider> Touching => _touchingColliders is null ? Array.Empty<Collider>() : _touchingColliders;
+	/// <summary>
+	/// Append contacts without boxing the dictionary's enumerator.
+	/// </summary>
+	internal void GetTouching( List<Collider> result )
+	{
+		if ( _touchingColliders is null )
+			return;
+
+		foreach ( var collider in _touchingColliders.Keys )
+			result.Add( collider );
+	}
 
 	private record struct TouchingPair( Collider Self, Collider Other, GameObject GameObject );
 	private HashSet<TouchingPair> _touchingPairs;
-	private HashSet<Collider> _touchingColliders;
-	private HashSet<GameObject> _touchingObjects;
+
+	// How many touching pairs we have with each other collider and GameObject
+	private Dictionary<Collider, int> _touchingColliders;
+	private Dictionary<GameObject, int> _touchingObjects;
 
 	private HashSet<TouchingPair> TouchingPairs => _touchingPairs ??= new();
-	private HashSet<Collider> TouchingColliders => _touchingColliders ??= new();
-	private HashSet<GameObject> TouchingObjects => _touchingObjects ??= new();
+	private Dictionary<Collider, int> TouchingColliders => _touchingColliders ??= new();
+	private Dictionary<GameObject, int> TouchingObjects => _touchingObjects ??= new();
 
-	public CollisionEventSystem( PhysicsBody body, GameObject go = null )
+	public CollisionEventSystem( PhysicsBody body, Rigidbody rigidbody = null )
 	{
 		_body = body;
-		_gameObject = go ?? body.GameObject;
-
-		_body.OnIntersectionStart += OnIntersectionStart;
-		_body.OnIntersectionEnd += OnIntersectionEnd;
-		_body.OnIntersectionUpdate += OnIntersectionUpdate;
-		_body.OnTriggerBegin += OnTriggerBegin;
-		_body.OnTriggerEnd += OnTriggerEnd;
+		_rigidbody = rigidbody;
+		_gameObject = rigidbody?.GameObjectSource ?? body.GameObject;
+		_body.Listener = this;
 	}
 
-	private void OnTriggerBegin( PhysicsIntersection c )
+	/// <summary>
+	/// Swap to a new physics body without reallocating delegates.
+	/// </summary>
+	public void Rebind( PhysicsBody newBody )
 	{
-		var self = new CollisionSource( c.Self );
-		var other = new CollisionSource( c.Other );
+		if ( _body.IsValid() )
+			_body.Listener = null;
+
+		_body = newBody;
+		_gameObject = _rigidbody?.GameObjectSource ?? newBody.GameObject;
+		_body.Listener = this;
+	}
+
+	internal void OnTriggerBegin( in CollisionSource self, in CollisionSource other )
+	{
 		var gameObject = other.Body.GameObject;
 
 		OnObjectTriggerStart( self.Collider, gameObject );
 		OnColliderTriggerStart( self.Collider, other.Collider, gameObject );
 	}
 
-	private void OnTriggerEnd( PhysicsIntersectionEnd c )
+	internal void OnTriggerEnd( in CollisionSource self, in CollisionSource other )
 	{
-		var self = new CollisionSource( c.Self );
-		var other = new CollisionSource( c.Other );
 		var gameObject = other.Body.GameObject;
 
 		OnColliderTriggerStop( self.Collider, other.Collider, gameObject );
-
-		if ( IsTouching( other.Component ) )
-			return;
-
 		OnObjectTriggerStop( self.Collider, gameObject );
 	}
 
-	private void OnIntersectionStart( PhysicsIntersection c )
+	internal void OnIntersectionStart( in Collision o )
 	{
-		var self = new CollisionSource( c.Self );
-		var other = new CollisionSource( c.Other );
-		var o = new Collision( self, other, c.Contact );
+		_rigidbody?.HandleImpactDamage( o );
 
-		OnCollisionStart?.Invoke( o );
-
-		_gameObject.Components.ExecuteEnabledInSelfAndDescendants<ICollisionListener>( x => x.OnCollisionStart( o ) );
+		_gameObject.Components.ExecuteEnabledInSelfAndDescendants<ICollisionListener, Collision>( o, static ( x, c ) => x.OnCollisionStart( c ) );
 	}
 
-	private bool IsTouching( Component other )
+	internal void OnIntersectionEnd( in CollisionStop o )
 	{
-		return false;
+		_gameObject.Components.ExecuteEnabledInSelfAndDescendants<ICollisionListener, CollisionStop>( o, static ( x, c ) => x.OnCollisionStop( c ) );
 	}
 
-	private void OnIntersectionEnd( PhysicsIntersectionEnd c )
+	internal void OnIntersectionUpdate( in Collision o )
 	{
-		var self = new CollisionSource( c.Self );
-		var other = new CollisionSource( c.Other );
-		var o = new CollisionStop( self, other );
-
-		OnCollisionStop?.Invoke( o );
-
-		_gameObject.Components.ExecuteEnabledInSelfAndDescendants<ICollisionListener>( x => x.OnCollisionStop( o ) );
-	}
-
-	private void OnIntersectionUpdate( PhysicsIntersection c )
-	{
-		var self = new CollisionSource( c.Self );
-		var other = new CollisionSource( c.Other );
-		var o = new Collision( self, other, c.Contact );
-
-		OnCollisionUpdate?.Invoke( o );
-
-		_gameObject.Components.ExecuteEnabledInSelfAndDescendants<ICollisionListener>( x => x.OnCollisionUpdate( o ) );
+		_gameObject.Components.ExecuteEnabledInSelfAndDescendants<ICollisionListener, Collision>( o, static ( x, c ) => x.OnCollisionUpdate( c ) );
 	}
 
 	private void OnColliderTriggerStart( Collider self, Collider other, GameObject go )
@@ -107,15 +99,21 @@ class CollisionEventSystem : IDisposable
 		if ( other is null )
 			return;
 
-		if ( !TouchingPairs.Any( x => x.Other == other ) )
+		// An object enter listener can disable us, still send the enter but don't track a pair we'll never exit
+		if ( !_disposed )
 		{
-			TouchingColliders.Add( other );
+			if ( !TouchingPairs.Add( new TouchingPair( self, other, go ) ) )
+				return;
 
-			other.OnComponentDisabled += RemoveDeactivated;
+			// Watch the other collider from our first pair with it, when it's disabled its shapes go away without sending trigger exits
+			if ( TouchingColliders.TryAdd( other, 1 ) )
+				other.AddTouchWatcher( this );
+			else
+				TouchingColliders[other]++;
+
+			if ( go is not null )
+				TouchingObjects[go]++;
 		}
-
-		if ( !TouchingPairs.Add( new TouchingPair( self, other, go ) ) )
-			return;
 
 		if ( !self.IsValid() )
 			return;
@@ -128,7 +126,7 @@ class CollisionEventSystem : IDisposable
 
 		self.OnTriggerEnter?.InvokeWithWarning( other );
 
-		_gameObject.Components.ExecuteEnabledInSelfAndDescendants<ITriggerListener>( x => x.OnTriggerEnter( self, other ) );
+		_gameObject.Components.ExecuteEnabledInSelfAndDescendants<ITriggerListener, (Collider self, Collider other)>( (self, other), static ( x, s ) => x.OnTriggerEnter( s.self, s.other ) );
 	}
 
 	private void OnColliderTriggerStop( Collider self, Collider other, GameObject go )
@@ -139,21 +137,30 @@ class CollisionEventSystem : IDisposable
 		if ( other is null )
 			return;
 
-		foreach ( var shape in self.Shapes )
-		{
-			if ( other.Shapes.Any( x => shape.IsTouching( x, true ) ) )
-				return;
-		}
-
-		if ( !TouchingPairs.Remove( new TouchingPair( self, other, go ) ) )
+		var pair = new TouchingPair( self, other, go );
+		if ( _touchingPairs is null || !_touchingPairs.Contains( pair ) )
 			return;
 
-		if ( !TouchingPairs.Any( x => x.Other == other ) )
+		// Another shape pair of these colliders can still be overlapping
+		foreach ( var shape in self.Shapes )
 		{
-			TouchingColliders.Remove( other );
-
-			other.OnComponentDisabled -= RemoveDeactivated;
+			foreach ( var otherShape in other.Shapes )
+			{
+				if ( shape.IsTouching( otherShape, true ) )
+					return;
+			}
 		}
+
+		_touchingPairs.Remove( pair );
+
+		if ( --_touchingColliders[other] == 0 )
+		{
+			_touchingColliders.Remove( other );
+			other.RemoveTouchWatcher( this );
+		}
+
+		if ( go is not null )
+			_touchingObjects[go]--;
 
 		if ( !self.IsValid() )
 			return;
@@ -166,7 +173,7 @@ class CollisionEventSystem : IDisposable
 
 		self.OnTriggerExit?.InvokeWithWarning( other );
 
-		_gameObject.Components.ExecuteEnabledInSelfAndDescendants<ITriggerListener>( x => x.OnTriggerExit( self, other ) );
+		_gameObject.Components.ExecuteEnabledInSelfAndDescendants<ITriggerListener, (Collider self, Collider other)>( (self, other), static ( x, s ) => x.OnTriggerExit( s.self, s.other ) );
 	}
 
 	private void OnObjectTriggerStart( Collider self, GameObject other )
@@ -177,7 +184,8 @@ class CollisionEventSystem : IDisposable
 		if ( other is null )
 			return;
 
-		if ( !TouchingObjects.Add( other ) )
+		// Collider pairs with it count up from zero
+		if ( !TouchingObjects.TryAdd( other, 0 ) )
 			return;
 
 		if ( !self.IsValid() )
@@ -191,7 +199,7 @@ class CollisionEventSystem : IDisposable
 
 		self.OnObjectTriggerEnter?.InvokeWithWarning( other );
 
-		_gameObject.Components.ExecuteEnabledInSelfAndDescendants<ITriggerListener>( x => x.OnTriggerEnter( self, other ) );
+		_gameObject.Components.ExecuteEnabledInSelfAndDescendants<ITriggerListener, (Collider self, GameObject other)>( (self, other), static ( x, s ) => x.OnTriggerEnter( s.self, s.other ) );
 	}
 
 	private void OnObjectTriggerStop( Collider self, GameObject other )
@@ -202,11 +210,11 @@ class CollisionEventSystem : IDisposable
 		if ( other is null )
 			return;
 
-		if ( TouchingPairs.Any( x => x.GameObject == other ) )
+		// Still touching it through another pair
+		if ( _touchingObjects is null || !_touchingObjects.TryGetValue( other, out var pairs ) || pairs > 0 )
 			return;
 
-		if ( !TouchingObjects.Remove( other ) )
-			return;
+		_touchingObjects.Remove( other );
 
 		if ( !self.IsValid() )
 			return;
@@ -219,38 +227,68 @@ class CollisionEventSystem : IDisposable
 
 		self.OnObjectTriggerExit?.InvokeWithWarning( other );
 
-		_gameObject.Components.ExecuteEnabledInSelfAndDescendants<ITriggerListener>( x => x.OnTriggerExit( self, other ) );
+		_gameObject.Components.ExecuteEnabledInSelfAndDescendants<ITriggerListener, (Collider self, GameObject other)>( (self, other), static ( x, s ) => x.OnTriggerExit( s.self, s.other ) );
 	}
 
-	private void RemoveDeactivated()
+	/// <summary>
+	/// A collider we're touching was disabled, end every pair with an inactive collider.
+	/// </summary>
+	internal void RemoveDeactivated()
 	{
-		Action actions = default;
+		if ( _touchingPairs is null )
+			return;
 
-		foreach ( var pair in TouchingPairs )
+		List<TouchingPair> ended = null;
+		foreach ( var pair in _touchingPairs )
 		{
 			if ( pair.Other.Active )
 				continue;
 
-			actions += () => OnColliderTriggerStop( pair.Self, pair.Other, pair.GameObject );
-			actions += () => OnObjectTriggerStop( pair.Self, pair.GameObject );
+			(ended ??= new()).Add( pair );
 		}
 
-		actions?.InvokeWithWarning();
+		if ( ended is null )
+			return;
+
+		// One throwing listener shouldn't leave the other pairs touching
+		foreach ( var pair in ended )
+		{
+			try
+			{
+				OnColliderTriggerStop( pair.Self, pair.Other, pair.GameObject );
+			}
+			catch ( Exception e )
+			{
+				Log.Warning( e, e.Message );
+			}
+
+			try
+			{
+				OnObjectTriggerStop( pair.Self, pair.GameObject );
+			}
+			catch ( Exception e )
+			{
+				Log.Warning( e, e.Message );
+			}
+		}
 	}
 
 	public void Dispose()
 	{
+		_disposed = true;
+
+		if ( _touchingColliders is not null )
+		{
+			foreach ( var other in _touchingColliders.Keys )
+				other.RemoveTouchWatcher( this );
+		}
+
 		_touchingPairs?.Clear();
 		_touchingColliders?.Clear();
 		_touchingObjects?.Clear();
 
-		if ( !_body.IsValid() )
-			return;
+		if ( !_body.IsValid() ) return;
 
-		_body.OnIntersectionStart -= OnIntersectionStart;
-		_body.OnIntersectionEnd -= OnIntersectionEnd;
-		_body.OnIntersectionUpdate -= OnIntersectionUpdate;
-		_body.OnTriggerBegin -= OnTriggerBegin;
-		_body.OnTriggerEnd -= OnTriggerEnd;
+		if ( _body.Listener == this ) _body.Listener = null;
 	}
 }

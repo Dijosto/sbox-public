@@ -28,8 +28,14 @@ namespace Sandbox;
 /// </code>
 /// </example>
 /// <seealso cref="Application"/>
+[Expose]
 public static partial class Game
 {
+	/// <summary>
+	/// Creates scripts using the current menu or game's exposed types and cached code.
+	/// </summary>
+	public static ScriptSystem Scripting => GlobalContext.Game.Scripting;
+
 	/// <summary>
 	/// The input context for this context (menu, gamemenu, client)
 	/// </summary>
@@ -83,7 +89,7 @@ public static partial class Game
 	/// <summary>
 	/// Return true if we're running on a handheld device (the deck). Will always be false serverside.
 	/// </summary>
-	public static bool IsRunningOnHandheld { get; internal set; }
+	public static bool IsRunningOnHandheld => Steamworks.SteamClient.IsValid && Steamworks.SteamUtils.IsRunningOnSteamDeck;
 
 	/// <summary>
 	/// A shared random that is automatically seeded on tick
@@ -108,7 +114,7 @@ public static partial class Game
 	/// </summary>
 	public static WebSurface CreateWebSurface()
 	{
-		return new WebSurface( !IsMenu );
+		return new WebSurface( true );
 	}
 
 	/// <summary>
@@ -130,9 +136,25 @@ public static partial class Game
 	public static SceneTrace SceneTrace => Game.ActiveScene.Trace;
 
 	/// <summary>
-	/// Close the current game.
+	/// Close the current game. Ignored while it's on its menu (<see cref="IsOnMenu"/>) - that's the platform menu's to
+	/// close, and closing it from under it leaves nothing running; start it by changing scene instead.
 	/// </summary>
 	public static void Close()
+	{
+		// A warning, not an exception - a Quit button on a game's own menu is common, and it's just ignored
+		if ( IsOnMenu && IMenuDll.Current is not null && !Application.IsEditor && GlobalContext.Current != GlobalContext.Menu )
+		{
+			Log.Warning( "Game.Close() ignored - the game can't close itself while it's on its menu, the platform menu does that. Change scene to start it." );
+			return;
+		}
+
+		CloseGame();
+	}
+
+	/// <summary>
+	/// Close the current game, whatever it's on - the engine's own way out, under <see cref="Close"/>'s check
+	/// </summary>
+	internal static void CloseGame()
 	{
 		// Editor only: just exit playmode
 		if ( IToolsDll.Current is not null )
@@ -145,15 +167,26 @@ public static partial class Game
 		// Be aware that this could be called from the GameDll or the MenuDll
 		// So anything here needs to be safe to call from either
 
+		Api.Activity.SetExitReason( "menu" );
+
 		if ( IGameInstance.Current is not null )
 		{
 			IGameInstance.Current.Close();
-			LaunchArguments.Reset();
+		}
+		else
+		{
+			// Conna: game instance will call disconnect. If we don't have a game instance then we
+			// need to call it ourselves.
+			Networking.Disconnect();
+
+			Application.ClearGame();
 		}
 
-		// Standalone mode and Dedicated Server only: exit whole app
+		LaunchArguments.Reset();
+
 		if ( Application.IsStandalone || Application.IsDedicatedServer )
 		{
+			// exit whole app
 			Application.Exit();
 		}
 	}
@@ -177,6 +210,9 @@ public static partial class Game
 			return;
 		}
 
+		var sameGame = string.Equals( Ident?.Split( '#' )[0], gameIdent?.Split( '#' )[0], StringComparison.OrdinalIgnoreCase );
+		Api.Activity.GameRequested( new( sameGame ? "reload" : "game", gameIdent ) );
+
 		if ( Networking.IsActive && Networking.IsHost )
 		{
 			if ( keepClients )
@@ -189,7 +225,8 @@ public static partial class Game
 			// Allow for a 1 second grace period for clients to receive the message
 			await Task.Delay( 1000 );
 
-			Networking.Disconnect();
+			// Clients are following us to the new game, nobody should take over this one
+			Networking.Disconnect( handoffHost: false );
 		}
 
 		// close old game
@@ -202,11 +239,10 @@ public static partial class Game
 		Application.ClearGame();
 
 		LoadingScreen.IsVisible = true;
+		LoadingScreen.Media = null;
+		LoadingScreen.Title = null;
 
-		// Load new game
-		Log.Info( $"Loading {gameIdent}.." );
 		await IGameInstanceDll.Current.LoadGamePackageAsync( gameIdent, GameLoadingFlags.Host, default );
-		Log.Info( $"Loading {gameIdent} complete!" );
 	}
 
 	/// <summary>

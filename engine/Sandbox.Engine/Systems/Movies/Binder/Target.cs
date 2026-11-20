@@ -1,6 +1,4 @@
-﻿using System;
-
-namespace Sandbox.MovieMaker;
+﻿namespace Sandbox.MovieMaker;
 
 #nullable enable
 
@@ -20,6 +18,11 @@ namespace Sandbox.MovieMaker;
 /// </summary>
 public interface ITrackTarget
 {
+	/// <summary>
+	/// The binder that created this target.
+	/// </summary>
+	TrackBinder Binder { get; }
+
 	/// <summary>
 	/// Name of this target, for debugging and editing.
 	/// </summary>
@@ -78,7 +81,7 @@ public interface ITrackReference : ITrackTarget
 	new ITrackReference<GameObject>? Parent { get; }
 
 	/// <summary>
-	/// Explicitly this reference to a particular object in the scene, or null to force it to stay unbound.
+	/// Explicitly bind this reference to a particular object in the scene, or null to force it to stay unbound.
 	/// </summary>
 	void Bind( IValid? value );
 
@@ -88,7 +91,6 @@ public interface ITrackReference : ITrackTarget
 	void Reset();
 
 	ITrackTarget? ITrackTarget.Parent => Parent;
-	bool ITrackTarget.IsBound => (Value as IValid).IsValid();
 }
 
 /// <inheritdoc cref="ITrackReference"/>
@@ -113,7 +115,12 @@ public partial interface ITrackProperty : ITrackTarget, IValid
 	new ITrackTarget Parent { get; }
 
 	/// <summary>
-	/// False if this member is readonly.
+	/// False if this member is write-only.
+	/// </summary>
+	bool CanRead => true;
+
+	/// <summary>
+	/// False if this member is read-only.
 	/// </summary>
 	bool CanWrite => true;
 
@@ -123,12 +130,19 @@ public partial interface ITrackProperty : ITrackTarget, IValid
 	new object? Value { get; set; }
 
 	/// <summary>
-	/// If bound and writable, update this property's value from the
-	/// given <paramref name="track"/> at the given <paramref name="time"/>.
+	/// Does this property have a default value that should be applied
+	/// at times when controlling tracks have no data?
 	/// </summary>
-	bool Update( IPropertyTrack track, MovieTime time );
+	bool HasDefaultValue => false;
+
+	/// <summary>
+	/// If <see cref="HasDefaultValue"/> is true, what default value should be
+	/// used for this property.
+	/// </summary>
+	object? DefaultValue { get; }
 
 	bool IValid.IsValid => true;
+	TrackBinder ITrackTarget.Binder => Parent.Binder;
 	bool ITrackTarget.IsBound => Parent is { IsBound: true };
 	bool ITrackTarget.IsActive => Parent is { IsActive: true };
 	ITrackTarget ITrackTarget.Parent => Parent;
@@ -141,25 +155,15 @@ public partial interface ITrackProperty<T> : ITrackProperty, ITrackTarget<T>
 	/// <inheritdoc cref="ITrackProperty.Value"/>
 	new T Value { get; set; }
 
-	/// <inheritdoc cref="ITrackProperty.Update"/>
-	public bool Update( IPropertyTrack<T> track, MovieTime time )
-	{
-		if ( !IsBound || !CanWrite ) return false;
-		if ( !track.TryGetValue( time, out var value ) ) return false;
-
-		Value = value;
-
-		return true;
-	}
+	new T DefaultValue => default!;
 
 	T ITrackTarget<T>.Value => Value;
-
-	bool ITrackProperty.Update( IPropertyTrack track, MovieTime time ) =>
-		track is IPropertyTrack<T> typedTrack && Update( typedTrack, time );
 
 	object? ITrackProperty.Value
 	{
 		get => Value;
 		set => Value = (T)value!;
 	}
+
+	object? ITrackProperty.DefaultValue => DefaultValue;
 }

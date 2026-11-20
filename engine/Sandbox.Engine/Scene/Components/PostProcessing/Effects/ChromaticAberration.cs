@@ -24,14 +24,14 @@ public sealed class ChromaticAberration : BasePostProcess<ChromaticAberration>
 	/// </summary>
 	[Property] public Vector3 Offset { get; set; } = new Vector3( 6f, 2f, 4.0f );
 
-	private static readonly Material Shader = Material.FromShader( "shaders/postprocess/pp_chromaticaberration.shader" );
+	private static Material Shader = Material.FromShader( "shaders/postprocess/pp_chromaticaberration.shader" );
 
 	public override void Render()
 	{
 		float scale = GetWeighted( x => x.Scale );
 		Vector3 offset = GetWeighted( x => x.Offset );
 
-		if ( scale <= 0f )
+		if ( scale <= 0f || offset == Vector3.Zero )
 			return;
 
 		Attributes.Set( "scale", scale );

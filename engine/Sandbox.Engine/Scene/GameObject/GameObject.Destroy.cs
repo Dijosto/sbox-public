@@ -3,6 +3,19 @@
 
 public partial class GameObject : IValid
 {
+	/// <summary>
+	/// Invokes the callback for the given <paramref name="callback"/> type.
+	/// Called internally by <see cref="CallbackBatch"/> to avoid delegate allocations.
+	/// </summary>
+	internal void InvokeCallback( CommonCallback callback )
+	{
+		switch ( callback )
+		{
+			case CommonCallback.Deserialize: PostDeserialize( _pendingDeserializeOptions ); break;
+			case CommonCallback.Term: TermFinal(); break;
+		}
+	}
+
 	bool _destroying;
 	bool _destroyed;
 
@@ -25,7 +38,7 @@ public partial class GameObject : IValid
 		Components.ForEach( "OnDestroy", true, c => c.Destroy() );
 		ForEachChild( "Children", true, c => c.Term() );
 
-		CallbackBatch.Add( CommonCallback.Term, TermFinal, this, "Term" );
+		CallbackBatch.Add( CommonCallback.Term, this, "Term" );
 	}
 
 	/// <summary>
@@ -171,7 +184,10 @@ public partial class GameObject : IValid
 			Assert.AreEqual( 0, Children.Count, $"{Children.Count} children weren't deleted!" );
 		}
 
-		// Actually delete the objects
-		Scene?.SceneWorld?.DeletePendingObjects();
+		// Actually delete the objects - don't force a scene world to exist just to flush deletes
+		if ( Scene is { HasSceneWorld: true } )
+		{
+			Scene.SceneWorld.DeletePendingObjects();
+		}
 	}
 }

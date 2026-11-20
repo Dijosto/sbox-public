@@ -1,0 +1,42 @@
+@import "/Platform/_platform.scss";
+
+// A right-click menu - the platform's popup list (platform-popup-list), a press anywhere off it (.background) shutting it
+menupanel
+{
+    position: absolute;
+    z-index: 1000;
+    pointer-events: all;
+    flex-shrink: 0;
+
+    .background
+    {
+        position: absolute;
+        left: -5000px;
+        right: -5000px;
+        top: -5000px;
+        bottom: -5000px;
+    }
+
+    > .inner
+    {
+        @include platform-surface;
+        @include platform-popup-list;
+        min-width: 200px;
+        flex-shrink: 0;
+        border-radius: 8px;
+        backdrop-filter: none;
+
+        .spacer
+        {
+            flex-shrink: 0;
+            height: 1px;
+            margin: 2px 6px;
+            background-color: $platform-hairline;
+        }
+
+        .option .icon
+        {
+            font-family: "Material Icons";
+        }
+    }
+}

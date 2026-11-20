@@ -1,9 +1,11 @@
-﻿namespace Editor.MeshEditor;
+﻿using System.Runtime.InteropServices;
+
+namespace Editor.MeshEditor;
 
 /// <summary>
-/// Create stuff as long as it fits in a box, woah crazy.
+/// Draw a primitive by dragging its bounds in the scene.
 /// </summary>
-[Title( "Block" ), Icon( "view_in_ar" )]
+[Title( "Block" ), Icon( "meshtools/primitve_tools/block.png" )]
 public sealed class BlockEditor( PrimitiveTool tool ) : PrimitiveEditor( tool )
 {
 	PrimitiveBuilder _primitive = EditorTypeLibrary.Create<PrimitiveBuilder>( nameof( BlockPrimitive ) );
@@ -11,10 +13,16 @@ public sealed class BlockEditor( PrimitiveTool tool ) : PrimitiveEditor( tool )
 
 	BBox? _box;
 	BBox _startBox;
-	BBox _deltaBox;
+
 	Vector3 _dragStartPos;
 	bool _dragStarted;
-	Model _previewModel;
+	SceneObject _previewObject;
+	ToolRenderable _previewWireframe;
+	readonly List<Vector3> _previewPositions = [];
+	bool _resizeDragging;
+	BBox _resizeBefore;
+	int _undoStartCount;
+	int _cameraFacing = -1;
 
 	static float TextSize => 22 * Gizmo.Settings.GizmoScale * Application.DpiScale;
 
@@ -56,6 +64,9 @@ public sealed class BlockEditor( PrimitiveTool tool ) : PrimitiveEditor( tool )
 
 	public override void OnCreated( MeshComponent component )
 	{
+		Dispose();
+		PopUndo();
+
 		var selection = SceneEditorSession.Active.Selection;
 		selection.Set( component.GameObject );
 
@@ -66,54 +77,52 @@ public sealed class BlockEditor( PrimitiveTool tool ) : PrimitiveEditor( tool )
 		}
 
 		_box = null;
-		_dragStarted = false;
+		ConstructionFrame = Transform.Zero;
 	}
 
 	void StartStage( SceneTrace trace )
 	{
-		var tr = trace.Run();
-
-		if ( !tr.Hit )
-		{
-			var plane = new Plane( Vector3.Up, 0.0f );
-			if ( plane.TryTrace( Gizmo.CurrentRay, out var point, true ) )
-			{
-				tr.Hit = true;
-				tr.Normal = plane.Normal;
-				tr.EndPosition = point;
-			}
-		}
-
-		if ( !tr.Hit ) return;
-
-		tr.EndPosition = GridSnap( tr.EndPosition, tr.Normal );
+		if ( !TryGetPlacement( trace, out var point, out var normal ) ) return;
+		point = SnapToSurface( point, normal );
+		var frame = ConstructionFrame;
 
 		if ( Gizmo.WasLeftMousePressed )
 		{
-			_dragStartPos = tr.EndPosition;
 			_dragStarted = true;
 
 			if ( _box.HasValue )
 			{
+				_dragStarted = true;
 				Tool.Create();
 			}
 
+			SceneEditorSession.Active.Selection.Clear();
+
+			ConstructionFrame = frame;
+			_dragStartPos = point;
+
 			_box = null;
-			_dragStarted = true;
+			_undoStartCount = SceneEditorSession.Active.UndoSystem.Back.Count;
 		}
 		else
 		{
-			var size = 3.0f * Gizmo.Camera.Position.Distance( tr.EndPosition ) / 1000.0f;
+			var worldPoint = frame.PointToWorld( point );
+			var size = GetPointSize( point, 3.0f );
 			Gizmo.Draw.Color = Color.White;
-			Gizmo.Draw.SolidSphere( tr.EndPosition, size );
+			Gizmo.Draw.SolidSphere( worldPoint, size );
+
+			if ( frame.Rotation != Rotation.Identity )
+			{
+				Gizmo.Draw.Color = Gizmo.Colors.Up;
+				Gizmo.Draw.Line( worldPoint, worldPoint + frame.Rotation.Up * size * 8.0f );
+			}
 		}
 	}
 
 	void DraggingStage()
 	{
 		var plane = new Plane( _dragStartPos, Vector3.Up );
-		if ( !plane.TryTrace( Gizmo.CurrentRay, out var point, true ) ) return;
-
+		if ( !plane.TryTrace( LocalRay, out var point, true ) ) return;
 		point = GridSnap( point, Vector3.Up );
 
 		if ( !Gizmo.IsLeftMouseDown )
@@ -128,13 +137,20 @@ public sealed class BlockEditor( PrimitiveTool tool ) : PrimitiveEditor( tool )
 				return;
 			}
 
+			var before = _box;
+
 			_box = new BBox( _dragStartPos, point + Vector3.Up * s_lastHeight );
 			_dragStarted = false;
 
 			BuildPreview();
+
+			PushUndo( "Create Preview Block", before, _box );
 		}
 		else
 		{
+			using var scope = Gizmo.Scope( "drag" );
+			Gizmo.Transform = ConstructionFrame;
+
 			var box = new BBox( _dragStartPos, point );
 			Gizmo.Draw.IgnoreDepth = true;
 			Gizmo.Draw.LineThickness = 2;
@@ -154,16 +170,17 @@ public sealed class BlockEditor( PrimitiveTool tool ) : PrimitiveEditor( tool )
 
 			textScope.Text = $"L: {box.Size.y:0.#}";
 			textScope.TextColor = Gizmo.Colors.Left;
-			Gizmo.Draw.ScreenText( textScope, box.Mins.WithY( box.Center.y ), Vector2.Up * 32 );
+			Gizmo.Draw.ScreenText( textScope, ConstructionFrame.PointToWorld( box.Mins.WithY( box.Center.y ) ), Vector2.Up * 32 );
 
 			textScope.Text = $"W: {box.Size.x:0.#}";
 			textScope.TextColor = Gizmo.Colors.Forward;
-			Gizmo.Draw.ScreenText( textScope, box.Mins.WithX( box.Center.x ), Vector2.Up * 32 );
+			Gizmo.Draw.ScreenText( textScope, ConstructionFrame.PointToWorld( box.Mins.WithX( box.Center.x ) ), Vector2.Up * 32 );
 		}
 	}
 
 	public override void OnUpdate( SceneTrace trace )
 	{
+		UpdateConstructionFrame( trace, true );
 		if ( Application.IsKeyDown( KeyCode.Escape ) ||
 			 Application.IsKeyDown( KeyCode.Delete ) )
 		{
@@ -174,6 +191,14 @@ public sealed class BlockEditor( PrimitiveTool tool ) : PrimitiveEditor( tool )
 		{
 			BuildPreview();
 			_activeMaterial = Tool.ActiveMaterial;
+		}
+
+		// Some primitives orient themselves to the camera, so rebuild when the facing direction changes.
+		var facing = CameraFacing;
+		if ( _cameraFacing != facing )
+		{
+			_cameraFacing = facing;
+			BuildPreview();
 		}
 
 		if ( !Gizmo.Pressed.Any )
@@ -193,8 +218,13 @@ public sealed class BlockEditor( PrimitiveTool tool ) : PrimitiveEditor( tool )
 
 	void Cancel()
 	{
+		Dispose();
+		PopUndo();
+
 		_box = null;
 		_dragStarted = false;
+		_resizeDragging = false;
+		ConstructionFrame = Transform.Zero;
 	}
 
 	public override void OnCancel()
@@ -215,20 +245,23 @@ public sealed class BlockEditor( PrimitiveTool tool ) : PrimitiveEditor( tool )
 
 		using ( Gizmo.Scope( "box" ) )
 		{
+			Gizmo.Transform = ConstructionFrame;
 			Gizmo.Hitbox.DepthBias = 0.01f;
 
 			if ( !Gizmo.Pressed.Any )
 			{
 				_startBox = box;
-				_deltaBox = default;
 			}
 
-			if ( Gizmo.Control.BoundingBox( "Resize", box, out var outBox ) )
+			if ( Gizmo.Control.UpdateBoundingBox( "Resize", box, out var outBox, out var resizePressed, out _ ) )
 			{
-				_deltaBox.Maxs += outBox.Maxs - box.Maxs;
-				_deltaBox.Mins += outBox.Mins - box.Mins;
+				if ( !_resizeDragging )
+				{
+					_resizeDragging = true;
+					_resizeBefore = _box.Value;
+				}
 
-				box = Gizmo.Snap( _startBox, _deltaBox );
+				box = outBox;
 
 				if ( _primitive.Is2D )
 				{
@@ -249,23 +282,41 @@ public sealed class BlockEditor( PrimitiveTool tool ) : PrimitiveEditor( tool )
 
 				BuildPreview();
 			}
+			if ( _resizeDragging && (resizePressed && Gizmo.WasLeftMouseReleased || !Gizmo.Pressed.Any) )
+			{
+				_resizeDragging = false;
+
+				PushUndo( "Resize Block", _resizeBefore, _box );
+			}
+			Gizmo.Draw.BoundingBox( "Resize", box );
 
 			using ( Gizmo.Scope( "Bounds" ) )
 			{
 				DimensionDisplay.DrawBounds( box );
 			}
 		}
+	}
 
-		if ( _previewModel.IsValid() && !_previewModel.IsError )
-		{
-			Gizmo.Draw.Model( _previewModel );
-		}
+	static Vector3 SnapToSurface( Vector3 point, Vector3 normal )
+	{
+		normal = normal.Normal;
+		var snapped = GridSnap( point, normal );
+
+		var n = normal.Abs();
+		var axis = n.x >= n.y && n.x >= n.z ? Vector3.Forward : n.y >= n.z ? Vector3.Left : Vector3.Up;
+		var denom = normal.Dot( axis );
+		if ( denom.AlmostEqual( 0.0f ) ) return snapped;
+
+		var t = normal.Dot( point - snapped ) / denom;
+		return snapped + axis * t;
 	}
 
 	static Vector3 GridSnap( Vector3 point, Vector3 normal )
 	{
-		var basis = Rotation.LookAt( normal );
-		return Gizmo.Snap( point * basis.Inverse, new Vector3( 0, 1, 1 ) ) * basis;
+		var n = normal.Normal.Abs();
+		var x = n.x >= n.y && n.x >= n.z;
+		var y = !x && n.y >= n.z;
+		return Gizmo.Snap( point, new Vector3( x ? 0 : 1, y ? 0 : 1, x || y ? 1 : 0 ) );
 	}
 
 	public override Widget CreateWidget()
@@ -276,14 +327,94 @@ public sealed class BlockEditor( PrimitiveTool tool ) : PrimitiveEditor( tool )
 	void BuildPreview()
 	{
 		var mesh = Build();
-		_previewModel = mesh?.Rebuild();
+		var model = mesh?.Rebuild();
+		if ( !model.IsValid() || model.IsError )
+		{
+			Dispose();
+			return;
+		}
+
+		var world = SceneEditorSession.Active.Scene.DebugSceneWorld;
+		if ( !_previewObject.IsValid() )
+		{
+			_previewObject = new SceneObject( world, model );
+			_previewObject.Tags.Add( "editor_mesh" );
+			_previewObject.Tags.Add( "editor_overlay" );
+			_previewObject.Flags.CastShadows = false;
+		}
+		else
+		{
+			_previewObject.Model = model;
+		}
+		_previewObject.Transform = ConstructionFrame;
+
+		_previewPositions.Clear();
+		foreach ( var edge in mesh.GetVisibleEdges() )
+		{
+			_previewPositions.Add( ConstructionFrame.PointToWorld( edge.Start ) );
+			_previewPositions.Add( ConstructionFrame.PointToWorld( edge.End ) );
+		}
+		_previewWireframe ??= new ToolRenderable( RenderPreviewWireframe );
+		_previewWireframe.MarkDirty();
+		_previewWireframe.Update( world );
+	}
+
+	void RenderPreviewWireframe( ToolRenderContext context )
+	{
+		context.Tag = "editor_wireframe";
+		context.DrawLines( CollectionsMarshal.AsSpan( _previewPositions ) );
+	}
+
+	public override void Dispose()
+	{
+		if ( _previewObject.IsValid() )
+			_previewObject.Delete();
+		_previewObject = null;
+		_previewWireframe?.Dispose();
+		_previewWireframe = null;
+		_previewPositions.Clear();
+	}
+
+	/// <summary>
+	/// Which horizontal direction the camera is mostly looking down. Used to
+	/// detect when camera-aligned primitives need rebuilding.
+	/// </summary>
+	int CameraFacing
+	{
+		get
+		{
+			var forward = SceneViewWidget.Current?.LastSelectedViewportWidget?.State.CameraRotation.Forward ?? Vector3.Forward;
+			forward = ConstructionFrame.NormalToLocal( forward );
+
+			if ( MathF.Abs( forward.y ) > MathF.Abs( forward.x ) )
+				return forward.y >= 0.0f ? 0 : 1;
+
+			return forward.x >= 0.0f ? 2 : 3;
+		}
+	}
+
+	void PushUndo( string name, BBox? before, BBox? after )
+	{
+		if ( before == after ) return;
+
+		PushUndo( name,
+			undo: () =>
+			{
+				_box = before;
+				BuildPreview();
+			},
+			redo: () =>
+			{
+				_box = after;
+				BuildPreview();
+			}
+		);
 	}
 
 	private static IEnumerable<TypeDescription> GetBuilderTypes()
 	{
 		return EditorTypeLibrary.GetTypes<PrimitiveBuilder>()
-			.Where( x => !x.IsAbstract )
-			.OrderBy( x => x.Name );
+			.Where( x => !x.IsAbstract );
 	}
 
 	class BlockEditorWidget : ToolSidebarWidget
@@ -303,24 +434,26 @@ public sealed class BlockEditor( PrimitiveTool tool ) : PrimitiveEditor( tool )
 
 			{
 				var group = AddGroup( "Shape Type" );
-				var list = group.Add( new PrimitiveListView( this ) );
-				list.FixedWidth = 200;
-				list.SetItems( GetBuilderTypes() );
-				list.SelectItem( list.Items.FirstOrDefault( x => (x as TypeDescription).TargetType == _primitive?.GetType() ) );
-				list.ItemSelected = ( e ) => OnPrimitiveSelected( (e as TypeDescription).TargetType );
-				list.BuildLayout();
+				var picker = group.Add( new PrimitiveTypePicker( this, "Shape" ) );
+				picker.SetItems( GetBuilderTypes() );
+				picker.SelectType( _primitive?.GetType() );
+				picker.TypeSelected = type => OnPrimitiveSelected( type.TargetType );
 			}
 
 			_controlLayout = Layout.AddColumn();
 			BuildControlSheet();
 
-			Layout.AddStretchCell();
+			AddShortcuts(
+				("Align to Surface", "Shift + Drag")
+			);
 		}
 
 		void OnPrimitiveSelected( Type type )
 		{
-			_editor._primitive = EditorTypeLibrary.Create<PrimitiveBuilder>( type );
+			_primitive = EditorTypeLibrary.Create<PrimitiveBuilder>( type );
+			_editor._primitive = _primitive;
 			_editor.BuildPreview();
+			BuildControlSheet();
 		}
 
 		void BuildControlSheet()
@@ -339,9 +472,17 @@ public sealed class BlockEditor( PrimitiveTool tool ) : PrimitiveEditor( tool )
 			var group = w.AddGroup( $"{title} Properties" );
 			var so = _primitive.GetSerialized();
 			so.OnPropertyChanged += ( e ) => _onEdited?.Invoke();
-			var sheet = new ControlSheet();
-			sheet.AddObject( so );
-			group.Add( sheet );
+
+			if ( _primitive.CreatePropertyEditor( so ) is { } editor )
+			{
+				group.Add( editor );
+			}
+			else
+			{
+				var sheet = new ControlSheet();
+				sheet.AddObject( so );
+				group.Add( sheet );
+			}
 		}
 
 		[EditorEvent.Frame]

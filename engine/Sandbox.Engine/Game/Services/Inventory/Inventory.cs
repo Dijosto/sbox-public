@@ -10,6 +10,11 @@ public static partial class Inventory
 	static List<Item> _items = new();
 
 	/// <summary>
+	/// Whether or not the inventory has been loaded from Steam.
+	/// </summary>
+	internal static bool HasLoaded { get; private set; }
+
+	/// <summary>
 	/// All of the items the user has in their inventory
 	/// </summary>
 	public static IReadOnlyCollection<Item> Items => _items.AsReadOnly();
@@ -17,6 +22,7 @@ public static partial class Inventory
 	/// <summary>
 	/// Get the user's inventory. This is called on startup - and shouldn't really need to be
 	/// called again unless the user buys something. Returns a list of items added since the last refresh.
+	/// An unsuccessful Steam result returns no new items and preserves the last successful inventory.
 	/// </summary>
 	[ConCmd( "inv_refresh", ConVarFlags.Protected )]
 	internal static async Task<Item[]> Refresh( CancellationToken token = default )
@@ -24,31 +30,56 @@ public static partial class Inventory
 		var result = NativeEngine.SteamInventory.GetAllItems();
 		if ( result.IsNull ) return Array.Empty<Item>();
 
-		while ( result.IsPending() )
+		try
 		{
-			await Task.Delay( 10 );
+			while ( result.IsPending() )
+			{
+				await Task.Delay( 10, token );
+			}
+
+			if ( !result.IsOk() ) return Array.Empty<Item>();
+
+			var wasLoaded = HasLoaded;
+			var previousItems = _items.ToArray();
+
+			_items.Clear();
+
+			for ( int i = 0; i < result.Count(); i++ )
+			{
+				_items.Add( new Item( result.Get( i ) ) );
+			}
+
+			CurrentBlob = SerializeResult( result );
+			HasLoaded = true;
+
+			// The initial load isn't a purchase, but an already loaded empty inventory can gain new items.
+			if ( !wasLoaded ) return Array.Empty<Item>();
+
+			return _items.Where( x => !previousItems.Any( y => y.ItemId == x.ItemId ) ).ToArray();
 		}
-
-		var previousItems = _items.ToArray();
-
-		_items.Clear();
-
-		for ( int i = 0; i < result.Count(); i++ )
+		finally
 		{
-			_items.Add( new Item( result.Get( i ) ) );
+			result.Destroy();
 		}
+	}
 
-		// If we had items previously then notify of new items. This is usually caused by a call to Refresh after an in-game purchase.
-		if ( previousItems.Count() > 0 )
+	/// <summary>
+	/// That last serialized inventory proof for the local user, sent as part of UserInfo during connection
+	/// </summary>
+	internal static byte[] CurrentBlob { get; private set; } = Array.Empty<byte>();
+
+	private static unsafe byte[] SerializeResult( CSteamInventoryResult result )
+	{
+		var size = result.GetSerializedSize();
+		if ( size == 0 )
+			return Array.Empty<byte>();
+
+		var buffer = new byte[size];
+		fixed ( byte* ptr = buffer )
 		{
-			var newItems = _items.ToList();
-			newItems.RemoveAll( x => previousItems.Any( y => y.ItemId == x.ItemId ) );
-
-			return newItems.ToArray();
+			result.Serialize( ptr, size );
 		}
-
-		result.Destroy();
-		return Array.Empty<Item>();
+		return buffer;
 	}
 
 	/// <summary>
@@ -100,11 +131,8 @@ public static partial class Inventory
 
 			if ( timer.ElapsedSeconds > 20 )
 			{
-				// Timed out waiting for items, but the checkout was successful.
-				// Do one final refresh to ensure we have the latest inventory state, even if we didn't detect the new items specifically.
-				Log.Warning( "Checkout succeeded but timed out waiting for new items to appear in inventory. Items may appear shortly." );
-				await Refresh();
-				return true;
+				Log.Warning( "Checkout timed out waiting for new items. Purchase may have been cancelled, or items may appear shortly." );
+				return false;
 			}
 		}
 	}

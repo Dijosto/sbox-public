@@ -77,10 +77,13 @@ public sealed class ColorGrading : BasePostProcess<ColorGrading>
 	[ShowIf( nameof( ColorSpace ), ColorSpaceEnum.HSV )]
 	public Curve ValueCurve { get; set; } = new Curve( new Curve.Frame( 0.0f, 0.5f ), new Curve.Frame( 1.0f, 1.0f ) );
 
-	private static readonly Material Shader = Material.FromShader( "ColorGrading.shader" );
+	private static Material Shader = Material.FromShader( "ColorGrading.shader" );
 
 	public override void Render()
 	{
+		if ( GradingMethod == GradingType.None && ColorSpace == ColorSpaceEnum.None )
+			return;
+
 		var blendFactor = GetWeighted( x => x.BlendFactor );
 		var colorTempK = GetWeighted( x => x.ColorTempK );
 

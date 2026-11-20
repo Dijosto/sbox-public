@@ -17,16 +17,23 @@ public static class EditorScene
 	}
 
 	public static Gizmo.SceneSettings GizmoSettings { get; private set; } = new Gizmo.SceneSettings();
+	static CookieContainer _settingsCookie;
 
 	public static SelectionSystem Selection => SceneEditorSession.Active?.Selection;
 
 	public static void RestoreState()
 	{
-		var package = Project.Current.Package;
+		_settingsCookie = ProjectCookie;
 		if ( ProjectCookie?.Get<Gizmo.SceneSettings>( $"gizmo.settings", null ) is Gizmo.SceneSettings savedSettings )
 		{
 			GizmoSettings = savedSettings;
 		}
+	}
+
+	internal static void SaveState()
+	{
+		if ( ReferenceEquals( _settingsCookie, ProjectCookie ) )
+			_settingsCookie.Set( "gizmo.settings", GizmoSettings );
 	}
 
 	[Shortcut( "editor.new", "CTRL+N" )]
@@ -79,7 +86,7 @@ public static class EditorScene
 		}
 
 		session = SceneEditorSession.CreateFromPath( resource.ResourcePath );
-		session.MakeActive();
+		session?.MakeActive();
 	}
 
 	/// <summary>
@@ -242,6 +249,10 @@ public static class EditorScene
 		playableSession ??= FindPlayableSession();
 		if ( playableSession is null ) return;
 
+		var current = playMode ? null : SceneSource.LoadForPlay( playableSession );
+		if ( !playMode && current is null )
+			return;
+
 		OnPlayStore();
 
 		Game.IsPlaying = true;
@@ -252,9 +263,18 @@ public static class EditorScene
 
 		if ( playMode )
 		{
-			LoadingScreen.IsVisible = true;
-			LoadingScreen.Title = "Loading Game..";
-			IGameInstanceDll.Current.EditorPlay();
+			if ( IGameInstance.Current is not null )
+			{
+				LoadingScreen.IsVisible = true;
+				LoadingScreen.Title = "Loading Game..";
+				if ( !IGameInstanceDll.Current.EditorPlay() )
+				{
+					Game.IsPlaying = false;
+					LoadingScreen.IsVisible = false;
+					OnPlayRestore();
+					return;
+				}
+			}
 		}
 		else
 		{
@@ -267,7 +287,6 @@ public static class EditorScene
 				Game.ActiveScene = null;
 			}
 
-			var current = playableSession.Scene.CreateSceneFile();
 			var name = playableSession.Scene.Name;
 
 			Game.ActiveScene = new Scene();
@@ -279,7 +298,15 @@ public static class EditorScene
 
 			Game.ActiveScene.RunEvent<ISceneStartup>( x => x.OnHostPreInitialize( options.GetSceneFile() ) );
 
-			Game.ActiveScene.Load( options );
+			if ( !Game.ActiveScene.Load( options ) )
+			{
+				Game.ActiveScene.Destroy();
+				Game.ActiveScene = null;
+				Game.IsPlaying = false;
+				LoadingScreen.IsVisible = false;
+				OnPlayRestore();
+				return;
+			}
 
 			Game.ActiveScene.RunEvent<ISceneStartup>( x => x.OnHostInitialize() );
 			Game.ActiveScene.RunEvent<ISceneStartup>( x => x.OnClientInitialize() );
@@ -292,15 +319,17 @@ public static class EditorScene
 		}
 
 		SceneEditorSession.Active.SetPlaying( Game.ActiveScene );
-
 		EditorEvent.Run( "scene.play" );
 	}
 
 	public static void Stop()
 	{
+		// Close any open overlay modals so they don't persist in the next play session
+		IModalSystem.Current?.CloseAll( true );
+
 		Game.IsClosing = true;
 
-		SceneEditorSession.Active.StopPlaying();
+		SceneEditorSession.Playing?.StopPlaying();
 
 		Game.IsPlaying = false;
 		Game.IsPaused = false;
@@ -351,18 +380,16 @@ public static class EditorScene
 		Assert.NotNull( resource, "resource should not be null" );
 
 		var session = SceneEditorSession.CreateFromPath( resource.ResourcePath );
-		session.MakeActive();
+		session?.MakeActive();
 	}
 
 	internal static void UpdatePrefabInstancesInScene( Scene scene, PrefabFile prefab )
 	{
-		var changedPath = prefab.ResourcePath;
-
 		using ( scene.Push() )
 		{
 			// Copy, because this collection can be modified during prefab updating ( e.g. refreshing/deserializing prefab spawns GOs or components)
 			var prefabInstancesRequiringUpdate = scene.GetAllObjects( false )
-				.Where( x => x.IsPrefabInstanceRoot && x.PrefabInstanceSource == changedPath )
+				.Where( x => x.IsPrefabInstanceRoot && x.PrefabInstance.PrefabSource.Guid == prefab.Guid )
 				.Select( x => x.OutermostPrefabInstanceRoot ) // We always need to update the outermostprefab instance
 				.ToHashSet();
 			foreach ( var obj in prefabInstancesRequiringUpdate )
@@ -377,26 +404,36 @@ public static class EditorScene
 	}
 
 	/// <summary>
-	/// Update any/all instances of a prefab in any open sessions
+	/// Update any/all instances of a prefab in any open sessions.
+	/// Two passes are needed so that changes propagate through prefab dependency
+	/// chains regardless of iteration order (e.g. PrefabA → PrefabC → PrefabB).
 	/// </summary>
 	public static void UpdatePrefabInstances( PrefabFile prefab )
 	{
 		ArgumentNullException.ThrowIfNull( prefab );
 
-		var prefabSessions = SceneEditorSession.All
-			.OfType<PrefabEditorSession>();
+		var allSessions = SceneEditorSession.All;
 
-		// We need to update the prefab file itself, so that it has the latest changes
-		foreach ( var session in prefabSessions )
+		// First pass: update other open prefab sessions that may contain instances
+		// of this prefab, then write their changes so dependent prefabs stay current
+		foreach ( var session in allSessions )
 		{
-			UpdatePrefabInstancesInScene( session.Scene, prefab );
-			session.Scene.ToPrefabFile();
+			if ( session is not PrefabEditorSession prefabSession ) continue;
+
+			// The source prefab already has the latest changes via OnEdited
+			if ( prefabSession.Scene.Source == prefab ) continue;
+
+			UpdatePrefabInstancesInScene( prefabSession.Scene, prefab );
+			prefabSession.Scene.ToPrefabFile();
 		}
 
-		// And then update all prefab instances again
-		// This makes sure prefab dependencies are updated as well
-		foreach ( var session in SceneEditorSession.All )
+		// Second pass: re-process all sessions (except the source) so that
+		// multi-level prefab dependencies resolve even if pass 1 hit them
+		// in the wrong order
+		foreach ( var session in allSessions )
 		{
+			if ( session is PrefabEditorSession prefabSession && prefabSession.Scene.Source == prefab ) continue;
+
 			UpdatePrefabInstancesInScene( session.Scene, prefab );
 		}
 	}
@@ -434,7 +471,7 @@ public static class EditorScene
 		var options = new GameObject.SerializeOptions();
 		var serializedObjects = selection.Select( x => x.Serialize( options ) ).ToArray();
 
-		EditorUtility.Clipboard.Copy( Json.Serialize( serializedObjects ) );
+		EditorUtility.Clipboard.Copy( SceneInstanceClipboard.Write( session.Scene, selection, serializedObjects ) );
 
 		using ( session.UndoScope( "Cut" ).WithGameObjectDestructions( selection ).Push() )
 		{
@@ -453,7 +490,7 @@ public static class EditorScene
 		using ( SceneEditorSession.Active.UndoScope( "Select All" ).Push() )
 		{
 			Selection.Clear();
-			foreach ( var child in SceneEditorSession.Active.Scene.Children )
+			foreach ( var child in SceneEditorSession.Active.Scene.Children.Where( x => x.ShouldShowInHierarchy() ) )
 			{
 				Selection.Add( child );
 			}
@@ -470,42 +507,52 @@ public static class EditorScene
 
 		var serialized = selection.Select( x =>
 		{
+			using var blobs = BlobDataSerializer.Capture();
+
 			var s = x.Serialize( options );
 			// When we copy we keep the world transform.
 			s["Position"] = JsonValue.Create( x.WorldPosition );
 			s["Rotation"] = JsonValue.Create( x.WorldRotation );
 			s["Scale"] = JsonValue.Create( x.WorldScale );
+
+			blobs.SaveTo( s );
 			return s;
 		} );
 
-		EditorUtility.Clipboard.Copy( Json.Serialize( serialized ) );
+		EditorUtility.Clipboard.Copy( SceneInstanceClipboard.Write( SceneEditorSession.Active.Scene, selection, serialized ) );
 	}
 
 	[Shortcut( "editor.paste", "CTRL+V" )]
 	public static void Paste()
 	{
-		var selected = EditorScene.Selection.FirstOrDefault() as GameObject;
+		PasteInternal();
+	}
+
+	public static void PasteAt( SceneTraceResult tr )
+	{
+		PasteInternal( tr );
+	}
+
+	static void PasteInternal( SceneTraceResult? tr = default )
+	{
+		var selected = Selection.FirstOrDefault() as GameObject;
 
 		var session = SceneEditorSession.Resolve( selected ) ?? SceneEditorSession.Active;
 		using var scene = session.Scene.Push();
 
 		// Paste to scene root if nobody is selected
-		if ( selected is null )
-		{
-			selected = SceneEditorSession.Active.Scene;
-		}
+		selected ??= SceneEditorSession.Active.Scene;
 
 		if ( selected is Scene )
 		{
-			PasteAsChild();
+			PasteAsChildAt( tr );
 			return;
 		}
 
-		ExecutableUndoablePaste( selected, false );
+		ExecutableUndoablePaste( selected, false, tr );
 	}
 
-	[Shortcut( "editor.paste-as-child", "CTRL+SHIFT+V" )]
-	public static void PasteAsChild()
+	static void PasteAsChildAt( SceneTraceResult? tr = default )
 	{
 		var selected = Selection.OfType<GameObject>().ToArray();
 		var first = selected.FirstOrDefault();
@@ -519,64 +566,101 @@ public static class EditorScene
 			selected = [SceneEditorSession.Active.Scene];
 		}
 
-		ExecutableUndoablePaste( selected, true );
+		ExecutableUndoablePaste( selected, true, tr );
 	}
 
-	private static void ExecutableUndoablePaste( GameObject target, bool asChild )
+	[Shortcut( "editor.paste-as-child", "CTRL+SHIFT+V" )]
+	public static void PasteAsChild()
 	{
-		ExecutableUndoablePaste( [target], asChild );
+		PasteAsChildAt();
 	}
 
-	private static void ExecutableUndoablePaste( IEnumerable<GameObject> targets, bool asChild )
+	[Shortcut( "editor.paste-special", "CTRL+ALT+V" )]
+	public static void PasteSpecial()
+	{
+		var dialog = new ScenePasteSpecialDialog( ScenePasteSpecialDialog.Execute );
+		dialog.Show();
+	}
+
+	private static void ExecutableUndoablePaste( GameObject target, bool asChild, SceneTraceResult? tr )
+	{
+		ExecutableUndoablePaste( [target], asChild, tr );
+	}
+
+	private static void ExecutableUndoablePaste( IEnumerable<GameObject> targets, bool asChild, SceneTraceResult? tr )
 	{
 		var text = EditorUtility.Clipboard.Paste();
 
 		// Deserialize can fail if the clipboards contents area ambigous / partally invalid
 		try
 		{
-			if ( Json.Deserialize<IEnumerable<JsonObject>>( text ) is IEnumerable<JsonObject> serializedObjects )
+			var session = SceneEditorSession.Resolve( targets.FirstOrDefault() );
+			var (serializedObjects, instances) = SceneInstanceClipboard.Read( session.Scene, text );
+			var objCount = serializedObjects.Length;
+			if ( objCount == 0 ) return;
+
+			using var scene = session.Scene.Push();
+			using ( session.UndoScope( $"Paste {objCount} Objects" ).WithGameObjectCreations().Push() )
 			{
-				var objCount = serializedObjects.Count();
-				if ( objCount == 0 ) return;
+				Selection.Clear();
 
-				var session = SceneEditorSession.Resolve( targets.FirstOrDefault() );
-				using var scene = session.Scene.Push();
-				using ( session.UndoScope( $"Paste {objCount} Objects" ).WithGameObjectCreations().Push() )
+				foreach ( var target in targets )
 				{
-					EditorScene.Selection.Clear();
-
-					foreach ( var target in targets )
+					foreach ( var jso in serializedObjects )
 					{
-						foreach ( var jso in serializedObjects )
+						var go = SceneInstanceClipboard.Paste( session.Scene, jso, instances );
+
+						if ( target.IsValid() )
 						{
-							var go = SceneEditorSession.Active.Scene.CreateObject();
-							// avoids some warnings
-							SceneUtility.MakeIdGuidsUnique( jso );
-							go.Deserialize( jso );
-
-							if ( target.IsValid() )
+							if ( asChild )
 							{
-								if ( asChild )
-								{
-									go.SetParent( target );
-								}
-								else
-								{
-									target.AddSibling( go, false );
-								}
+								go.SetParent( target );
 							}
-
-							go.MakeNameUnique();
-
-							EditorScene.Selection.Add( go );
+							else
+							{
+								target.AddSibling( go, false );
+							}
 						}
+
+						go.MakeNameUnique();
+
+						Selection.Add( go );
 					}
+				}
+
+				if ( tr is { } trace )
+				{
+					PlaceBoundsOnSurface( Selection.OfType<GameObject>(), trace.HitPosition, trace.Normal );
 				}
 			}
 		}
 		catch
 		{
 			Log.Warning( "Failed to paste, invalid JSON." );
+		}
+	}
+
+	/// <summary>
+	/// Helper function to offset gameobjects to surface bounds.
+	/// </summary>
+	public static void PlaceBoundsOnSurface( IEnumerable<GameObject> gos, Vector3 position, Vector3 normal )
+	{
+		var selectionBounds = BBox.FromBoxes( gos.Select( x => x.GetBounds() ) );
+		var selectionCenter = selectionBounds.Center;
+		var maxDot = float.NegativeInfinity;
+
+		foreach ( var corner in selectionBounds.Corners )
+		{
+			var d = Vector3.Dot( corner - selectionCenter, normal );
+			if ( d > maxDot ) maxDot = d;
+		}
+
+		var pastePos = position + normal * maxDot;
+		var offset = pastePos - selectionCenter;
+
+		foreach ( var o in gos )
+		{
+			o.WorldPosition += offset;
 		}
 	}
 

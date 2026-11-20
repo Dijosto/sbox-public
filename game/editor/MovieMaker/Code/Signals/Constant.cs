@@ -18,12 +18,12 @@ partial record PropertySignal<T>
 partial record PropertyBlock<T>
 {
 	public static implicit operator PropertyBlock<T>( CompiledConstantBlock<T> block ) =>
-		new ( new ConstantSignal<T>( block.Serialized ), block.TimeRange );
+		new( new ConstantSignal<T>( block.Serialized ), block.TimeRange );
 }
 
 [JsonDiscriminator( "Constant" )]
 [method: JsonConstructor]
-file sealed record ConstantSignal<T>( JsonNode? Serialized ) : PropertySignal<T>
+file sealed record ConstantSignal<T>( JsonNode? Serialized ) : PropertySignal<T>, ILiteralSignal
 {
 	private JsonNode? _serialized = Serialized;
 
@@ -83,7 +83,7 @@ file sealed record ConstantSignal<T>( JsonNode? Serialized ) : PropertySignal<T>
 	protected override PropertySignal<T> OnTransform( MovieTransform value ) => this;
 	protected override PropertySignal<T> OnReduce( MovieTime? start, MovieTime? end ) => this;
 
-	public override IEnumerable<ICompiledPropertyBlock<T>> Compile( MovieTimeRange timeRange, int sampleRate ) =>
+	public override IEnumerable<ICompiledPropertyBlock<T>> Compile( MovieTimeRange timeRange, int? sampleRate ) =>
 		[new CompiledConstantBlock<T>( timeRange, Serialized )];
 
 	public override IEnumerable<MovieTimeRange> GetPaintHints( MovieTimeRange timeRange ) => [timeRange.Start, timeRange.End - MovieTime.Epsilon];
@@ -96,11 +96,11 @@ partial class PropertySignalExtensions
 	/// </summary>
 	public static PropertySignal<T> AsSignal<T>( this T value ) => value;
 
-	public static IPropertySignal AsSignal( this object? value, Type targetType )
+	public static PropertySignal AsSignal( this object? value, Type targetType )
 	{
-		var signalType = typeof(ConstantSignal<>).MakeGenericType( targetType );
+		var signalType = typeof( ConstantSignal<> ).MakeGenericType( targetType );
 
-		return (IPropertySignal)Activator.CreateInstance( signalType, value )!;
+		return (PropertySignal)Activator.CreateInstance( signalType, value )!;
 	}
 
 	/// <inheritdoc cref="AsSignal{T}(IReadOnlyList{PropertyBlock{T}})"/>

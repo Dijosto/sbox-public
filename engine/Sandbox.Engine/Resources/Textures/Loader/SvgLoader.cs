@@ -34,6 +34,7 @@ internal static class SvgLoader
 				color = Color.Parse( qColor );
 			}
 		}
+
 		try
 		{
 			var filePath = split[0];
@@ -48,10 +49,7 @@ internal static class SvgLoader
 				return null;
 			}
 
-			var tex = Texture.CreateFromSvgSource( svg, width, height, color );
-			tex?.RegisterWeakResourceId( url );
-
-			return tex;
+			return Texture.RenderSvg( svg, width, height, color );
 		}
 		catch ( System.Exception e )
 		{

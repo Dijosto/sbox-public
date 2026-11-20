@@ -1,10 +1,11 @@
-﻿namespace Editor.Widgets.SceneTests;
+namespace Editor.Widgets.SceneTests;
 
 [Title( "Rotation" ), Icon( "screen_rotation" )]
 [Description( "Standard rotation widget" )]
 internal class RotationSimple : ISceneTest
 {
-	Angles angles;
+	Rotation rotation = Rotation.Identity;
+	Rotation startRotation = Rotation.Identity;
 
 	public void Frame()
 	{
@@ -12,18 +13,21 @@ internal class RotationSimple : ISceneTest
 		{
 			Gizmo.Draw.Color = Gizmo.Colors.Green;
 
-			if ( Gizmo.Control.Rotate( "my-arrow", out var angleDelta ) )
+			if ( Gizmo.WasLeftMousePressed ) startRotation = rotation;
+			if ( Gizmo.Control.UpdateRotation( "my-arrow", Rotation.Identity, out Rotation rotationDelta ) )
 			{
-				angles += angleDelta;
+				rotation = startRotation * Gizmo.Snap( rotationDelta );
 			}
+			Gizmo.Draw.Rotate( "my-arrow" );
 
-			using ( Gizmo.Scope( "Object", new Transform( 0, angles.ToRotation() ) ) )
+			using ( Gizmo.Scope( "Object", new Transform( 0, rotation ) ) )
 			{
 				Gizmo.Draw.Color = Color.White;
 				Gizmo.Draw.Model( "models/editor/playerstart.vmdl" );
 			}
 		}
 
+		var angles = rotation.Angles();
 		Gizmo.Draw.Color = Color.Black;
 		Gizmo.Draw.Text( $"Value: {angles.pitch:n0}, {angles.yaw:n0}, {angles.roll:n0}", new Transform( Vector3.Down * 50.0f ) );
 	}

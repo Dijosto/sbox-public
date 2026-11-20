@@ -15,7 +15,8 @@ internal partial class StandaloneGameInstance : GameInstance
 	/// </summary>
 	public override async Task<bool> LoadAsync( PackageLoader.Enroller enroller, CancellationToken token )
 	{
-		var project = Project.AddFromFile( Standalone.GamePath );
+		// The project config was embedded in our executable at export time - assets/ holds only content
+		var project = Project.AddFromEmbeddedConfig( Standalone.ProjectConfigJson, Standalone.GamePath );
 		await Project.SyncWithPackageManager();
 		await Project.CompileAsync();
 		await project.Package.MountAsync();
@@ -25,7 +26,7 @@ internal partial class StandaloneGameInstance : GameInstance
 
 		PackageManager.CmdList();
 
-		Application.GameIdent = Package is null ? Ident : $"{_package.Org.Ident}.{_package.Ident}";
+		Application.GameIdent = Package?.FullIdent ?? Ident;
 		Application.GamePackage = _package;
 
 		{
@@ -33,7 +34,6 @@ internal partial class StandaloneGameInstance : GameInstance
 			{
 				PackageIdent = Package.FullIdent,
 				ContextTag = "gamemenu",
-				AllowLocalPackages = true,
 				CancellationToken = token
 			};
 
@@ -76,6 +76,8 @@ internal partial class StandaloneGameInstance : GameInstance
 
 		FileSystem.Mounted.Mount( new LocalFileSystem( Standalone.GamePath ) );
 		NativeEngine.FullFileSystem.AddProjectPath( Ident, Standalone.GamePath );
+
+		NativeEngine.g_pResourceSystem.InvalidateDatabase();
 		NativeEngine.g_pResourceSystem.ReloadSymlinkedResidentResources();
 
 		EngineFileSystem.ProjectSettings = activePackage.ProjectSettings;
@@ -83,21 +85,18 @@ internal partial class StandaloneGameInstance : GameInstance
 		LoadProjectSettings();
 
 		Log.Trace( $"Loading GameResources" );
-		ResourceLoader.LoadAllGameResource( FileSystem.Mounted );
+		await ResourceLoader.LoadAllGameResourceAsync( FileSystem.Mounted, token );
 
 		Log.Trace( $"Loading Fonts" );
 		FontManager.Instance.LoadAll( FileSystem.Mounted );
 
-		// Create a filesystem and initialize the localization
+		// Initialize localization
+		Game.Language = new LanguageContainer();
+		var localizationPath = System.IO.Path.Combine( Standalone.GamePath, "Localization" );
+		if ( System.IO.Directory.Exists( localizationPath ) )
 		{
-			var localizationFolder = new AggregateFileSystem();
-			var localizationPath = System.IO.Path.Combine( Standalone.GamePath, "Localization" );
-
-			if ( System.IO.Directory.Exists( localizationPath ) )
-			{
-				localizationFolder.CreateAndMount( localizationPath );
-			}
-			Game.Language = new LanguageContainer( localizationFolder );
+			Game.Language.FileSystem.CreateAndMount( localizationPath );
+			Game.Language.Refresh();
 		}
 
 		SetupFileWatch();
@@ -115,7 +114,7 @@ internal partial class StandaloneGameInstance : GameInstance
 		_packageAssembly = null;
 
 
-		if ( Package.TryParseIdent( Package.FullIdent, out var ident ) )
+		if ( Package.TryParseIdentParts( Package.FullIdent, out var ident ) )
 		{
 			var loaded = enroller.FindAssembly( Package, $"package.{ident.org}.{ident.package}" );
 			if ( loaded is not null )

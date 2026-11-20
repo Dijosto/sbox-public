@@ -1,4 +1,5 @@
-﻿using System.Text;
+﻿using System.Reflection;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
@@ -12,7 +13,18 @@ internal sealed class InterfaceConverterFactory : JsonConverterFactory
 		// Apply only to interfaces, no generic args
 		// Otherwise we pick up stuff like IList<T>
 		//
-		return typeToConvert.IsInterface && typeToConvert.GetGenericArguments().Length < 1;
+
+		if ( !typeToConvert.IsInterface ) return false;
+		if ( typeToConvert.IsGenericType ) return false;
+
+		//
+		// If the interface has its own converter, don't try
+		// to handle it with this one.
+		//
+
+		var converterType = typeToConvert.GetCustomAttribute<JsonConverterAttribute>()?.ConverterType;
+
+		return converterType is null || converterType == typeof( InterfaceConverterFactory );
 	}
 
 	public override JsonConverter CreateConverter( Type typeToConvert, JsonSerializerOptions options )
@@ -72,7 +84,7 @@ internal sealed class InterfaceConverter<T> : JsonConverter<T> where T : class
 			if ( data.Value.ValueKind == JsonValueKind.String )
 			{
 				var path = data.Value.GetString();
-				var res = Resource.LoadFromPath( typeof( GameResource ), path );
+				var res = Resource.Load( typeof( GameResource ), path );
 				return res as T;
 			}
 		}

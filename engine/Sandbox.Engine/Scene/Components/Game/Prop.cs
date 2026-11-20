@@ -132,6 +132,7 @@ public class Prop : Component, Component.ExecuteInEditor, Component.IDamageable
 	public bool StartAsleep { get; set; }
 
 	[Property] public Action OnPropBreak { get; set; }
+	[Property] public Action<List<Gib>> OnGibsCreated { get; set; }
 	[Property] public Action<DamageInfo> OnPropTakeDamage { get; set; }
 
 	[Property, Hide]
@@ -139,6 +140,16 @@ public class Prop : Component, Component.ExecuteInEditor, Component.IDamageable
 
 	[Property, Hide]
 	ModelRenderer ModelRenderer { get; set; }
+
+	/// <summary>
+	/// Override material carried over from the prop a gib broke off, applied to the renderer we create.
+	/// </summary>
+	internal Material InheritedMaterialOverride;
+
+	/// <summary>
+	/// Surface carried over from the prop a gib broke off, applied to the collider we create.
+	/// </summary>
+	internal Surface InheritedSurface;
 
 	void ClearProcedurals()
 	{
@@ -239,6 +250,11 @@ public class Prop : Component, Component.ExecuteInEditor, Component.IDamageable
 		mr.MaterialGroup = MaterialGroup;
 		mr.Tint = Tint;
 
+		if ( InheritedMaterialOverride is not null )
+		{
+			mr.MaterialOverride = InheritedMaterialOverride;
+		}
+
 		AddProcedural( mr );
 
 		ModelRenderer = mr;
@@ -258,6 +274,7 @@ public class Prop : Component, Component.ExecuteInEditor, Component.IDamageable
 			var collider = Components.GetOrCreate<ModelCollider>();
 			collider.Static = true;
 			collider.Model = Model;
+			ApplyInheritedSurface( collider );
 			AddProcedural( collider );
 
 			return;
@@ -269,6 +286,7 @@ public class Prop : Component, Component.ExecuteInEditor, Component.IDamageable
 			var collider = Components.GetOrCreate<ModelCollider>();
 			collider.Static = false;
 			collider.Model = Model;
+			ApplyInheritedSurface( collider );
 
 			AddProcedural( collider );
 
@@ -332,10 +350,38 @@ public class Prop : Component, Component.ExecuteInEditor, Component.IDamageable
 		AddProcedural( physics );
 	}
 
+	void ApplyInheritedSurface( Collider collider )
+	{
+		if ( InheritedSurface.IsValid() )
+		{
+			collider.Surface = InheritedSurface;
+		}
+	}
+
+	static Material GetGibMaterialOverride( ModelRenderer mr )
+	{
+		if ( !mr.IsValid() )
+			return null;
+
+		if ( mr.MaterialOverride is not null )
+			return mr.MaterialOverride;
+
+		var materials = mr.Materials;
+		if ( materials.Count == 1 && materials.HasOverride( 0 ) )
+			return materials.GetOverride( 0 );
+
+		return null;
+	}
+
 	/// <summary>
 	/// True if this prop can be set on fire.
 	/// </summary>
 	public bool IsFlammable => Model?.Data.Flammable ?? false;
+
+	/// <summary>
+	/// True if this prop will explode when destroyed.
+	/// </summary>
+	public bool IsExplosive => Model?.Data.Explosive ?? false;
 
 	[Sync]
 	public bool IsOnFire { get; protected set; }
@@ -352,6 +398,14 @@ public class Prop : Component, Component.ExecuteInEditor, Component.IDamageable
 		// The dead feel nothing
 		if ( Health <= 0.0f )
 			return;
+
+		// Explosive props detonate immediately on any physics impact
+		if ( IsExplosive && damage.Tags.Contains( "impact" ) )
+		{
+			Health = 0;
+			Kill( damage );
+			return;
+		}
 
 		if ( IsFlammable && !IsOnFire && ShouldDamageIgnite( damage ) )
 		{
@@ -373,7 +427,7 @@ public class Prop : Component, Component.ExecuteInEditor, Component.IDamageable
 
 		if ( Health <= 0 )
 		{
-			Kill();
+			Kill( damage );
 			Health = 0;
 		}
 	}
@@ -415,19 +469,24 @@ public class Prop : Component, Component.ExecuteInEditor, Component.IDamageable
 		}
 	}
 
-	public void Kill()
+	public void Kill( DamageInfo damage = null )
 	{
-		OnBreak();
+		OnBreak( damage );
 		GameObject.Destroy();
 	}
 
-	void OnBreak()
+	void OnBreak( DamageInfo damage = null )
 	{
 		OnPropBreak?.Invoke();
 
 		PlayBreakSound();
 
-		NetworkCreateGibs();
+		var wasImpact = damage?.Tags.Contains( "impact" ) ?? false;
+
+		if ( GameObject.HasFlagOrParent( GameObjectFlags.NotNetworked ) )
+			CreateGibs( wasImpact );
+		else
+			NetworkCreateGibs( wasImpact );
 
 		CreateExplosion();
 	}
@@ -445,6 +504,8 @@ public class Prop : Component, Component.ExecuteInEditor, Component.IDamageable
 
 		var force = Model.Data.ExplosionForce;
 		if ( force <= 0 ) force = 1;
+
+		CreateScorchDecal();
 
 		var explosionPrefab = Game.Resources.Get<PrefabFile>( "/prefabs/engine/explosion_med.prefab" );
 		if ( explosionPrefab == null )
@@ -464,11 +525,36 @@ public class Prop : Component, Component.ExecuteInEditor, Component.IDamageable
 			x.PhysicsForceScale = force;
 			x.DamageAmount = damage;
 			x.Attacker = LastAttacker;
+			x.Weapon = GameObject;
+			x.DamageTags?.Add( "explosion" );
 
 		}, FindMode.EverythingInSelfAndDescendants );
 
 		go.Enabled = true;
 		go.NetworkSpawn( true, null );
+	}
+
+	[Rpc.Broadcast( NetFlags.OwnerOnly )]
+	private void CreateScorchDecal()
+	{
+		var tr = Scene.Trace.Ray( new Ray( WorldPosition + new Vector3( 0, 0, 8 ), Vector3.Down ), 40 )
+			.IgnoreDynamic()
+			.IgnoreGameObjectHierarchy( GameObject )
+			.UseHitPosition( true )
+			.Run();
+
+		if ( !tr.Hit ) return;
+
+		var scorchPrefab = GameObject.GetPrefab( "/prefabs/engine/scorch.prefab" );
+		if ( scorchPrefab == null )
+		{
+			Log.Warning( "Can't find /prefabs/engine/scorch.prefab" );
+			return;
+		}
+
+		var go = scorchPrefab.Clone( tr.HitPosition + tr.Normal, Rotation.LookAt( -tr.Normal, Vector3.Up ) );
+		go.SetParent( tr.GameObject, true );
+		go.Enabled = true;
 	}
 
 	private void PlayBreakSound()
@@ -498,22 +584,22 @@ public class Prop : Component, Component.ExecuteInEditor, Component.IDamageable
 	/// Create the gibs for this prop breaking, over the network. This causes clients to spawn the gibs too.
 	/// </summary>
 	[Rpc.Broadcast( NetFlags.OwnerOnly )]
-	public void NetworkCreateGibs()
+	public void NetworkCreateGibs( bool wasImpact = false )
 	{
-		CreateGibs();
+		CreateGibs( wasImpact );
 	}
 
 	/// <summary>
 	/// Create the gibs and return them.
 	/// </summary>
-	public List<Gib> CreateGibs()
+	public List<Gib> CreateGibs( bool wasImpact = false )
 	{
 		var gibs = new List<Gib>();
 
 		if ( Model is null )
 			return gibs;
 
-		var spawnServerGibs = !Network.IsProxy;
+		var spawnServerGibs = Networking.IsHost;
 		var spawnClientGibs = !Application.IsDedicatedServer;
 
 		var breaklist = Model.GetData<ModelBreakPiece[]>();
@@ -523,68 +609,104 @@ public class Prop : Component, Component.ExecuteInEditor, Component.IDamageable
 		var rb = Components.Get<Rigidbody>();
 		var mr = Components.Get<ModelRenderer>();
 
+		var materialOverride = GetGibMaterialOverride( mr );
+		var surface = Components.Get<Collider>()?.Surface;
+
 		gibs.EnsureCapacity( breaklist.Length );
 
-		foreach ( var breakModel in breaklist )
+		// Batch anything we're spawning here
+		using ( Scene.BatchGroup() )
 		{
-			var model = Model.Load( breakModel.Model );
-			if ( model is null || model.IsError )
-				continue;
-
-			// Skip gibs we shouldn't spawn
-			if ( !spawnServerGibs && !breakModel.IsClientOnly ) continue;
-			if ( !spawnClientGibs && breakModel.IsClientOnly ) continue;
-
-			var gib = new GameObject( false, $"{GameObject.Name} (gib)" );
-
-			var offset = breakModel.Offset;
-			var placementOrigin = model.Attachments.GetTransform( "placementOrigin" );
-			if ( placementOrigin.HasValue )
-				offset = placementOrigin.Value.PointToLocal( offset );
-
-			gib.WorldPosition = WorldTransform.PointToWorld( offset );
-			gib.WorldRotation = WorldRotation;
-			gib.WorldScale = WorldScale;
-
-			foreach ( var tag in breakModel.CollisionTags.Split( ' ', StringSplitOptions.RemoveEmptyEntries ) )
+			foreach ( var breakModel in breaklist )
 			{
-				gib.Tags.Add( tag );
-			}
+				var model = Model.Load( breakModel.Model );
+				if ( model is null || model.IsError )
+					continue;
 
-			var c = gib.Components.Create<Gib>( false );
-			c.FadeTime = breakModel.FadeTime;
-			c.Model = model;
-			c.Enabled = true;
-			c.Tint = mr?.Tint ?? c.Tint;
+				// Skip gibs we shouldn't spawn
+				if ( !spawnServerGibs && !breakModel.IsClientOnly ) continue;
+				if ( !spawnClientGibs && breakModel.IsClientOnly ) continue;
 
-			gibs.Add( c );
+				var gib = new GameObject( false, $"{GameObject.Name} (gib)" );
 
-			if ( breakModel.IsClientOnly )
-			{
-				gib.Tags.Add( "debris", "clientside" ); // no physics interactions
-			}
-			else if ( !IsProxy )
-			{
-				// Spawn on the network
-				gib.NetworkSpawn( true, null );
-			}
+				var offset = breakModel.Offset;
+				var placementOrigin = model.Attachments.GetTransform( "placementOrigin" );
+				if ( placementOrigin.HasValue )
+					offset = placementOrigin.Value.PointToLocal( offset );
 
-			gib.Enabled = true;
+				gib.WorldPosition = WorldTransform.PointToWorld( offset );
+				gib.WorldRotation = WorldRotation;
+				gib.WorldScale = WorldScale;
 
-			var phys = gib.Components.Get<Rigidbody>( true );
+				foreach ( var tag in breakModel.CollisionTags.Split( ' ', StringSplitOptions.RemoveEmptyEntries ) )
+				{
+					gib.Tags.Add( tag );
+				}
 
-			if ( phys is not null && rb is not null )
-			{
-				// Compute linear velocity at the gibs spawn point.
-				var velocity = rb.PreVelocity + Vector3.Cross( rb.PreAngularVelocity, phys.MassCenter - rb.MassCenter );
+				var c = gib.Components.Create<Gib>( false );
+				c.InheritedMaterialOverride = materialOverride;
+				c.InheritedSurface = surface;
+				c.FadeTime = breakModel.FadeTime;
+				c.Model = model;
+				c.Enabled = true;
+				c.Tint = mr?.Tint ?? c.Tint;
+				c.MaterialGroup = mr?.MaterialGroup ?? c.MaterialGroup;
 
-				// Apply 50% energy loss.
-				velocity *= 0.5f;
+				gibs.Add( c );
 
-				phys.Velocity = velocity;
-				phys.AngularVelocity = rb.PreAngularVelocity;
+				if ( breakModel.IsClientOnly )
+				{
+					gib.Tags.Add( "debris", "clientside" ); // no physics interactions
+					gib.Flags |= GameObjectFlags.NotNetworked; // every peer makes its own, keep them out of snapshots
+				}
+				else if ( Networking.IsHost )
+				{
+					// Spawn on the network
+					gib.NetworkSpawn( true, null );
+				}
+
+				gib.Enabled = true;
 			}
 		}
+
+		// Transfer velocity from us to the gibs.
+		if ( rb.IsValid() )
+		{
+			// If the prop was thrown on the floor or a wall when broken, we want the gibs to inherit the velocity from before that impact
+			// that way they crash into the floor/wall nicely and stuff.
+			// HOWEVER, we don't want this for anything else
+			// else we'd be stomping whatever changes people might be wanting to make to the velocity themselves.
+			var linVel = wasImpact ? rb.PreVelocity : rb.Velocity;
+			var angVel = wasImpact ? rb.PreAngularVelocity : rb.AngularVelocity;
+			foreach ( var gib in gibs )
+			{
+				var phys = gib.Components.Get<Rigidbody>( true );
+				if ( !phys.IsValid() ) continue;
+
+				// Compute linear velocity at the gibs spawn point.
+				var velocity = linVel + Vector3.Cross( angVel, phys.MassCenter - rb.MassCenter );
+
+				if ( wasImpact )
+				{
+					// Apply 50% energy loss from surface impact.
+					velocity *= 0.5f;
+				}
+
+				phys.Velocity = velocity;
+				phys.AngularVelocity = angVel;
+			}
+		}
+
+		// If this prop was on fire, ignite the gibs so the fire carries over.
+		if ( IsOnFire )
+		{
+			foreach ( var gib in gibs )
+			{
+				gib.Ignite();
+			}
+		}
+
+		OnGibsCreated?.Invoke( gibs );
 
 		return gibs;
 	}

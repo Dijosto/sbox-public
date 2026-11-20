@@ -5,6 +5,7 @@ namespace Sandbox.UI;
 /// A collection of <see cref="StyleSheet"/> objects applied directly to a panel.
 /// See <see cref="Panel.StyleSheet"/>.
 /// </summary>
+[Expose]
 public struct StyleSheetCollection
 {
 	internal List<StyleSheet> List;
@@ -36,6 +37,15 @@ public struct StyleSheetCollection
 	public void Load( string filename, bool inheritVariables = true, bool failSilently = false )
 	{
 		Add( StyleSheet.FromFile( filename, inheritVariables ? CollectVariables() : null, failSilently ) );
+	}
+
+	/// <summary>
+	/// Add a stylesheet parsed from a string. The parsed sheet is cached under
+	/// <paramref name="key"/> and shared between all panels using the same key.
+	/// </summary>
+	public void AddInline( string content, string key )
+	{
+		Add( StyleSheet.FromInline( content, key ) );
 	}
 
 	/// <summary>

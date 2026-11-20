@@ -1,9 +1,15 @@
-﻿namespace Sandbox;
+using System.Buffers;
+using System.Runtime.InteropServices;
+
+namespace Sandbox;
 
 public static partial class Gizmo
 {
 	public sealed partial class GizmoDraw
 	{
+		// Reused across solid draw calls instead of allocating a temporary list each frame.
+		readonly List<Vertex> _scratchVertices = new();
+
 		/// <summary>
 		/// Draw a solid cone shape
 		/// </summary>
@@ -27,13 +33,14 @@ public static partial class Gizmo
 
 			float flAngle = 0;
 			float flAngleStep = (2.0f * MathF.PI) / (float)nSegments;
-			Vector3[] pVerts = new Vector3[nSegments];
+			Vector3[] pVerts = ArrayPool<Vector3>.Shared.Rent( nSegments );
+
 			for ( int i = 0; i < nSegments; flAngle += flAngleStep, i++ )
 			{
 				pVerts[i] = @base + flRadius * (vecLeft * MathF.Sin( flAngle ) + vecUp * MathF.Cos( flAngle ));
 			}
 
-			// Draw the cone.	
+			// Draw the cone.
 			for ( int i = 0; i < nSegments - 1; i++ )
 			{
 				var n = (pVerts[i] + vecTip).Normal;
@@ -53,16 +60,14 @@ public static partial class Gizmo
 
 
 			// Draw the base.
-			if ( true )
+			for ( int i = 1; i < nSegments - 1; i++ )
 			{
-				for ( int i = 1; i < nSegments - 1; i++ )
-				{
-					so.Vertices.Add( new Vertex( pVerts[0], Color ) { Normal = -vecUp } );
-					so.Vertices.Add( new Vertex( pVerts[i], Color ) { Normal = -vecUp } );
-					so.Vertices.Add( new Vertex( pVerts[i + 1], Color ) { Normal = -vecUp } );
-				}
+				so.Vertices.Add( new Vertex( pVerts[0], Color ) { Normal = -vecUp } );
+				so.Vertices.Add( new Vertex( pVerts[i], Color ) { Normal = -vecUp } );
+				so.Vertices.Add( new Vertex( pVerts[i + 1], Color ) { Normal = -vecUp } );
 			}
 
+			ArrayPool<Vector3>.Shared.Return( pVerts );
 		}
 
 		/// <summary>
@@ -258,47 +263,39 @@ public static partial class Gizmo
 		/// </summary>
 		public void SolidSphere( Vector3 center, float radius, int hSegments = 8, int vSegments = 8 )
 		{
+			if ( hSegments < 1 || vSegments < 1 ) return;
+			using var aroundBuffer = hSegments > MaxCachedCircleSections ? new PooledSpan<Vector2>( checked(hSegments + 1) ) : default;
+			using var downBuffer = vSegments > MaxCachedCircleSections ? new PooledSpan<Vector2>( checked(vSegments + 1) ) : default;
+			var around = CircleSamples( hSegments, aroundBuffer.Span );
+			var down = CircleSamples( vSegments, downBuffer.Span, half: true );
+			var stride = checked(hSegments + 1);
+			using var grid = new PooledSpan<Vertex>( checked(stride * (vSegments + 1)) );
+			var vertices = grid.Span;
+			var vertex = new Vertex( Vector3.Zero, Color32 );
+			for ( var y = 0; y <= vSegments; ++y )
+				for ( var x = 0; x <= hSegments; ++x )
+				{
+					vertex.Position = center + new Vector3( radius * down[y].x * around[x].y,
+						radius * down[y].y, radius * down[y].x * around[x].x );
+					vertices[y * stride + x] = vertex;
+				}
+
 			var so = VertexObject( Graphics.PrimitiveType.Triangles, SolidMaterial );
-			var vertices = new List<Vertex>();
-
-			for ( var y = 0; y <= vSegments; y++ )
-			{
-				var v = (float)y / vSegments;
-				var vAngle = v * MathF.PI;
-
-				for ( int x = 0; x <= hSegments; x++ )
+			var start = so.Vertices.Count;
+			CollectionsMarshal.SetCount( so.Vertices, checked(start + hSegments * vSegments * 6) );
+			var target = CollectionsMarshal.AsSpan( so.Vertices )[start..];
+			var output = 0;
+			for ( var y = 0; y < vSegments; ++y )
+				for ( var x = 0; x < hSegments; ++x )
 				{
-					var u = (float)x / hSegments;
-					var hAngle = u * MathF.PI * 2;
-
-					var vertex = new Vector3(
-						center.x + radius * MathF.Sin( vAngle ) * MathF.Cos( hAngle ),
-						center.y + radius * MathF.Cos( vAngle ),
-						center.z + radius * MathF.Sin( vAngle ) * MathF.Sin( hAngle )
-					);
-
-					vertices.Add( new Vertex( vertex, Color ) );
+					var i = y * stride + x;
+					target[output++] = vertices[i];
+					target[output++] = vertices[i + stride];
+					target[output++] = vertices[i + 1];
+					target[output++] = vertices[i + 1];
+					target[output++] = vertices[i + stride];
+					target[output++] = vertices[i + stride + 1];
 				}
-			}
-
-			for ( var y = 0; y < vSegments; y++ )
-			{
-				for ( var x = 0; x < hSegments; x++ )
-				{
-					int i0 = y * (hSegments + 1) + x;
-					int i1 = i0 + 1;
-					int i2 = i0 + (hSegments + 1);
-					int i3 = i2 + 1;
-
-					so.Vertices.Add( vertices[i0] );
-					so.Vertices.Add( vertices[i2] );
-					so.Vertices.Add( vertices[i1] );
-
-					so.Vertices.Add( vertices[i1] );
-					so.Vertices.Add( vertices[i2] );
-					so.Vertices.Add( vertices[i3] );
-				}
-			}
 		}
 
 		/// <summary>
@@ -307,7 +304,8 @@ public static partial class Gizmo
 		public void SolidCylinder( Vector3 start, Vector3 end, float radius, int hSegments = 32 )
 		{
 			var so = VertexObject( Graphics.PrimitiveType.Triangles, SolidMaterial );
-			var vertices = new List<Vertex>();
+			var vertices = _scratchVertices;
+			vertices.Clear();
 
 			var axis = (end - start).Normal;
 			var up = Vector3.Up;
@@ -373,7 +371,8 @@ public static partial class Gizmo
 		public void SolidCapsule( Vector3 start, Vector3 end, float radius, int hSegments, int vSegments )
 		{
 			var so = VertexObject( Graphics.PrimitiveType.Triangles, SolidMaterial );
-			var vertices = new List<Vertex>();
+			var vertices = _scratchVertices;
+			vertices.Clear();
 
 			var axis = (end - start).Normal;
 			var right = Vector3.Cross( axis, Vector3.Right ).Normal;
@@ -522,7 +521,7 @@ public static partial class Gizmo
 			// Generate the "up" vector within the rotation plane for the circle.
 			Vector3 vecUp = Vector3.Cross( vecAxis, vecRight ).Normal;
 
-			using ( Gizmo.Scope() )
+			using ( Gizmo.PushScope() )
 			{
 				Transform = Transform.WithRotation( Transform.Rotation * Rotation.LookAt( vecAxis, vecUp ) );
 				Draw.LineCircle( 0, radius, 0, 180.0f, sections: 32 );
@@ -534,8 +533,13 @@ public static partial class Gizmo
 		/// </summary>
 		public void Sprite( Vector3 center, float size, string texture )
 		{
-			using var tex = Texture.Load( texture );
-			Sprite( center, size, tex );
+			// Textures will get destroyed automatically if they get garbage collected,
+			// and we don't want to immediately dispose after use here otherwise the
+			// same texture will get loaded from scratch over and over again.
+
+#pragma warning disable CA2000 // Dispose objects before losing scope
+			Sprite( center, size, Texture.Load( texture ) );
+#pragma warning restore CA2000
 		}
 
 		/// <summary>
@@ -559,23 +563,100 @@ public static partial class Gizmo
 		/// </summary>
 		public void Sprite( Vector3 center, Vector2 size, Texture texture, bool worldspace, float angle )
 		{
-			var so = VertexObject( Graphics.PrimitiveType.Points, SpriteMaterial, false );
+			var so = VertexObject( Graphics.PrimitiveType.Points, SpriteMaterial, texture ?? Texture.White );
 
-			var a = new Vertex
-			{
-				Position = Transform.PointToWorld( center ),
-				Color = Color,
-				TexCoord0 = new Vector4( size.x, size.y, worldspace ? 1 : 0, angle.DegreeToRadian() ),
-				Normal = Vector3.Up,
-				Tangent = new Vector4( 1, 0, 0, 1 )
-			};
+			var vertex = SpriteVertex( size, worldspace, angle );
+			vertex.Position = Transform.PointToWorld( center );
 
-			so.Bounds = so.Bounds.AddBBox( BBox.FromPositionAndSize( center, size.Length * 2 ) );
-			so.Vertices.Add( a );
-			so.Flags.IsTranslucent = true;
-			so.Flags.IsOpaque = false;
-
-			so.Attributes.Set( "TextureColor", texture ?? Texture.White );
+			so.Vertices.Add( vertex );
 		}
+
+		/// <summary>
+		/// Draw a batch of identical sprites. Much faster than calling <see cref="Sprite( Vector3, Vector2, Texture, bool, float )"/>
+		/// in a loop, which repeats the batch lookup and per sprite setup for every one.
+		/// </summary>
+		public void Sprites( ReadOnlySpan<Vector3> centers, Vector2 size, Texture texture = null, bool worldspace = true, float angle = 0.0f )
+		{
+			if ( centers.IsEmpty ) return;
+
+			var so = VertexObject( Graphics.PrimitiveType.Points, SpriteMaterial, texture ?? Texture.White );
+
+			var start = so.Vertices.Count;
+			CollectionsMarshal.SetCount( so.Vertices, start + centers.Length );
+
+			var target = CollectionsMarshal.AsSpan( so.Vertices ).Slice( start, centers.Length );
+			var vertex = SpriteVertex( size, worldspace, angle );
+			var transform = Transform;
+
+			if ( transform == global::Transform.Zero )
+			{
+				for ( int i = 0; i < target.Length; i++ )
+				{
+					vertex.Position = centers[i];
+					target[i] = vertex;
+				}
+
+				return;
+			}
+
+			for ( int i = 0; i < target.Length; i++ )
+			{
+				vertex.Position = transform.PointToWorld( centers[i] );
+				target[i] = vertex;
+			}
+		}
+
+		/// <summary>
+		/// Draw a batch of identical sprites. Much faster than calling <see cref="Sprite( Vector3, Vector2, Texture, bool, float )"/>
+		/// in a loop, which repeats the batch lookup and per sprite setup for every one.
+		/// </summary>
+		public void Sprites( IEnumerable<Vector3> centers, Vector2 size, Texture texture = null, bool worldspace = true, float angle = 0.0f )
+		{
+			if ( centers is null ) return;
+
+			// Take the span path when the source is already contiguous.
+			if ( centers is List<Vector3> list )
+			{
+				Sprites( CollectionsMarshal.AsSpan( list ), size, texture, worldspace, angle );
+				return;
+			}
+
+			if ( centers is Vector3[] array )
+			{
+				Sprites( array.AsSpan(), size, texture, worldspace, angle );
+				return;
+			}
+
+			VertexSceneObject so = null;
+
+			var vertex = SpriteVertex( size, worldspace, angle );
+			var transform = Transform;
+
+			foreach ( var center in centers )
+			{
+				if ( so is null )
+				{
+					so = VertexObject( Graphics.PrimitiveType.Points, SpriteMaterial, texture ?? Texture.White );
+
+					if ( centers.TryGetNonEnumeratedCount( out var count ) )
+						so.Vertices.EnsureCapacity( so.Vertices.Count + count );
+				}
+
+				vertex.Position = transform.PointToWorld( center );
+				so.Vertices.Add( vertex );
+			}
+		}
+
+		/// <summary>
+		/// Every vertex in a sprite batch shares everything but its position, so build it once and
+		/// only rewrite the position per sprite.
+		/// </summary>
+		private Vertex SpriteVertex( Vector2 size, bool worldspace, float angle ) => new()
+		{
+			Color = Color,
+			Normal = Vector3.Up,
+			TexCoord0 = new Vector4( size.x, size.y, worldspace ? 1 : 0, angle.DegreeToRadian() ),
+			Tangent = new Vector4( 1, 0, 0, 1 )
+		};
 	}
 }

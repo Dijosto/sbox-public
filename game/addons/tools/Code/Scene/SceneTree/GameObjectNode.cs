@@ -53,6 +53,7 @@ partial class GameObjectNode : TreeNode<GameObject>
 			HashCode hc = new HashCode();
 			hc.Add( Value.Name );
 			hc.Add( Value.IsPrefabInstance );
+			hc.Add( (Value.Scene.Editor as SceneEditorSession)?.IsInstance( Value ) );
 			hc.Add( Value.Flags );
 			hc.Add( Value.NetworkMode );
 			hc.Add( Value.Network.Active );
@@ -104,6 +105,12 @@ partial class GameObjectNode : TreeNode<GameObject>
 		Color overlayIconColor = iconColor;
 
 		string overlayIcon = null;
+
+		if ( Value.Scene.Editor is SceneEditorSession session && session.IsInstance( Value ) )
+		{
+			icon = "view_in_ar";
+			pen = iconColor = Theme.Green;
+		}
 
 		if ( Value.IsPrefabInstance )
 		{
@@ -309,13 +316,23 @@ partial class GameObjectNode : TreeNode<GameObject>
 
 
 		}
+
+		if ( Value.Tags.Has( "hidden" ) )
+		{
+			var eyeRect = item.Rect;
+			eyeRect.Right -= 4;
+			eyeRect.Left = eyeRect.Right - 18;
+
+			Paint.Pen = Theme.TextControl;
+			Paint.DrawIcon( eyeRect, "visibility_off", 14, TextFlag.Center );
+		}
 	}
 
 	public override void OnRename( VirtualWidget item, string text, List<TreeNode> selection = null )
 	{
 		var undoName = selection != null && selection.Count > 1 ? $"Rename {selection.Count} Objects" : "Rename Object";
 		var gos = selection.Select( x => x.Value ).OfType<GameObject>().ToArray();
-		using ( SceneEditorSession.Active.UndoScope( undoName ).WithGameObjectChanges( gos, GameObjectUndoFlags.All ).Push() )
+		using ( SceneEditorSession.Active.UndoScope( undoName ).WithGameObjectChanges( gos, GameObjectUndoFlags.Properties ).Push() )
 		{
 			foreach ( var go in gos )
 			{
@@ -353,8 +370,13 @@ partial class GameObjectNode : TreeNode<GameObject>
 		return true;
 	}
 
-	private async void Drop( string text )
+	private async void Drop( string text, ItemEdge dropEdge = default )
 	{
+		// Capture the target scene and session before any awaits
+		var targetScene = Value.Scene;
+		var session = targetScene.Editor;
+		var targetGo = Value;
+
 		var drop = await BaseDropObject.CreateDropFor( text );
 
 		if ( drop is null )
@@ -362,15 +384,25 @@ partial class GameObjectNode : TreeNode<GameObject>
 
 		await drop.StartInitialize( text );
 
-		using ( var sc = Value.Scene.Push() )
+		using ( var sc = targetScene.Push() )
 		{
 			await drop.OnDrop();
 			var go = drop.GameObject;
 			if ( go.IsValid() )
 			{
-				go.Parent = Value;
+				// Insert above/below the target if dropping on an edge, otherwise parent to target.
+				if ( targetGo is not Scene && dropEdge.HasFlag( ItemEdge.Top | ItemEdge.Bottom ) )
+				{
+					targetGo.AddSibling( go, before: dropEdge.HasFlag( ItemEdge.Top ) );
+				}
+				else
+				{
+					go.Parent = targetGo;
+				}
+
 				go.LocalTransform = new Transform();
-				EditorScene.Selection.Add( go );
+
+				session?.Selection.Set( go );
 			}
 		}
 		drop.Delete();
@@ -443,7 +475,12 @@ partial class GameObjectNode : TreeNode<GameObject>
 
 			if ( e.IsDrop )
 			{
-				using ( SceneEditorSession.Active.UndoScope( "Change Game Object Order" ).WithGameObjectChanges( draggedGos, GameObjectUndoFlags.Properties ).Push() )
+				var undo = SceneEditorSession.Active.UndoScope( "Change Game Object Order" )
+					.WithGameObjectChanges( draggedGos, GameObjectUndoFlags.Properties );
+				var targetParent = targetGo is not Scene && (e.DropEdge.HasFlag( ItemEdge.Top ) || e.DropEdge.HasFlag( ItemEdge.Bottom )) ? targetGo.Parent : targetGo;
+				if ( targetParent is not Scene )
+					undo.WithGameObjectChanges( targetParent, GameObjectUndoFlags.Children );
+				using ( undo.Push() )
 				{
 					foreach ( var draggedGo in draggedGos )
 					{
@@ -499,15 +536,20 @@ partial class GameObjectNode : TreeNode<GameObject>
 			return DropAction.Move;
 		}
 
-		if ( e.Data.Url is not null && e.IsDrop )
+		// For local file paths, only accept the drop if the extension is supported by a registered DropObject
+		if ( !string.IsNullOrEmpty( e.Data.FileOrFolder ) && BaseDropObject.CanCreateDropFor( e.Data.FileOrFolder ) )
 		{
-			Drop( e.Data.Url.ToString() );
+			if ( e.IsDrop )
+				Drop( e.Data.FileOrFolder, e.DropEdge );
+
 			return DropAction.Move;
 		}
 
-		if ( !string.IsNullOrEmpty( e.Data.FileOrFolder ) && e.IsDrop )
+		if ( e.Data.Url is not null )
 		{
-			Drop( e.Data.FileOrFolder );
+			if ( e.IsDrop )
+				Drop( e.Data.Url.ToString(), e.DropEdge );
+
 			return DropAction.Move;
 		}
 
@@ -531,6 +573,7 @@ partial class GameObjectNode : TreeNode<GameObject>
 
 		bool isObjectMenu = gameObject.IsValid();
 		bool isPrefabRoot = isObjectMenu && treeNode is PrefabNode;
+		var session = (treeNode.Value as GameObject)?.Scene.Editor as SceneEditorSession ?? SceneEditorSession.Active;
 
 		// For object creation, we need to determine the parent at click time, not menu creation time
 		// (because right-clicking on empty space deselects nodes, and we want root-level creation in that case)
@@ -555,11 +598,16 @@ partial class GameObjectNode : TreeNode<GameObject>
 		m.AddOption( "Copy", "content_copy", EditorScene.Copy, "editor.copy" ).Enabled = isObjectMenu;
 		m.AddOption( "Paste", "content_paste", EditorScene.Paste, "editor.paste" );
 		m.AddOption( "Paste As Child", null, EditorScene.PasteAsChild, "editor.paste-as-child" ).Enabled = isObjectMenu;
+		m.AddOption( "Paste Special", "content_paste_go", EditorScene.PasteSpecial, "editor.paste-special" );
 		m.AddOption( "Create Group", "file_copy", SceneEditorMenus.Group, "editor.group" ).Enabled = isObjectMenu && !isPrefabRoot;
+		m.AddOption( "Create Instance", "view_in_ar", SceneEditorMenus.CreateInstance ).Enabled =
+			isObjectMenu && !isPrefabRoot && session is { IsPrefabSession: false, IsPlaying: false };
 		m.AddSeparator();
 		m.AddOption( "Rename", "label", treeNode.TreeView.BeginRename, "editor.rename" ).Enabled = isObjectMenu;
 		m.AddOption( "Duplicate", "file_copy", SceneEditorMenus.Duplicate, "editor.duplicate" ).Enabled = isObjectMenu && !isPrefabRoot;
 		m.AddOption( "Delete", "delete", SceneEditorMenus.Delete, "editor.delete" ).Enabled = isObjectMenu && !isPrefabRoot;
+		m.AddOption( "Hide/Show", "visibility_off", SceneEditorMenus.ToggleVisibility, "editor.toggle-visibility" ).Enabled = isObjectMenu;
+		m.AddOption( "Isolate Selection", "filter_center_focus", SceneEditorMenus.IsolateSelection, "editor.isolate-selection" ).Enabled = isObjectMenu;
 
 		m.AddSeparator();
 
@@ -576,6 +624,14 @@ partial class GameObjectNode : TreeNode<GameObject>
 		if ( gameObject.IsValid() ) // has selection
 		{
 			var selectedGos = EditorScene.Selection.OfType<GameObject>().ToArray();
+			if ( selectedGos.Length == 1 && session?.IsInstance( gameObject ) == true )
+			{
+				var instances = m.AddMenu( "Instance", "view_in_ar" );
+				instances.AddOption( "Make Unique", "file_copy", () => session.MakeInstanceUnique( gameObject ) );
+				instances.AddOption( "Unlink Instance", "link_off", () => session.UnlinkInstance( gameObject ) );
+				instances.AddOption( "Ungroup Instance", "ungroup", () => session.UngroupInstance( gameObject ) )
+					.Enabled = gameObject.Components.Count == 0;
+			}
 
 			m.AddSeparator();
 
@@ -642,14 +698,7 @@ partial class GameObjectNode : TreeNode<GameObject>
 					{
 						foreach ( var go in selectedGos )
 						{
-							if ( go.IsPrefabInstanceRoot )
-							{
-								EditorUtility.Prefabs.RevertInstanceToPrefab( go );
-							}
-							else if ( go.IsPrefabInstance )
-							{
-								EditorUtility.Prefabs.RevertGameObjectInstanceChanges( go );
-							}
+							EditorUtility.Prefabs.RevertGameObjectInstanceChanges( go );
 						}
 					}
 				} ).Enabled = isModified;
@@ -693,7 +742,8 @@ partial class GameObjectNode : TreeNode<GameObject>
 
 						foreach ( var go in selectedGos )
 						{
-							if ( go.IsPrefabInstanceRoot )
+							// Nested roots must go through ApplyGameObjectInstanceChangesToPrefab, not WriteInstanceToPrefab.
+							if ( EditorUtility.Prefabs.IsOuterMostPrefabRoot( go ) )
 							{
 								EditorUtility.Prefabs.WriteInstanceToPrefab( go );
 							}
@@ -759,10 +809,11 @@ partial class GameObjectNode : TreeNode<GameObject>
 			}
 			prefabRoot.Name = System.IO.Path.GetFileNameWithoutExtension( saveLocation );
 
-			EditorUtility.Prefabs.ConvertGameObjectToPrefab( prefabRoot, saveLocation );
-			EditorUtility.InspectorObject = prefabRoot;
+			prefabRoot = EditorUtility.Prefabs.ConvertGameObjectToPrefab( prefabRoot, saveLocation );
+			if ( prefabRoot is null ) return;
 
-			EditorScene.Selection.Clear();
+			EditorUtility.InspectorObject = prefabRoot;
+			EditorScene.Selection.Set( prefabRoot );
 		}
 	}
 

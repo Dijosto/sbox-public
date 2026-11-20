@@ -1,4 +1,7 @@
-﻿using Sandbox.Rendering;
+﻿using NativeEngine;
+using Sandbox.Engine;
+using Sandbox.Engine.Settings;
+using Sandbox.Rendering;
 using Sandbox.VR;
 
 namespace Sandbox;
@@ -13,8 +16,14 @@ public sealed partial class SceneCamera : IDisposable, IManagedCamera
 	// these systems into systems that are configurable per camera and from addon code.
 	// For example, volumetricFog should hold the render state. The addon code should hold
 	// the volumes. Tonemapping should hold the render state for this camera only.
-	internal ToneMapping ToneMapping = Application.IsHeadless ? null : new ToneMapping();
+	internal ToneMapping ToneMapping = Graphics.IsAvailable ? new ToneMapping() : null;
 	internal VolumetricFog VolumetricFogImpl = null;
+	private readonly Lazy<Cmaa2Renderer> _cmaa2Renderer = new( () => new Cmaa2Renderer(), isThreadSafe: true );
+
+	/// <summary>
+	/// Last frame's depth chain, for the native renderer's occlusion culling.
+	/// </summary>
+	internal IDisposable OcclusionHistory;
 
 	/// <summary>
 	/// This is a c++ object with a ton of useful shit.
@@ -23,6 +32,28 @@ public sealed partial class SceneCamera : IDisposable, IManagedCamera
 	CFrustum _frustum;
 
 	internal Matrix ProjectionMatrix => Frustum.GetProj();
+
+	/// <summary>
+	/// World to projection matrix using the reverse-Z projection (matches the rendered depth buffer:
+	/// far plane = 0, near plane = 1), transposed for row-vector use with <see cref="Matrix.Transform(Vector4)"/>.
+	/// <para>
+	/// The engine's native matrices are column-vector (GPU <c>mul( M, v )</c>) while
+	/// <see cref="Matrix.Transform(Vector4)"/> is row-vector (<c>v · M</c>), so we hand back the transpose.
+	/// Transform a homogeneous world point — <c>matrix.Transform( new Vector4( pos, 1 ) )</c> — to get its
+	/// reverse-Z clip-space coordinate (before the perspective divide).
+	/// </para>
+	/// </summary>
+	internal Matrix ReverseZViewProjectionMatrix => Frustum.GetReverseZViewProjTranspose();
+
+	/// <summary>
+	/// Returns the normalized screen coverage (0-1) of a sphere at the given origin and radius.
+	/// </summary>
+	internal float ComputeScreenSize( Vector3 origin, float radius ) => Frustum.ComputeScreenSize( origin, radius );
+
+	/// <summary>
+	/// Returns the screen width in pixels of a sphere at the given origin and radius.
+	/// </summary>
+	internal float ComputeScreenSizeInPixels( Vector3 origin, float radius ) => Frustum.ComputeScreenSize( origin, radius ) * Size.x;
 
 	public RenderAttributes Attributes { get; }
 
@@ -47,16 +78,41 @@ public sealed partial class SceneCamera : IDisposable, IManagedCamera
 	internal Action<Rendering.Stage, SceneCamera> OnRenderStageHook;
 
 	/// <summary>
-	/// Called when rendering the post process pass
+	/// Called after post-processing has completed, but before normal UI overlays.
 	/// </summary>
-	[Obsolete]
-	public Action OnRenderPostProcess { get; set; }
+	internal Action OnAfterPostProcess;
 
 	/// <summary>
-	/// Called when rendering the transparent pass
+	/// Whether the camera component's post processing reads the depth-normals G-buffer.
 	/// </summary>
-	[Obsolete]
-	public Action OnRenderOpaque { get; set; }
+	internal Func<bool> WantsDepthNormalsHook;
+
+	/// <summary>
+	/// Whether something in this camera's frame reads the normals and roughness G-buffer of the depth-normals prepass
+	/// (AO, SSR). Native always draws it; the managed scene renderer only when this says so.
+	/// </summary>
+	internal bool WantsDepthNormals => (WantsDepthNormalsHook?.Invoke() ?? false) || ScreenSpaceReflections is not null;
+
+	/// <summary>
+	/// Queries and runs the camera component's independent effects ahead of their normal stage.
+	/// </summary>
+	internal Func<Rendering.Stage, PostProcessQueue, bool> HasEarlyPostProcessHook;
+	internal Action<Rendering.Stage, bool> ScheduleEarlyPostProcessHook;
+	internal Action<Rendering.Stage, PostProcessQueue> RenderEarlyPostProcessHook;
+
+	/// <summary>
+	/// Whether something at <paramref name="stage"/> can run early on <paramref name="queue"/>
+	/// (<see cref="BasePostProcess.EarlyQueue"/>).
+	/// </summary>
+	internal bool HasEarlyPostProcess( Rendering.Stage stage, PostProcessQueue queue ) => HasEarlyPostProcessHook?.Invoke( stage, queue ) ?? false;
+
+	internal void ScheduleEarlyPostProcess( Rendering.Stage stage, bool enabled ) => ScheduleEarlyPostProcessHook?.Invoke( stage, enabled );
+
+	/// <summary>
+	/// Run what <see cref="HasEarlyPostProcess"/> found, inside a <see cref="Graphics"/> block on the selected queue. The stage then
+	/// skips it.
+	/// </summary>
+	internal void RenderEarlyPostProcess( Rendering.Stage stage, PostProcessQueue queue ) => RenderEarlyPostProcessHook?.Invoke( stage, queue );
 
 	/// <summary>
 	/// Called when rendering the transparent pass
@@ -64,9 +120,14 @@ public sealed partial class SceneCamera : IDisposable, IManagedCamera
 	[Obsolete]
 	public Action OnRenderTransparent { get; set; }
 
-	public Action OnRenderOverlay { get; set; }
+	internal Action OnRenderOverlay { get; set; }
 
-	public Action OnRenderUI { get; set; }
+	internal Action OnRenderUI { get; set; }
+
+	/// <summary>
+	/// Called before post processing, for UI that wants bloom and color grading applied to it.
+	/// </summary>
+	internal Action OnRenderUIBeforePostProcess { get; set; }
 
 	/// <summary>
 	/// The size of the screen. Allows us to work out aspect ratio.
@@ -96,6 +157,39 @@ public sealed partial class SceneCamera : IDisposable, IManagedCamera
 	/// Control fog based on an image.
 	/// </summary>
 	public CubemapFogController CubemapFog { get; init; } = new();
+
+	/// <summary>
+	/// Camera-local fog resolved from Fog components. Null preserves the legacy gradient and
+	/// cubemap fog. A disabled setup with full weight explicitly clears those fog layers.
+	/// CameraComponent refreshes this value during rendering setup; use its Fog components
+	/// for persistent settings or ViewSetup.Fog for an individual capture override.
+	/// </summary>
+	public FogSetup? Fog { get; set; }
+
+	/// <summary>
+	/// Choose this view's fog without changing the camera or world. Explicit capture settings
+	/// take precedence, including legacy gradient overrides authored before camera-local fog.
+	/// </summary>
+	internal FogSetup? ResolveFog( in ViewSetup setup )
+	{
+		if ( !CanInheritFog( setup ) )
+			return setup.Fog;
+
+		return Fog;
+	}
+
+	internal FogSetup? ResolveFogForSkybox( in ViewSetup setup )
+	{
+		if ( !CanInheritFog( setup ) )
+			return setup.Fog;
+
+		return World?.GetRenderingSkybox()?.ResolveFog( this ) ?? Fog;
+	}
+
+	// ViewSetup.EnablePostprocessing controls fullscreen effects only. The camera's switch
+	// disables inherited camera fog, and explicit legacy captures keep their own fog settings.
+	bool CanInheritFog( in ViewSetup setup ) =>
+		!setup.Fog.HasValue && !setup.GradientFog.HasValue && EnablePostProcessing;
 
 	/// <summary>
 	/// Define the rotations for each of the 6 cube faces (right, left, up, down, front, back)
@@ -141,6 +235,29 @@ public sealed partial class SceneCamera : IDisposable, IManagedCamera
 				VolumetricFogImpl = null;
 			}
 
+			if ( _cmaa2Renderer.IsValueCreated )
+				EngineLoop.DisposeAtFrameEnd( _cmaa2Renderer.Value );
+
+			if ( OcclusionHistory != null )
+			{
+				// A view queued to render may still read it
+				EngineLoop.DisposeAtFrameEnd( OcclusionHistory );
+				OcclusionHistory = null;
+			}
+
+			if ( _reflections != null )
+			{
+				// A view queued to render may still trace with it
+				EngineLoop.DisposeAtFrameEnd( _reflections );
+				_reflections = null;
+			}
+
+			// Release native CStrongHandle copies held by texture tracking
+			// in our RenderAttributes. Without this, the handles survive until
+			// the RenderAttributes finalizer runs which may be after the
+			// resource system has already reported leaks.
+			Attributes?.Clear();
+
 			disposedValue = true;
 		}
 	}
@@ -154,6 +271,23 @@ public sealed partial class SceneCamera : IDisposable, IManagedCamera
 
 	internal int _cameraId;
 
+	ScreenSpaceReflectionsPass _reflections;
+
+	/// <summary>
+	/// The screen-space reflections this camera's views render: part of every camera, or null when the graphics settings
+	/// turn them off (<see cref="ScreenSpaceReflectionsPass.IsEnabled"/>).
+	/// </summary>
+	internal ScreenSpaceReflectionsPass ScreenSpaceReflections => ScreenSpaceReflectionsPass.IsEnabled ? _reflections : null;
+
+	/// <summary>
+	/// Make the pass while reflections are on. On the main thread: it makes its shaders here, which a render job can't.
+	/// </summary>
+	internal void UpdateScreenSpaceReflections()
+	{
+		if ( ScreenSpaceReflectionsPass.IsEnabled )
+			_reflections ??= new();
+	}
+
 	internal void InitCommon()
 	{
 		_cameraId = (this as IManagedCamera).AllocateCameraId();
@@ -165,6 +299,7 @@ public sealed partial class SceneCamera : IDisposable, IManagedCamera
 		Attributes.Set( "indirectLighting", true );
 		Attributes.Set( "renderSun", true );
 		Attributes.Set( "drawShadows", true );
+		Attributes.Set( "ParticleLighting", ParticleLightingSystem.Unlit );
 
 		FieldOfView = 70.0f;
 
@@ -240,6 +375,12 @@ public sealed partial class SceneCamera : IDisposable, IManagedCamera
 	/// Your camera can render multiple worlds.
 	/// </summary>
 	public HashSet<SceneWorld> Worlds => _worlds;
+
+	/// <summary>
+	/// Worlds holding debug drawing and editor gizmos. Views render them unless
+	/// <see cref="ViewSetup.EnableDebugOverlays"/> is false, which renders the game only.
+	/// </summary>
+	internal HashSet<SceneWorld> DebugWorlds { get; } = new();
 
 	Transform _transform = new Transform();
 
@@ -375,7 +516,7 @@ public sealed partial class SceneCamera : IDisposable, IManagedCamera
 	/// </summary>
 	public bool WireframeMode
 	{
-		get => Attributes.GetInt( "Wireframe" ) > 1;
+		get => Attributes.GetInt( "Wireframe" ) >= 1;
 		set => Attributes.Set( "Wireframe", value ? 1 : 0 );
 	}
 
@@ -426,6 +567,15 @@ public sealed partial class SceneCamera : IDisposable, IManagedCamera
 	}
 
 	/// <summary>
+	/// Render without anti-aliasing: no MSAA, CMAA2 or temporal upscaling. The player's render resolution and FSR1 still apply.
+	/// </summary>
+	internal bool DisableAntiAliasing
+	{
+		get => Attributes.GetBool( "disableAntiAliasing" );
+		set => Attributes.Set( "disableAntiAliasing", value );
+	}
+
+	/// <summary>
 	/// Toggle all post processing effects for this camera. The default is on.
 	/// </summary>
 	public bool EnablePostProcessing { get; set; } = true;
@@ -435,15 +585,34 @@ public sealed partial class SceneCamera : IDisposable, IManagedCamera
 	/// </summary>
 	internal bool EnableEngineOverlays { get; set; } = false;
 
-	private static WeakReference<SceneCamera> _recordingCamera;
+	/// <summary>
+	/// Whether the UI stage layer should be created for this camera render.
+	/// When false, the native pipeline will skip the UI layer entirely.
+	/// </summary>
+	internal bool RenderUI { get; set; } = true;
+
+	/// <summary>
+	/// When true, rendering from this camera won't request higher mip levels from
+	/// the texture streaming system. Used by cubemap rendering to prevent envmap probes
+	/// from pulling in full-resolution textures across the entire map.
+	/// </summary>
+	internal bool ExcludeFromTextureStreaming { get; set; }
+
+	/// <summary>
+	/// Render as a tools view (<c>SVF_TOOL_VIEW</c>), as native's tools render theirs: tools materials draw in the pipeline's
+	/// ToolsUtil layers. Off by default, as every camera has been.
+	/// </summary>
+	internal bool ToolsView { get; set; }
+
+	private static readonly WeakReference<SceneCamera> _recordingCamera = new( null );
 
 	/// <summary>
 	/// The camera currently used for video/screenshot recording.
 	/// </summary>
 	internal static SceneCamera RecordingCamera
 	{
-		get => _recordingCamera?.TryGetTarget( out var cam ) == true ? cam : null;
-		set => _recordingCamera = value is not null ? new WeakReference<SceneCamera>( value ) : null;
+		get => _recordingCamera.TryGetTarget( out var cam ) ? cam : null;
+		set => _recordingCamera.SetTarget( value );
 	}
 
 	internal bool IsRecordingCamera => RecordingCamera == this;
@@ -479,6 +648,14 @@ public sealed partial class SceneCamera : IDisposable, IManagedCamera
 	}
 
 	/// <summary>
+	/// This camera only draws UI - skip the scene rendering pipeline entirely and put the UI
+	/// straight onto its target. For a window that is nothing but panels, which is what a
+	/// launcher window is: the pipeline's passes and render targets are all for a scene that
+	/// isn't there.
+	/// </summary>
+	internal bool UIOnly { get; set; }
+
+	/// <summary>
 	/// Should be called before a render
 	/// </summary>
 	internal void OnPreRender( Vector2 size )
@@ -503,27 +680,64 @@ public sealed partial class SceneCamera : IDisposable, IManagedCamera
 
 	void IManagedCamera.OnRenderStage( Rendering.Stage renderStage )
 	{
-		// legacy stuff isn't thread safe
-		if ( ThreadSafe.IsMainThread )
-		{
-			switch ( renderStage )
-			{
-				case Rendering.Stage.AfterPostProcess:
-					{
-						OnRenderOverlay?.Invoke();
-						break;
-					}
+		if ( renderStage == Rendering.Stage.BeforePostProcess )
+			ApplyAntiAliasing();
 
-				case Rendering.Stage.AfterUI:
-					{
-						OnRenderUI?.Invoke();
-						break;
-					}
-			}
+		switch ( renderStage )
+		{
+			case Rendering.Stage.AfterDepthPrepass:
+				{
+					// Light shadow-mask command lists (screen-space contact shadows) only need the
+					// full-res depth buffer, and this stage already runs per view with a valid.
+					ShadowMapperCallbacks.RenderScreenSpaceShadows();
+					break;
+				}
+
+			case Rendering.Stage.EarlyUI:
+				{
+					if ( RenderUI )
+						OnRenderUIBeforePostProcess?.Invoke();
+					break;
+				}
+			case Rendering.Stage.UI:
+				{
+					OnRenderUI?.Invoke();
+					break;
+				}
+
+			case Rendering.Stage.AfterPostProcess:
+				{
+					OnRenderOverlay?.Invoke();
+					break;
+				}
+
 		}
 
 		// new stuff is commandlist based, so is total thread safe
 		OnRenderStageHook?.InvokeWithWarning( renderStage, this );
+
+		if ( renderStage == Rendering.Stage.AfterPostProcess )
+			OnAfterPostProcess?.Invoke();
+
+		if ( renderStage == Rendering.Stage.AfterUI && IsRecordingCamera && Application.IsEditor && !Game.IsPlaying )
+		{
+			ScreenCaptureUtility.CaptureFrame();
+			ScreenCaptureUtility.DrawRecordingBorder();
+		}
+	}
+
+	void ApplyAntiAliasing()
+	{
+		if ( !DisableAntiAliasing
+			&& RenderSettings.Instance.AntiAliasMode == AntiAliasMode.Cmaa2
+			&& Graphics.ToolsVisMode == (int)SceneCameraDebugMode.Normal )
+		{
+			_cmaa2Renderer.Value.Render();
+			return;
+		}
+
+		if ( _cmaa2Renderer.IsValueCreated )
+			_cmaa2Renderer.Value.ReleaseResources();
 	}
 
 	/// <summary>
@@ -567,6 +781,9 @@ public sealed partial class SceneCamera : IDisposable, IManagedCamera
 	/// </summary>
 	public Ray GetRay( Vector2 cursorPosition, Vector3 screenSize )
 	{
+		if ( screenSize.x <= 0.0f || screenSize.y <= 0.0f )
+			return new Ray( Position, Rotation.Forward );
+
 		if ( !Ortho )
 		{
 			var aspect = screenSize.x / screenSize.y;
@@ -651,8 +868,8 @@ public sealed partial class SceneCamera : IDisposable, IManagedCamera
 		}
 		else
 		{
-			result.x = (result.x + 2f) / 2f;
-			result.y = ((result.y - 2f) / 2f) * -1f;
+			result.x = (result.x + 1f) / 2f;
+			result.y = (1f - result.y) / 2f;
 
 			if ( result.x <= 0f || result.x >= 1f || result.y <= 0f || result.y >= 1f )
 				result.z = -1f;
@@ -753,9 +970,52 @@ public sealed partial class SceneCamera : IDisposable, IManagedCamera
 
 		using var setup = new CameraRenderer( "RenderToTexture", _cameraId );
 		setup.Configure( this, config );
-		setup.Native.RenderToTexture( texture.native, Graphics.SceneView );
+		setup.Native.RenderToTexture( texture.native, Graphics.SceneView, default );
 	}
 
+
+	/// <summary>
+	/// Submit a view into colour and optional depth textures, as a child of <paramref name="parent"/> when it's valid,
+	/// and copy its resolved projection and viewport for whatever samples it.
+	/// </summary>
+	internal bool RenderToTexture( Texture target, Texture depthTarget, ISceneView parent, in ViewSetup config, string name, out ViewData viewData )
+	{
+		viewData = default;
+
+		using var setup = new CameraRenderer( name, _cameraId );
+
+		// The lock only covers reading the scene camera into this call's renderer. A top-level render
+		// waits for the whole frame inside the native call, and a child view rendered through this
+		// camera from the render thread needs the lock during that wait.
+		lock ( this )
+		{
+			setup.Configure( this, config );
+		}
+
+		//
+		// Adds the views to the scene system
+		//
+		var rendered = setup.Native.RenderToTexture( target.native, parent, depthTarget?.native ?? default );
+
+		if ( rendered )
+		{
+			var depthRange = setup.Native.RenderedDepthRange;
+			viewData = new ViewData
+			{
+				IsValid = true,
+				ProjectionToView = setup.Native.RenderedProjectionToView,
+				Viewport = setup.Native.RenderedViewport,
+				DepthRange = new Vector2( depthRange.x, depthRange.y ),
+				DepthUvScaleBias = new Vector4(
+					setup.Native.FlipX ? -1 : 1, setup.Native.FlipY ? -1 : 1,
+					setup.Native.FlipX ? 1 : 0, setup.Native.FlipY ? 1 : 0 )
+			};
+		}
+
+		setup.Native.ClearSceneWorlds();
+
+		return rendered;
+	}
 
 	internal void RenderToBitmap( Bitmap bitmap, in ViewSetup config = default )
 	{
@@ -772,9 +1032,28 @@ public sealed partial class SceneCamera : IDisposable, IManagedCamera
 		using var setup = new CameraRenderer( "RenderToBitmap", _cameraId );
 		setup.Configure( this, config );
 
+		// Game code can free the bitmap while we render, so render into memory we own
+		var width = bitmap.Width;
+		var height = bitmap.Height;
+		var bytesPerPixel = bitmap.BytesPerPixel;
+		var length = bitmap.GetBuffer().Length;
+
 		unsafe
 		{
-			setup.Native.RenderToBitmap( (IntPtr)bitmap.GetPointer(), bitmap.Width, bitmap.Height, bitmap.BytesPerPixel );
+			var pixels = System.Runtime.InteropServices.NativeMemory.AllocZeroed( (nuint)length );
+			try
+			{
+				setup.Native.RenderToBitmap( (IntPtr)pixels, width, height, bytesPerPixel );
+
+				if ( !bitmap.IsValid() || bitmap.Width != width || bitmap.Height != height || bitmap.BytesPerPixel != bytesPerPixel )
+					return;
+
+				new ReadOnlySpan<byte>( pixels, length ).CopyTo( bitmap.GetBuffer() );
+			}
+			finally
+			{
+				System.Runtime.InteropServices.NativeMemory.Free( pixels );
+			}
 		}
 	}
 
@@ -799,17 +1078,31 @@ public sealed partial class SceneCamera : IDisposable, IManagedCamera
 		//
 		// Adds the views to the scene system
 		//
-		var setup = new CameraRenderer( "RenderToCubeTexture", _cameraId );
+		using var setup = new CameraRenderer( "RenderToCubeTexture", _cameraId );
 		setup.Configure( this, config );
+		setup.Native.EnableUI = false;
 
-		for ( int i = 0; i < CubeRotations.Length; i++ )
+		// All six faces share one scene submission and one bindless descriptor set.
+		// Join an existing frame bracket when the caller already has one open.
+		bool ownsBatch = !CSceneSystem.IsRenderingViews();
+		// Standalone captures preserve the main frame's performance stats.
+		if ( ownsBatch ) CSceneSystem.BeginRenderingViews( false );
+		try
 		{
-			// Override rotation for each face
-			setup.Native.CameraRotation = (Rotation * CubeRotations[i]).Angles();
-			setup.Native.RenderToCubeTexture( texture.native, i );
+			for ( int i = 0; i < CubeRotations.Length; i++ )
+			{
+				setup.Native.CameraRotation = (Rotation * CubeRotations[i]).Angles();
+				setup.Native.RenderToCubeTexture( texture.native, i );
+			}
 		}
-
-		setup.Dispose();
+		finally
+		{
+			if ( ownsBatch )
+			{
+				CSceneSystem.FinishRenderingViews();
+				CSceneSystem.WaitForRenderingToComplete();
+			}
+		}
 	}
 
 	private void RenderStereo( in ViewSetup config = default )
@@ -939,4 +1232,8 @@ public enum SceneCameraDebugMode
 	Overdraw = 101,
 	[Title( "Ambient Occlusion" ), Icon( "radio_button_checked" )]
 	AmbientOcclusion = 14,
+	[Title( "Motion Vectors" ), Icon( "animation" )]
+	MotionVectors = 102,
+	[Title( "Reactive Mask" ), Icon( "shield" )]
+	ReactiveMask = 103,
 }

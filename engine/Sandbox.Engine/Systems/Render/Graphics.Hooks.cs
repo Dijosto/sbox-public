@@ -1,4 +1,6 @@
 using Sandbox.Engine;
+using Sandbox.Rendering;
+using NativeEngine;
 
 namespace Sandbox;
 
@@ -19,6 +21,11 @@ public static partial class Graphics
 			{
 				RenderUiOverlay();
 				DebugOverlay.Render();
+				ScreenCaptureUtility.CaptureFrame();
+				ScreenCaptureUtility.DrawRecordingBorder();
+
+				// Over everything, and after the capture so recordings don't have it in
+				Sandbox.Diagnostics.DevTools.RenderGameDock();
 			}
 
 			return;
@@ -45,15 +52,11 @@ public static partial class Graphics
 
 	static void RenderUiOverlay()
 	{
-		using var _ = IMenuDll.Current?.PushScope();
+		if ( Application.IsStandalone )
+			return;
 
-		Graphics.Attributes.SetCombo( "D_WORLDPANEL", 0 );
-
-		for ( int i = GlobalContext.Current.UISystem.RootPanels.Count() - 1; i >= 0; i-- )
-		{
-			if ( GlobalContext.Current.UISystem.RootPanels[i].RenderedManually || GlobalContext.Current.UISystem.RootPanels[i].IsWorldPanel ) continue;
-
-			GlobalContext.Current.UISystem.RootPanels[i].Render( 1 );
-		}
+		using var _ = GlobalContext.MenuScope();
+		GlobalContext.Current.UISystem.Render();
 	}
+
 }

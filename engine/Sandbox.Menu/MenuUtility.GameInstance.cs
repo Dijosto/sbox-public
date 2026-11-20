@@ -4,49 +4,17 @@ namespace Sandbox;
 
 public static partial class MenuUtility
 {
-	static CancellationTokenSource gameLoadingCts = new CancellationTokenSource();
-
-	/// <summary>
-	/// Close the current game.
-	/// </summary>
-	public static void CloseGame()
-	{
-		// Editor only: just exit playmode
-		if ( IToolsDll.Current is not null )
-		{
-			IToolsDll.Current.ExitPlaymode();
-			return;
-		}
-
-		gameLoadingCts?.Cancel();
-
-		if ( IGameInstance.Current is not null )
-		{
-			IGameInstance.Current?.Close();
-		}
-		else
-		{
-			// Conna: game instance will call disconnect. If we don't have a game instance then we
-			// need to call it ourselves.
-			Networking.Disconnect();
-
-			Application.ClearGame();
-		}
-
-		LaunchArguments.Reset();
-	}
-
 	/// <summary>
 	/// A game has been opened. Load the game. If allowLaunchOverride then special launch conditions will be obeyed.
 	/// For example, we might join a lobby instead of loading the game, or we might open the launcher.
 	/// </summary>
 	public static void OpenGame( string ident, bool allowLaunchOverride = true, Dictionary<string, string> gameSettings = null )
 	{
-		gameLoadingCts?.Cancel();
-		gameLoadingCts = new CancellationTokenSource();
+		CloseAllModals();
+		Api.Activity.GameRequested( new( "menu", ident ), replace: false );
 
-		if ( gameSettings is not null ) LaunchArguments.GameSettings = gameSettings;
-		_ = LoadAsync( ident, allowLaunchOverride, gameLoadingCts.Token );
+		if ( gameSettings is not null ) LaunchArguments.SetTrustedGameSettings( gameSettings );
+		_ = LoadAsync( ident, allowLaunchOverride );
 	}
 
 	/// <summary>
@@ -55,26 +23,30 @@ public static partial class MenuUtility
 	public static void OpenGameWithMap( string gameident, string mapName, Dictionary<string, string> gameSettings = null )
 	{
 		LaunchArguments.Map = mapName;
-		if ( gameSettings is not null ) LaunchArguments.GameSettings = gameSettings;
+		if ( gameSettings is not null ) LaunchArguments.SetTrustedGameSettings( gameSettings );
 
 		OpenGame( gameident, false );
 	}
 
-	static async Task LoadAsync( string ident, bool allowLaunchOverride, CancellationToken ct )
+	/// <summary>
+	/// Load a game onto its menu scene. It starts when it changes scene.
+	/// </summary>
+	public static Task OpenGameMenu( string ident )
+	{
+		CloseAllModals();
+		Api.Activity.GameRequested( new( "menu", ident ), replace: false );
+
+		return LoadAsync( ident, false, GameLoadingFlags.Menu );
+	}
+
+	static async Task LoadAsync( string ident, bool allowLaunchOverride, GameLoadingFlags extraFlags = default, CancellationToken ct = default )
 	{
 		ThreadSafe.AssertIsMainThread();
 		LoadingScreen.IsVisible = true;
 		LoadingScreen.Media = null;
-		LoadingScreen.Title = "Loading Game..";
+		LoadingScreen.Title = null;
 
-		var package = await Package.FetchAsync( ident, false );
-		if ( package is not null )
-		{
-			LoadingScreen.Title = package.Title;
-			LoadingScreen.Media = package.LoadingScreen.MediaUrl;
-		}
-
-		var flags = GameLoadingFlags.Host | GameLoadingFlags.Reload;
+		var flags = GameLoadingFlags.Host | GameLoadingFlags.Reload | extraFlags;
 		if ( Application.IsEditor ) flags |= GameLoadingFlags.Developer; // todo - is the package we're loading a local package
 
 		await IGameInstanceDll.Current.LoadGamePackageAsync( ident, flags, ct );
@@ -90,18 +62,41 @@ public static partial class MenuUtility
 		if ( _isJoiningLobby )
 			return false;
 
+		using var scope = Networking.MatchmakingScope();
+
+		// What the search found and where it ended up, so an empty or failed search can be told apart
+		// from a join. Without a join the caller usually starts its own server.
+		var report = new Api.Events.EventRecord( "quickplay" );
+		report.SetValue( "ident", ident );
+		report.StartTimer( "ms" );
+		var tried = 0;
+		int? joinedMembers = null;
+
 		try
 		{
 			_isJoiningLobby = true;
+			Api.Activity.GameRequested( new( "quickplay", ident ), replace: false );
 
+			// Leave the game we're in before looking, the loading screen stays up for the search
+			if ( Game.InGame )
+			{
+				IGameInstanceDll.Current.CloseGame();
+				LoadingScreen.IsVisible = true;
+			}
+
+			Log.Info( "Searching for games.." );
 			var lobbies = await Networking.QueryLobbies( ident );
+			Log.Info( $"..found {lobbies.Count} available matches" );
+
+			report.SetValue( "found", lobbies.Count );
+			report.SetValue( "open", lobbies.Count( x => !x.IsFull ) );
 
 			var orderedLobbies = lobbies.OrderBy( lobby => lobby.ContainsFriends )
 				.ThenByDescending( lobby => lobby.Members );
 
 			foreach ( var lobby in orderedLobbies )
 			{
-				if ( lobby.IsFull ) continue;
+				if ( lobby.IsFull || lobby.IsPasswordProtected ) continue;
 
 				// We might be in a game now
 				if ( Game.InGame ) return false;
@@ -109,16 +104,26 @@ public static partial class MenuUtility
 				Log.Info( $"Attempting to join available lobby {lobby.LobbyId}" );
 
 				// Try to join this one
+				tried++;
 				if ( await Networking.TryConnectSteamId( lobby.LobbyId ) )
+				{
+					joinedMembers = lobby.Members;
+					CloseAllModals();
 					return true;
+				}
 			}
 
-			Log.Info( $"Couldn't join a lobby - making a game" );
 			return false;
 		}
 		finally
 		{
 			_isJoiningLobby = false;
+
+			report.FinishTimer( "ms" );
+			report.SetValue( "tried", tried );
+			report.SetValue( "joined", joinedMembers is not null );
+			if ( joinedMembers is { } members ) report.SetValue( "members", members );
+			report.Submit();
 		}
 	}
 }

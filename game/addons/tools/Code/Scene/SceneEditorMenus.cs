@@ -6,11 +6,28 @@ public static class SceneEditorMenus
 	[Shortcut( "editor.duplicate", "CTRL+D" )]
 	public static void Duplicate()
 	{
-		var selection = EditorScene.Selection.OfType<GameObject>().ToArray();
-
 		using ( SceneEditorSession.Active.UndoScope( "Duplicate Object(s)" ).WithGameObjectCreations().Push() )
 		{
+			SceneTraceResult? tr = null;
+
+			if ( EditorPreferences.PasteAtCursor &&
+				 SceneViewWidget.Current?.LastSelectedViewportWidget is { } viewport &&
+				 viewport.IsValid() )
+			{
+				using ( viewport.GizmoInstance.Push() )
+					if ( viewport.TryGetCursorTracePosition( out var result ) )
+						tr = result;
+			}
+
 			DuplicateInternal();
+
+			if ( tr is { } trace )
+			{
+				EditorScene.PlaceBoundsOnSurface(
+					EditorScene.Selection.OfType<GameObject>(),
+					trace.HitPosition,
+					trace.Normal );
+			}
 		}
 	}
 
@@ -18,7 +35,7 @@ public static class SceneEditorMenus
 	{
 		using var scope = SceneEditorSession.Scope();
 
-		var selection = EditorScene.Selection.OfType<GameObject>().Where( go => go.GetType() != typeof( Sandbox.Scene ) ).OrderBy( e => -e.Parent.Children.IndexOf( e ) ).ToArray();
+		var selection = EditorScene.Selection.OfType<GameObject>().Where( go => go is not Scene ).OrderBy( e => -e.Parent.Children.IndexOf( e ) ).ToArray();
 
 		if ( selection.Length == 0 ) return;
 
@@ -37,7 +54,6 @@ public static class SceneEditorMenus
 		foreach ( var entry in groups )
 		{
 			var clone = entry.Key.Clone();
-
 			clone.WorldTransform = entry.Key.WorldTransform;
 			entry.Value.AddSibling( clone, false );
 
@@ -45,13 +61,17 @@ public static class SceneEditorMenus
 		}
 	}
 
+	/// <summary>Creates a scene-local linked group from the selection.</summary>
+	[Menu( "Editor", "Scene/Create Instance", "view_in_ar" )]
+	public static void CreateInstance() => SceneEditorSession.Active?.CreateInstance();
+
 	[Menu( "Editor", "Scene/Create Group" )]
 	[Shortcut( "editor.group", "CTRL+SHIFT+G" )]
 	public static void Group()
 	{
 		using var scope = SceneEditorSession.Scope();
 
-		var selection = EditorScene.Selection.OfType<GameObject>().Where( go => go.GetType() != typeof( Sandbox.Scene ) ).ToArray();
+		var selection = EditorScene.Selection.OfType<GameObject>().Where( go => go is not Scene ).ToArray();
 		var first = selection.FirstOrDefault();
 
 		if ( !first.IsValid() )
@@ -92,8 +112,12 @@ public static class SceneEditorMenus
 			if ( lastSelected != null )
 			{
 				var nextSelect = lastSelected.GetNextSibling( false );
-				if ( !nextSelect.IsValid() )
-					nextSelect = lastSelected.Parent;
+				while ( nextSelect.IsValid() && nextSelect.Flags.Contains( GameObjectFlags.Hidden ) )
+					nextSelect = nextSelect.GetNextSibling( false );
+
+				for ( var p = lastSelected.Parent; !nextSelect.IsValid() && p.IsValid(); p = p.Parent )
+					if ( p is not Scene && !p.Flags.Contains( GameObjectFlags.Hidden ) )
+						nextSelect = p;
 
 				if ( SceneEditorSession.Active.Selection.Contains( lastSelected ) )
 				{
@@ -181,7 +205,7 @@ public static class SceneEditorMenus
 		{
 			foreach ( var go in gos )
 			{
-				go.WorldPosition = go.WorldPosition.SnapToGrid( gridSpacing );
+				go.WorldPosition = WorkPlane.Snap( WorkPlane.Current, go.WorldPosition, gridSpacing );
 			}
 		}
 
@@ -209,7 +233,7 @@ public static class SceneEditorMenus
 	}
 
 	[Menu( "Editor", "Scene/Transforms/Align Down Local" )]
-	[Shortcut( "gameObject.align-down-local", "CTRL+1" )]
+	[Shortcut( "gameObject.align-down-local", "CTRL+KP_1" )]
 	public static void AlignToGroundLocal()
 	{
 		using var scope = SceneEditorSession.Scope();
@@ -240,7 +264,7 @@ public static class SceneEditorMenus
 	}
 
 	[Menu( "Editor", "Scene/Transforms/Align Down World" )]
-	[Shortcut( "gameObject.align-down-world", "CTRL+2" )]
+	[Shortcut( "gameObject.align-down-world", "CTRL+KP_2" )]
 	public static void AlignToGround()
 	{
 		using var scope = SceneEditorSession.Scope();
@@ -270,7 +294,7 @@ public static class SceneEditorMenus
 	}
 
 	[Menu( "Editor", "Scene/Transforms/Align To Closest Normal" )]
-	[Shortcut( "gameObject.align-to-closest-normal", "CTRL+3" )]
+	[Shortcut( "gameObject.align-to-closest-normal", "CTRL+KP_3" )]
 	public static void AlignToClosestNormal()
 	{
 		using var scope = SceneEditorSession.Scope();
@@ -314,7 +338,9 @@ public static class SceneEditorMenus
 	[Shortcut( "gameObject.nudge-right", "ALT+RIGHT" )]
 	public static void NudgeRight() => Nudge( Vector2.Right );
 
-	private static void Nudge( Vector2 direction )
+	internal static void DuplicateNudge( Vector2 direction ) => Nudge( direction, true );
+
+	private static void Nudge( Vector2 direction, bool duplicate = false )
 	{
 		using var scope = SceneEditorSession.Scope();
 
@@ -329,8 +355,16 @@ public static class SceneEditorMenus
 			return;
 
 		var gos = EditorScene.Selection.OfType<GameObject>();
-		using ( SceneEditorSession.Active.UndoScope( "Nudge Object(s)" ).WithGameObjectChanges( gos, GameObjectUndoFlags.Properties ).Push() )
+		using ( duplicate
+			? SceneEditorSession.Active.UndoScope( "Duplicate Object(s)" ).WithGameObjectCreations().Push()
+			: SceneEditorSession.Active.UndoScope( "Nudge Object(s)" ).WithGameObjectChanges( gos, GameObjectUndoFlags.Properties ).Push() )
 		{
+			if ( duplicate )
+			{
+				DuplicateInternal();
+				gos = EditorScene.Selection.OfType<GameObject>();
+			}
+
 			var gizmoInstance = lastSelectedViewportWidget.GizmoInstance;
 
 			var rotation = Rotation.Identity;
@@ -353,6 +387,8 @@ public static class SceneEditorMenus
 	[Shortcut( "editor.clear-selection", "ESC" )]
 	public static void DeselectAll()
 	{
+		if ( SceneViewWidget.Current?.Tools.CurrentTool?.CancelBoxSelection() == true ) return;
+
 		using ( SceneEditorSession.Active.UndoScope( "Deselect All" ).Push() )
 		{
 			EditorScene.Selection.Clear();
@@ -396,13 +432,117 @@ public static class SceneEditorMenus
 					SceneUtility.MakeIdGuidsUnique( prefabInstanceJson, gameObject.Id );
 					gameObject.Clear();
 					var originalTransform = gameObject.WorldTransform;
-					var originalName = gameObject.Name;
 					gameObject.Deserialize( prefabInstanceJson );
 					gameObject.WorldTransform = originalTransform;
-					gameObject.Name = originalName;
 				}
 			}
 		};
 		picker.Show();
+	}
+
+	[Menu( "Editor", "Scene/View/Hide Selected" )]
+	[Shortcut( "editor.hide-selected-objects", "H" )]
+	public static void HideSelectedObjects()
+	{
+		using var scope = SceneEditorSession.Scope();
+
+		var gos = EditorScene.Selection
+			.OfType<GameObject>()
+			.Where( go => !go.Tags.Has( "hidden" ) )
+			.ToArray();
+		if ( gos.Length == 0 )
+			return;
+
+		using ( SceneEditorSession.Active.UndoScope( "Hide Selected Object(s)" )
+			.WithGameObjectChanges( gos, GameObjectUndoFlags.Properties )
+			.Push() )
+		{
+			foreach ( var go in gos )
+			{
+				go.Tags.Add( "hidden" );
+			}
+		}
+	}
+
+	[Menu( "Editor", "Scene/View/Unhide All" )]
+	[Shortcut( "editor.unhide-all-objects", "U" )]
+	public static void UnhideAllObjects()
+	{
+		using var scope = SceneEditorSession.Scope();
+
+		var hiddenObjects = SceneEditorSession.Active.Scene
+			.GetAllObjects( true )
+			.Where( go => go.Tags.Has( "hidden" ) )
+			.ToArray();
+		if ( hiddenObjects.Length == 0 )
+			return;
+
+		using ( SceneEditorSession.Active.UndoScope( "Unhide All Object(s)" )
+			.WithGameObjectChanges( hiddenObjects, GameObjectUndoFlags.Properties )
+			.Push() )
+		{
+			foreach ( var go in hiddenObjects ) go.Tags.Remove( "hidden" );
+		}
+	}
+
+	[Menu( "Editor", "Scene/View/Toggle Visibility" )]
+	[Shortcut( "editor.toggle-visibility", "Alt+H" )]
+	public static void ToggleVisibility()
+	{
+		using var scope = SceneEditorSession.Scope();
+
+		var gos = EditorScene.Selection.OfType<GameObject>().ToArray();
+		if ( gos.Length == 0 )
+			return;
+
+		using ( SceneEditorSession.Active.UndoScope( "Toggle Visibility" )
+			.WithGameObjectChanges( gos, GameObjectUndoFlags.Properties )
+			.Push() )
+		{
+			var anyVisible = gos.Any( x => !x.Tags.Has( "hidden" ) );
+			foreach ( var go in gos )
+			{
+				if ( anyVisible ) go.Tags.Add( "hidden" );
+				else go.Tags.Remove( "hidden" );
+			}
+		}
+	}
+
+	[Menu( "Editor", "Scene/View/Isolate Selection" )]
+	[Shortcut( "editor.isolate-selection", "Ctrl+H" )]
+	public static void IsolateSelection()
+	{
+		using var scope = SceneEditorSession.Scope();
+
+		var selected = EditorScene.Selection
+			.OfType<GameObject>()
+			.Where( go => go is not Scene )
+			.ToArray();
+		if ( selected.Length == 0 )
+			return;
+
+		var visible = new HashSet<GameObject>();
+		foreach ( var s in selected )
+			for ( var go = s; go is not null and not Scene; go = go.Parent )
+				visible.Add( go );
+
+		var changedObjects = SceneEditorSession.Active.Scene
+			.GetAllObjects( true )
+			.Where( go => go is not Scene )
+			.Where( go => go.Tags.Has( "hidden" ) == visible.Contains( go ) )
+			.ToArray();
+		if ( changedObjects.Length == 0 )
+			return;
+
+		using ( SceneEditorSession.Active.UndoScope( "Isolate Selection" )
+			.WithGameObjectChanges( changedObjects, GameObjectUndoFlags.Properties )
+			.Push() )
+		{
+			foreach ( var go in changedObjects )
+			{
+				if ( visible.Contains( go ) ) go.Tags.Remove( "hidden" );
+				else go.Tags.Add( "hidden" );
+			}
+		}
 	}
 }

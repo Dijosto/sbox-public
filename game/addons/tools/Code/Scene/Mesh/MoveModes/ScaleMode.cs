@@ -7,7 +7,7 @@ namespace Editor.MeshEditor;
 /// <b>Shift</b> - extrude selection
 /// </summary>
 [Title( "Scale" )]
-[Icon( "zoom_out_map" )]
+[Icon( "meshtools/move_modes/scale.png" )]
 [Alias( "mesh.scale.mode" )]
 [Order( 2 )]
 public sealed class ScaleMode : MoveMode
@@ -23,7 +23,7 @@ public sealed class ScaleMode : MoveMode
 		_basis = tool.CalculateSelectionBasis();
 		var bounds = tool.CalculateLocalBounds();
 		_size = bounds.Size;
-		_origin = tool.Pivot;
+		_origin = tool.Pivot.Position;
 
 		if ( _size.x < 0.1f ) _size.x = 0;
 		if ( _size.y < 0.1f ) _size.y = 0;
@@ -37,21 +37,25 @@ public sealed class ScaleMode : MoveMode
 			Gizmo.Hitbox.DepthBias = 0.01f;
 			Gizmo.Hitbox.CanInteract = CanUseGizmo;
 
-			if ( Gizmo.Control.Scale( "scale", Vector3.Zero, out var delta, _basis ) )
+			if ( Gizmo.Control.UpdateScale( "scale", Vector3.Zero, out var delta, _basis ) )
 			{
 				_moveDelta += delta / 0.01f;
 
-				var size = _size + Gizmo.Snap( _moveDelta, _moveDelta ) * 2.0f;
+				var size = (_size + Gizmo.Snap( _moveDelta, _moveDelta ) * 2.0f).ComponentMax( Vector3.Zero );
 				var scale = new Vector3(
-						_size.x != 0 ? MathF.Max( size.x / _size.x, 0 ) : 1,
-						_size.y != 0 ? MathF.Max( size.y / _size.y, 0 ) : 1,
-						_size.z != 0 ? MathF.Max( size.z / _size.z, 0 ) : 1
+						_size.x != 0 ? size.x / _size.x : 1,
+						_size.y != 0 ? size.y / _size.y : 1,
+						_size.z != 0 ? size.z / _size.z : 1
 					);
 
-				tool.StartDrag();
-				tool.Scale( _origin, _basis, scale );
-				tool.UpdateDrag();
+				if ( tool.DragStarted || scale != Vector3.One )
+				{
+					tool.StartDrag();
+					tool.Scale( _origin, _basis, scale );
+					tool.UpdateDrag();
+				}
 			}
+			Gizmo.Draw.Scale( "scale", _basis );
 		}
 	}
 }

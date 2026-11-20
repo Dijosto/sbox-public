@@ -1,6 +1,7 @@
 using Sandbox.Engine.Resources;
 using Sandbox.Navigation;
 using Sandbox.Volumes;
+using System.Numerics;
 
 namespace Sandbox;
 
@@ -19,15 +20,15 @@ namespace Sandbox;
 public class NavMeshArea : VolumeComponent, Component.ExecuteInEditor
 {
 	/// <summary>
-	/// Whether navmesh generation in this area will be completely disabled. 
+	/// Whether navmesh generation in this area will be completely disabled.
 	/// </summary>
-	[Property, MakeDirty]
+	[Property]
 	public bool IsBlocker { get; set; } = true;
 
 	/// <summary>
 	/// The NavMesh area definition to apply to this area.
 	/// </summary>
-	[Property, MakeDirty]
+	[Property]
 	public NavMeshAreaDefinition Area { get; set; }
 
 	/// <summary>
@@ -55,26 +56,16 @@ public class NavMeshArea : VolumeComponent, Component.ExecuteInEditor
 	}
 
 	private Collider _linkedCollider;
-	private NavMeshAreaData _navMeshArea;
-
-	protected override void OnDirty()
-	{
-		if ( !Active ) return;
-
-		UpdateNavMeshArea();
-	}
 
 	internal override void OnEnabledInternal()
 	{
-		UpdateNavMeshArea();
-		Transform.OnTransformChanged += OnTransformChanged;
+		Scene.NavMesh.AddArea( this );
 		base.OnEnabledInternal();
 	}
 
 	internal override void OnDisabledInternal()
 	{
-		Transform.OnTransformChanged -= OnTransformChanged;
-		RemoveNavMeshArea();
+		Scene.NavMesh?.RemoveArea( this );
 		base.OnDisabledInternal();
 	}
 
@@ -124,44 +115,45 @@ public class NavMeshArea : VolumeComponent, Component.ExecuteInEditor
 		_linkedCollider = null;
 	}
 
-	private void UpdateNavMeshArea()
+	// A blocker keeps agents one agent radius away, like a wall does
+	internal Nav.NavVolume CreateVolume( float agentRadius )
 	{
-		// Create area if it doesn't exist
-		if ( _navMeshArea == null )
+		var shape = SceneVolume;
+		var result = new Nav.NavVolume
 		{
-			_navMeshArea = new NavMeshAreaData();
-			_navMeshArea.IsBlocked = IsBlocker;
-			_navMeshArea.AreaDefinition = Area;
-			Scene.NavMesh.AddSpatiaData( _navMeshArea );
+			Area = (byte)(IsBlocker ? 0 : Scene.NavMesh.AreaDefinitionToId( Area )),
+			Margin = IsBlocker ? agentRadius : 0,
+			LocalToWorld = Matrix4x4.Identity
+		};
+
+		if ( shape.Type == SceneVolume.VolumeTypes.Infinite )
+		{
+			result.Shape = Nav.VolumeShape.Everything;
+			return result;
 		}
 
-		// Update the properties
-		_navMeshArea.Volume = SceneVolume;
-		_navMeshArea.IsBlocked = IsBlocker;
-		_navMeshArea.AreaDefinition = Area;
-		_navMeshArea.LocalBounds = SceneVolume.GetBounds();
-		_navMeshArea.WorldBounds = _navMeshArea.LocalBounds.Transform( WorldTransform );
-		_navMeshArea.Transform = WorldTransform;
-		_navMeshArea.HasChanged = true;
-	}
+		var transform = WorldTransform;
+		result.LocalToWorld = Matrix4x4.CreateScale( transform.Scale ) * Matrix4x4.CreateFromQuaternion( transform.Rotation ) * Matrix4x4.CreateTranslation( transform.Position );
 
-	/// <summary>
-	/// Removes the current NavMeshArea
-	/// </summary>
-	private void RemoveNavMeshArea()
-	{
-		if ( _navMeshArea != null )
+		if ( shape.Type == SceneVolume.VolumeTypes.Sphere )
 		{
-			_navMeshArea.IsPendingRemoval = true;
-			_navMeshArea = null;
+			result.Shape = Nav.VolumeShape.Sphere;
+			result.A = shape.Sphere.Center;
+			result.Radius = shape.Sphere.Radius;
 		}
-	}
-
-	/// <summary>
-	/// Called when the transform changes
-	/// </summary>
-	private void OnTransformChanged()
-	{
-		UpdateNavMeshArea();
+		else if ( shape.Type == SceneVolume.VolumeTypes.Capsule )
+		{
+			result.Shape = Nav.VolumeShape.Capsule;
+			result.A = shape.Capsule.CenterA;
+			result.B = shape.Capsule.CenterB;
+			result.Radius = shape.Capsule.Radius;
+		}
+		else
+		{
+			result.Shape = Nav.VolumeShape.Box;
+			result.A = shape.Box.Mins;
+			result.B = shape.Box.Maxs;
+		}
+		return result;
 	}
 }

@@ -1,5 +1,6 @@
 ﻿using Sandbox.Internal;
 using System.Collections.Concurrent;
+using System.Linq.Expressions;
 using System.Runtime.CompilerServices;
 
 namespace Sandbox;
@@ -12,7 +13,7 @@ namespace Sandbox;
 [SkipHotload]
 public sealed class TypeDescription : ISourceLineProvider
 {
-	internal Internal.TypeLibrary library { get; set; }
+	internal readonly Internal.TypeLibrary library;
 
 	/// <summary>
 	/// The type this class describes.
@@ -28,6 +29,12 @@ public sealed class TypeDescription : ISourceLineProvider
 	/// Whether the class is valid or not, i.e. whether the type still exists.
 	/// </summary>
 	public bool IsValid { get; private set; }
+
+	/// <summary>
+	/// Changes whenever this description's members or attributes are refreshed, including
+	/// updates that preserve the underlying CLR type.
+	/// </summary>
+	public int Revision { get; private set; }
 
 	/// <summary>
 	/// Is from an assembly that was whitelist tested, so it can't have any bad stuff in it.
@@ -59,6 +66,11 @@ public sealed class TypeDescription : ISourceLineProvider
 	/// All methods of this type.
 	/// </summary>
 	public MethodDescription[] Methods { get; private set; }
+
+	/// <summary>
+	/// Overloaded operators and conversions exposed by this type. These are also included in Methods and Members.
+	/// </summary>
+	public MethodDescription[] Operators { get; private set; }
 
 	/// <summary>
 	/// All properties of this type.
@@ -171,7 +183,29 @@ public sealed class TypeDescription : ISourceLineProvider
 
 	private bool _useClassNameWhenSerializing;
 
-	static bool ShouldExposeMember( MemberInfo member, Internal.TypeLibrary lib, TypeDescription source )
+	// Assembly.GetName() allocates and takes a global culture lock, which is far too slow to call per member.
+	static readonly System.Runtime.CompilerServices.ConditionalWeakTable<Assembly, string> AssemblyNames = new();
+
+	/// <summary>
+	/// Allows registered primitives and dates to format using the current culture and an optional format string.
+	/// </summary>
+	static bool IsPrimitiveToString( MethodInfo method )
+	{
+		var type = method.DeclaringType;
+		if ( type is null || (!type.IsPrimitive && type != typeof( DateTime )) || !TypeLibrary.IsIntrinsicType( type ) )
+		{
+			return false;
+		}
+
+		var parameters = method.GetParameters();
+		return parameters.Length == 0
+			|| (parameters.Length == 1 && parameters[0].ParameterType == typeof( string ));
+	}
+
+	/// <summary>
+	/// Applies the catalog's member policy, including constructors supplied separately by consumers.
+	/// </summary>
+	internal bool ShouldExposeMember( MemberInfo member )
 	{
 		// |               |  public  | protected | private |
 		// |---------------|---------|-----------|---------|
@@ -190,6 +224,10 @@ public sealed class TypeDescription : ISourceLineProvider
 			}
 		}
 
+		// Ignore compiler generated properties, such as a record's EqualityContract
+		if ( member is PropertyInfo propa && propa.HasAttribute( typeof( CompilerGeneratedAttribute ) ) )
+			return false;
+
 		if ( member is MethodInfo methodInfo )
 		{
 			// Very special case, destructors implement this as a virtual that automatically calls base destructors
@@ -197,10 +235,16 @@ public sealed class TypeDescription : ISourceLineProvider
 			// And there is no reason to explicitly call Object.Finalize for something
 			if ( methodInfo.Name == Microsoft.CodeAnalysis.WellKnownMemberNames.DestructorName ) return false;
 
-			// Ignore getter/setter methods
-			if ( methodInfo.IsSpecialName ) return false;
-			if ( methodInfo.Name == "GetType" ) return false;
-			if ( methodInfo.Name == "ToString" ) return false;
+			// Operators are callable members. Other special methods (such as accessors) are represented separately.
+			if ( methodInfo.IsSpecialName && MethodDescription.ClassifyOperator( methodInfo ) == OperatorKind.None ) return false;
+			if ( methodInfo.Name == "GetType" && methodInfo.DeclaringType == typeof( object ) ) return false;
+
+			// The safe builder's string conversions are part of its API, including the substring overload.
+			if ( methodInfo.Name == "ToString" && methodInfo.DeclaringType != typeof( SafeStringBuilder ) && !IsPrimitiveToString( methodInfo ) )
+			{
+				return false;
+			}
+
 			if ( methodInfo.Name == "Equals" ) return false;
 			if ( methodInfo.Name == "GetHashCode" ) return false;
 		}
@@ -213,20 +257,20 @@ public sealed class TypeDescription : ISourceLineProvider
 		// get the derived type here. What if that type isn't in the library yet? I'll tell you
 		// what, we just fucked up. That's what.
 		//
-		if ( source.TargetType.Assembly == assembly )
+		if ( TargetType.Assembly == assembly )
 		{
 			// This is a dynamic assembly, allow anything
-			if ( source.IsDynamicAssembly )
+			if ( IsDynamicAssembly )
 				return true;
 		}
 		else
 		{
 			// this assembly is dynamic, allow anything
-			var dt = lib.GetType( member.DeclaringType );
+			var dt = library.GetType( member.DeclaringType );
 			if ( dt is not null && dt.IsDynamicAssembly ) return true;
 		}
 
-		var asmName = assembly.GetName().Name!;
+		var asmName = AssemblyNames.GetValue( assembly, static a => a.GetName().Name! );
 
 		//
 		// Keeping this around because we can't totally rely on the above. But the above is needed.
@@ -280,7 +324,7 @@ public sealed class TypeDescription : ISourceLineProvider
 			if ( !isSystemType && field.IsFamily ) return true;
 		}
 
-		return lib.ShouldExposePrivateMember?.Invoke( member ) ?? false;
+		return library.ShouldExposePrivateMember?.Invoke( member ) ?? false;
 	}
 
 	internal static TypeDescription Create( TypeLibrary typeLibrary, Type type, bool dynamicAssembly, TypeDescription target )
@@ -314,14 +358,19 @@ public sealed class TypeDescription : ISourceLineProvider
 
 	private void Init( Type type, bool dynamicAssembly )
 	{
+		IsValid = true;
 		TargetType = type;
 		IsDynamicAssembly = dynamicAssembly;
 		Identity = GetTypeIdentity( type );
 		GenericArguments = type.GetGenericArguments();
 		Interfaces = type.GetInterfaces();
 
+		// Reset cached factory so it recompiles against the new Type after hotload
+		_parameterlessFactory = null;
+		_parameterlessFactoryResolved = false;
+
 		var members = type.GetMembers( BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static )
-								.Where( x => ShouldExposeMember( x, library, this ) )
+								.Where( ShouldExposeMember )
 								.ToList();
 
 
@@ -338,7 +387,7 @@ public sealed class TypeDescription : ISourceLineProvider
 		ConcurrentBag<MemberDescription> md = new();
 		System.Threading.Tasks.Parallel.ForEach( members, x =>
 		{
-			var ident = GetMemberIdentity( x );
+			var ident = StringPool.Get( GetMemberIdentity( x ) );
 
 			MemberDescription previous = null;
 			previousPool?.TryGetValue( ident, out previous );
@@ -363,11 +412,13 @@ public sealed class TypeDescription : ISourceLineProvider
 		Members = md.OrderBy( x => x.SourceLine ).ToArray();
 		DeclaredMembers = Members.Where( x => x.MemberInfo.DeclaringType == type ).ToArray();
 		Methods = Members.OfType<MethodDescription>().ToArray();
+		Operators = Methods.Where( x => x.IsOperator ).ToArray();
 		Properties = Members.OfType<PropertyDescription>().ToArray();
 		Fields = Members.OfType<FieldDescription>().ToArray();
 
 		CaptureAttributes();
 		displayInfo = DisplayInfo.ForMember( type, true, Attributes );
+		Revision++;
 
 		if ( !string.IsNullOrWhiteSpace( displayInfo.ClassName ) )
 		{
@@ -469,15 +520,25 @@ public sealed class TypeDescription : ISourceLineProvider
 	/// <summary>
 	/// Returns true if this is named the passed name, either through classname, target class name or an alias
 	/// </summary>
-	public bool IsNamed( string name )
+	/// <param name="name">The name to check</param>
+	/// <param name="exactFullName">If true, only the exact full name or aliases will match.</param>
+	public bool IsNamed( string name, bool exactFullName = false )
 	{
-		if ( string.Equals( name, ClassName, StringComparison.OrdinalIgnoreCase ) )
-			return true;
-
 		if ( string.Equals( name, displayInfo.Fullname, StringComparison.OrdinalIgnoreCase ) )
 			return true;
 
-		if ( Aliases.Any( x => string.Equals( name, x, StringComparison.OrdinalIgnoreCase ) ) )
+		// Avoid allocating a capturing predicate for every catalog candidate, including types without aliases.
+		foreach ( var alias in Aliases )
+		{
+			if ( string.Equals( name, alias, StringComparison.OrdinalIgnoreCase ) )
+			{
+				return true;
+			}
+		}
+
+		if ( exactFullName ) return false;
+
+		if ( string.Equals( name, ClassName, StringComparison.OrdinalIgnoreCase ) )
 			return true;
 
 		return string.Equals( Name, name, StringComparison.OrdinalIgnoreCase );
@@ -628,6 +689,34 @@ public sealed class TypeDescription : ISourceLineProvider
 	public Type[] Interfaces { get; private set; }
 
 	/// <summary>
+	/// Compiled factory delegate for parameterless construction.
+	/// Avoids Activator.CreateInstance + DefaultBinder overhead on every call.
+	/// </summary>
+	private Func<object> _parameterlessFactory;
+	private bool _parameterlessFactoryResolved;
+
+	private Func<object> GetParameterlessFactory()
+	{
+		if ( _parameterlessFactoryResolved )
+			return _parameterlessFactory;
+
+		_parameterlessFactoryResolved = true;
+
+		if ( TargetType.IsAbstract || TargetType.IsInterface )
+			return null;
+
+		var ctor = TargetType.GetConstructor( Type.EmptyTypes );
+		if ( ctor is null )
+			return null;
+
+		_parameterlessFactory = Expression.Lambda<Func<object>>(
+			Expression.Convert( Expression.New( ctor ), typeof( object ) )
+		).Compile();
+
+		return _parameterlessFactory;
+	}
+
+	/// <summary>
 	/// Create an instance of this class, return it as a T.
 	/// If it can't be cast to a T we won't create it and will return null.
 	/// </summary>
@@ -637,6 +726,13 @@ public sealed class TypeDescription : ISourceLineProvider
 
 		if ( !TargetType.IsAssignableTo( type ) )
 			return default;
+
+		if ( args is null or { Length: 0 } )
+		{
+			var factory = GetParameterlessFactory();
+			if ( factory is not null )
+				return (T)factory();
+		}
 
 		return (T)System.Activator.CreateInstance( TargetType, args );
 	}

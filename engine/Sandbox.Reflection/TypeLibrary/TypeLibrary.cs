@@ -6,7 +6,10 @@ using System.ComponentModel.DataAnnotations;
 
 namespace Sandbox.Internal;
 
-[SkipHotload]
+/// <summary>
+/// Provides discovery, construction and member access for registered types.
+/// </summary>
+[Expose, SkipHotload]
 public partial class TypeLibrary
 {
 	/// <summary>
@@ -57,12 +60,24 @@ public partial class TypeLibrary
 	{
 		log.Trace( "Dispose" );
 
+		foreach ( var description in typedata.Values )
+		{
+			description.Dispose();
+		}
+
 		Types.Clear();
+		typedata.Clear();
+		members.Clear();
+		removedTypes.Clear();
+		InvalidateCache();
+		bytePack?.Dispose();
+		bytePack = null;
+		PostAddCallbacks = null;
 	}
 
 	/// <summary>
 	/// Add essential types from <c>System</c> assemblies, for example
-	/// <see cref="object"/>, <see cref="string"/>, and <see cref="int"/>.
+	/// <see cref="object"/>, <see cref="string"/>, <see cref="int"/>, and <see cref="Enumerable"/>.
 	/// Only public members of these types will be added.
 	/// </summary>
 	internal void AddIntrinsicTypes()
@@ -71,7 +86,8 @@ public partial class TypeLibrary
 
 		foreach ( var type in IntrinsicTypes )
 		{
-			if ( type.Assembly == coreLibAsm && Types.Add( type ) )
+			if ( (type.Assembly == coreLibAsm || type.Assembly == typeof( Enumerable ).Assembly
+				|| type.Assembly == typeof( System.Text.Json.Nodes.JsonNode ).Assembly) && Types.Add( type ) )
 			{
 				AddType( type, false );
 			}
@@ -97,10 +113,20 @@ public partial class TypeLibrary
 		log.Trace( $"Registering {incoming} (dynamic:{isDynamic}) ({types.Count()} Types)" );
 
 		var added = new ConcurrentBag<Action>();
-		System.Threading.Tasks.Parallel.ForEach( types, t => AddType( t, isDynamic ) );
-
-		foreach ( var t in types )
-			Types.Add( t );
+		try
+		{
+			System.Threading.Tasks.Parallel.ForEach( types, t => AddType( t, isDynamic ) );
+		}
+		finally
+		{
+			// If one type throws, the others are already live - track them so RemoveAssembly takes
+			// them out again, otherwise they outlive hotloads next to the incoming versions
+			foreach ( var t in types )
+			{
+				if ( typedata.ContainsKey( t ) )
+					Types.Add( t );
+			}
+		}
 
 		//
 		// Call the callbacks on the main thread
@@ -123,6 +149,10 @@ public partial class TypeLibrary
 	{
 		// System
 		typeof(object),
+		typeof(Math), typeof(MathF),
+		typeof(Random),
+		typeof(Guid),
+		typeof(DateTime), typeof(DateTimeKind),
 		typeof(char), typeof(string),
 		typeof(bool),
 		typeof(byte), typeof(sbyte),
@@ -136,6 +166,25 @@ public partial class TypeLibrary
 		typeof(HashSet<>),
 		typeof(Array),
 		typeof(IList<>),
+		typeof(ICollection<>),
+		typeof(IReadOnlyCollection<>),
+		typeof(IReadOnlyList<>),
+		typeof(System.Collections.IEnumerable),
+		typeof(IEnumerable<>),
+		typeof(Enumerable),
+		typeof(System.Collections.IEnumerator),
+		typeof(IEnumerator<>),
+		typeof(IDisposable),
+		typeof(System.Threading.Tasks.Task),
+		typeof(System.Threading.Tasks.Task<>),
+		typeof(System.Threading.CancellationToken),
+		typeof(System.Threading.CancellationTokenSource),
+		typeof(Exception),
+		typeof(AggregateException),
+		typeof(System.Text.Json.Nodes.JsonNode),
+		typeof(System.Text.Json.Nodes.JsonObject),
+		typeof(System.Text.Json.Nodes.JsonArray),
+		typeof(System.Text.Json.Nodes.JsonValue),
 		typeof(ValueTuple<>),
 		typeof(ValueTuple<,>),
 		typeof(ValueTuple<,,>),
@@ -146,6 +195,56 @@ public partial class TypeLibrary
 		typeof(ValueTuple<,,,,,,,>),
 
 		// Sandbox
+		typeof(Sandbox.SandboxSystemExtensions),
+		typeof(MathX),
+		typeof(StringToken),
+		// Share the addon compiler's safe builder through the normal catalog and its consumer-specific filters.
+		typeof(SafeStringBuilder),
+		typeof(Sandbox.Internal.PublicArrayPool<>),
+		typeof(BaseFileSystem),
+		typeof(Logger),
+		typeof(PropertyAttribute),
+		typeof(DefaultValueAttribute),
+		typeof(RequireComponentAttribute),
+		typeof(ButtonAttribute),
+		typeof(ClientEditableAttribute),
+		typeof(TagAttribute),
+		typeof(AliasAttribute),
+		typeof(SpawnableAttribute),
+		typeof(SelectionBaseAttribute),
+		typeof(AssetHintAttribute),
+		typeof(PlaceholderAttribute),
+		typeof(AdvancedAttribute),
+		typeof(InlineEditorAttribute),
+		typeof(KeyPropertyAttribute),
+		typeof(ToggleGroupAttribute),
+		typeof(EnumButtonGroupAttribute),
+		typeof(EnumDropdownAttribute),
+		typeof(MinMaxSliderAttribute),
+		typeof(SliderGradientAttribute),
+		typeof(TimeRangeAttribute),
+		typeof(ValueRangeAttribute),
+		typeof(ChangeAttribute),
+		typeof(ConVarAttribute),
+		typeof(ConCmdAttribute),
+		typeof(ConVarFlags),
+		typeof(ClassNameAttribute),
+		typeof(TitleAttribute),
+		typeof(DescriptionAttribute),
+		typeof(IconAttribute),
+		typeof(CategoryAttribute),
+		typeof(GroupAttribute),
+		typeof(OrderAttribute),
+		typeof(HeaderAttribute),
+		typeof(SpaceAttribute),
+		typeof(HideAttribute),
+		typeof(ReadOnlyAttribute),
+		typeof(TextAreaAttribute),
+		typeof(InputActionAttribute),
+		typeof(RangeAttribute),
+		typeof(StepAttribute),
+		typeof(MinMaxAttribute),
+		typeof(RealTime),
 		typeof(Rect),
 		typeof(RectInt),
 		typeof(Rect3D),
@@ -158,8 +257,10 @@ public partial class TypeLibrary
 		typeof(Color.Rgba16),
 		typeof(Color32),
 		typeof(ColorHsv),
+		typeof(Gradient),
 		typeof(Capsule),
 		typeof(Line),
+		typeof(Ray),
 		typeof(Transform),
 		typeof(BBox),
 		typeof(Sphere),
@@ -176,12 +277,14 @@ public partial class TypeLibrary
 		typeof(TextFlag),
 
 		// UI
+		typeof(Sandbox.UI.StyleSheetAttribute),
 		typeof(Sandbox.UI.OverflowMode),
 		typeof(Sandbox.UI.Align),
 		typeof(Sandbox.UI.PositionMode),
 		typeof(Sandbox.UI.FlexDirection),
 		typeof(Sandbox.UI.Justify),
 		typeof(Sandbox.UI.DisplayMode),
+		typeof(Sandbox.UI.GridAutoFlow),
 		typeof(Sandbox.UI.PointerEvents),
 		typeof(Sandbox.UI.Wrap),
 		typeof(Sandbox.UI.TextAlign),
@@ -208,13 +311,21 @@ public partial class TypeLibrary
 	};
 
 	/// <summary>
-	/// For some system types we only want to expose a subset of public members. In the future
+	/// For some system types we only want to expose a subset of public members, including constructors.
+	/// ConstructorInfo.ConstructorName explicitly permits public constructors for these types. In the future
 	/// we should try to use the same whitelist as when checking user code, but that's a bit scary.
 	/// </summary>
 	private static Dictionary<Type, HashSet<string>> WhitelistedSystemMembers { get; } = new()
 	{
 		{ typeof(Array), new() { nameof(Array.Length) } },
-		{ typeof(IList<>), new() { nameof(IList<object>.Count) } }
+		{ typeof(IList<>), new() { nameof(IList<object>.Count) } },
+		// Observe host-owned async work without exposing scheduling or reflection APIs.
+		{ typeof(System.Threading.Tasks.Task), new() { "IsCompleted", "IsCompletedSuccessfully", "IsCanceled", "IsFaulted", "Exception" } },
+		{ typeof(System.Threading.Tasks.Task<>), new() },
+		{ typeof(System.Threading.CancellationToken), new() { ConstructorInfo.ConstructorName, "None", "IsCancellationRequested", "CanBeCanceled", "ThrowIfCancellationRequested" } },
+		{ typeof(System.Threading.CancellationTokenSource), new() { ConstructorInfo.ConstructorName, "Token", "Cancel", "Dispose", "IsCancellationRequested" } },
+		{ typeof(Exception), new() { ConstructorInfo.ConstructorName, "Message", "InnerException", "GetBaseException" } },
+		{ typeof(AggregateException), new() { ConstructorInfo.ConstructorName, "Message", "InnerExceptions", "GetBaseException" } }
 	};
 
 	internal static bool IsIntrinsicType( Type t )
@@ -230,26 +341,40 @@ public partial class TypeLibrary
 
 		if ( IsIntrinsicType( t ) ) return true;
 
-		// If we're a nested type, defer to the class we're declared in
-		if ( t.DeclaringType != null )
+		// Only public nested types inherit exposure. Nonpublic types need an explicit opt-in above.
+		if ( t.IsNestedPublic )
+		{
+			if ( System.Attribute.IsDefined( t, typeof( System.Runtime.CompilerServices.CompilerGeneratedAttribute ) ) )
+				return false;
+
 			return ShouldExposeType( t.DeclaringType );
+		}
 
 		return false;
 	}
 
+	/// <summary>
+	/// Checks intrinsic member approval against the declaring type's generic definition.
+	/// </summary>
 	internal static bool ShouldExposePublicSystemMember( MemberInfo member )
 	{
-		if ( member.DeclaringType is null )
+		var type = member.DeclaringType;
+		if ( type is null )
 		{
 			return false;
 		}
 
-		if ( !IntrinsicTypes.Contains( member.DeclaringType ) )
+		if ( type.IsConstructedGenericType )
+		{
+			type = type.GetGenericTypeDefinition();
+		}
+
+		if ( !IntrinsicTypes.Contains( type ) )
 		{
 			return false;
 		}
 
-		if ( !WhitelistedSystemMembers.TryGetValue( member.DeclaringType, out var whitelisted ) )
+		if ( !WhitelistedSystemMembers.TryGetValue( type, out var whitelisted ) )
 		{
 			// If not specifically whitelisted, allow all public members
 
@@ -325,7 +450,11 @@ public partial class TypeLibrary
 
 		log.Trace( $"Removing {asm}" );
 
-		foreach ( var type in Types.Where( x => x.Assembly == asm ).ToArray() )
+		var outgoing = typedata.Where( x => x.Key.Assembly == asm ).Select( x => x.Key )
+			.Union( Types.Where( x => x.Assembly == asm ) )
+			.ToArray();
+
+		foreach ( var type in outgoing )
 		{
 			Types.Remove( type );
 			log.Trace( $" - {type}" );
@@ -351,16 +480,6 @@ public partial class TypeLibrary
 	public int GetTypeIdent( Type type )
 	{
 		return $"{type.Assembly.GetName().Name}.{type.Name}".FastHash();
-	}
-
-	[System.Obsolete( "Use GetType" )]
-	internal TypeDescription GetTypeByName( string name, System.Type canBeAssignedTo )
-	{
-		return typedata
-					.Where( x => canBeAssignedTo == null || canBeAssignedTo.IsAssignableFrom( x.Key ) )
-					.Where( x => x.Value.IsNamed( name ) )
-					.Select( x => x.Value )
-					.FirstOrDefault();
 	}
 
 	/// <summary>
@@ -400,31 +519,44 @@ public partial class TypeLibrary
 	public IReadOnlyList<TypeDescription> GetTypes( Type type )
 	{
 		if ( type == null )
-			return Cached( HashCode.Combine( "GetTypes", type ), () => typedata.Values.ToImmutableList() );
+			return Cached( HashCode.Combine( "GetTypes", type ), this, static lib => lib.typedata.Values.ToImmutableList() );
 
-		return Cached( HashCode.Combine( "GetTypes", type ), () => typedata.Values.Where( x => x.TargetType.IsAssignableTo( type ) ).ToImmutableList() );
+		return Cached( HashCode.Combine( "GetTypes", type ), (Library: this, Type: type), static s => s.Library.typedata.Values.Where( x => x.TargetType.IsAssignableTo( s.Type ) ).ToImmutableList() );
 	}
 
 	/// <summary>
 	/// Find a TypeDescription that derives from <typeparamref name="T"/>, by name
 	/// </summary>
-	public TypeDescription GetType<T>( string name ) => GetType<T>( name, false );
+	public TypeDescription GetType<T>( string name ) => GetType( typeof( T ), name, false, false );
 
 	/// <summary>
 	/// Find a TypeDescription that derives from T by name, which can be an Alias etc.
 	/// If preferAddonAssembly is true, then if there are conflicts we'll prefer types that are 
 	/// in addon code.
 	/// </summary>
-	public TypeDescription GetType<T>( string name, bool preferAddonAssembly ) => GetType( typeof( T ), name, preferAddonAssembly );
+	public TypeDescription GetType<T>( string name, bool preferAddonAssembly ) => GetType( typeof( T ), name, preferAddonAssembly, false );
+
+	/// <summary>
+	/// Find a TypeDescription that derives from T by name, which can be an Alias etc.
+	/// If preferAddonAssembly is true, then if there are conflicts we'll prefer types that are 
+	/// in addon code.
+	/// If exactFullName is true, the name must match the FullName of the type.
+	/// </summary>
+	public TypeDescription GetType<T>( string name, bool preferAddonAssembly, bool exactFullName ) => GetType( typeof( T ), name, preferAddonAssembly, exactFullName );
 
 	/// <summary>
 	/// Find a TypeDescription that derives from T by name, which can be an Alias etc.
 	/// If preferAddonAssembly is true, then if there are conflicts we'll prefer types that are 
 	/// in addon code.
 	/// </summary>
-	public TypeDescription GetType( Type type, string name, bool preferAddonAssembly = false )
+	/// <param name="type">The base type to search for, or null to search all types</param>
+	/// <param name="name">The name to search for, which can be an alias or the full name depending on the value of <paramref name="exactFullName"/></param>
+	/// <param name="preferAddonAssembly">If true, then if there are conflicts we'll prefer types that are in addon code.</param>
+	/// <param name="exactFullName">If true, the name must match the FullName (or alias) of the type</param>
+	public TypeDescription GetType( Type type, string name, bool preferAddonAssembly = false, bool exactFullName = false )
 	{
-		return Cached( HashCode.Combine( "GetType", type, name, preferAddonAssembly ), () => GetTypes( type ).Where( x => x.IsNamed( name ) ).OrderBy( x => (x.IsDynamicAssembly == preferAddonAssembly) ? 0 : 1 ).FirstOrDefault() );
+		return Cached( HashCode.Combine( "GetType", type, name, preferAddonAssembly, exactFullName ), (Library: this, Type: type, Name: name, PreferAddonAssembly: preferAddonAssembly, ExactFullName: exactFullName),
+			static s => s.Library.GetTypes( s.Type ).Where( x => x.IsNamed( s.Name, s.ExactFullName ) ).OrderBy( x => (x.IsDynamicAssembly == s.PreferAddonAssembly) ? 0 : 1 ).FirstOrDefault() );
 
 	}
 
@@ -460,7 +592,7 @@ public partial class TypeLibrary
 	/// <summary>
 	/// Find a TypeDescription by name
 	/// </summary>
-	public TypeDescription GetType( string name ) => GetType( null, name, false );
+	public TypeDescription GetType( string name, bool exactFullName = false ) => GetType( null, name, false, exactFullName );
 
 	/// <summary>
 	/// Find a TypeDescription by name
@@ -575,9 +707,14 @@ public partial class TypeLibrary
 		if ( targetType is null )
 			return null;
 
+		property.CreateObjectValue();
+
 		var getTarget = () => property.GetValue<object>();
-		if ( getTarget() is null )
-			return null;
+		var value = getTarget();
+		if ( value is null ) return null;
+
+		// get type from the object, incase we're a derived type.
+		targetType = GetType( value.GetType() );
 
 		return new TypeSerializedObject( getTarget, targetType, property );
 	}
@@ -647,6 +784,16 @@ public partial class TypeLibrary
 
 		// cache me
 		return new EnumDescription( enumType );
+	}
+
+	/// <summary>
+	/// Get a describtion of an enum value. This is useful if your enum values are decorated with attributes that you want to read, for example.
+	/// </summary>
+	public EnumDescription.Entry GetEnumDescription<T>( T enumValue ) where T : Enum
+	{
+		var ed = GetEnumDescription( typeof( T ) );
+		if ( ed is null ) return default;
+		return ed.GetEntry( enumValue );
 	}
 
 	/// <summary>

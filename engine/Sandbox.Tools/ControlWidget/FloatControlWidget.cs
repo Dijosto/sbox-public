@@ -34,6 +34,9 @@ public class FloatControlWidget : StringControlWidget
 
 	private FloatSlider SliderWidget;
 
+	IconButton _stepUpButton;
+	IconButton _stepDownButton;
+
 	public FloatControlWidget( SerializedProperty property ) : base( property )
 	{
 		Cursor = CursorShape.SizeH;
@@ -52,6 +55,8 @@ public class FloatControlWidget : StringControlWidget
 		if ( stepAttribute is not null )
 		{
 			RangeStep = stepAttribute.Step;
+
+			CreateStepButtons();
 		}
 
 		var clampAttribute = attributes.OfType<RangeAttribute>().FirstOrDefault();
@@ -64,6 +69,74 @@ public class FloatControlWidget : StringControlWidget
 				clampAttribute.Slider
 			);
 		}
+
+		if ( SliderWidget is not null )
+		{
+			SliderWidget.TrackGradient = attributes.OfType<SliderGradientAttribute>().FirstOrDefault()?.CreateGradient();
+		}
+	}
+
+	void CreateStepButtons()
+	{
+		_stepUpButton ??= new IconButton( "expand_less", () => StepValue( +1 ), this );
+		_stepUpButton.Background = Color.Transparent;
+		_stepDownButton ??= new IconButton( "expand_more", () => StepValue( -1 ), this );
+		_stepDownButton.Background = Color.Transparent;
+
+		UpdateStepButtonState();
+	}
+
+	void StepValue( int direction )
+	{
+		if ( ReadOnly || !SerializedProperty.IsEditable )
+			return;
+
+		var old = SerializedProperty.As.Float;
+		var value = ApplyStep( old, direction );
+
+		if ( value == old )
+			return;
+
+		PropertyStartEdit();
+
+		SerializedProperty.As.Float = value;
+		LineEdit.Text = ValueToString();
+
+		SignalValuesChanged();
+		UpdateStepButtonState();
+
+		PropertyFinishEdit();
+	}
+
+	float ApplyStep( float value, int direction )
+	{
+		var step = RangeStep > 0 ? RangeStep : 0.01f;
+
+		value += direction * step;
+
+		if ( HasRange && RangeClamped )
+			value = value.Clamp( Range.x, Range.y );
+
+		return step > 0 ? value.SnapToGrid( step ) : value;
+	}
+
+	void UpdateStepButtonState()
+	{
+		if ( _stepUpButton is null )
+			return;
+
+		var value = SerializedProperty.As.Float;
+		var canStepUp = true;
+		var canStepDown = true;
+
+		if ( HasRange && RangeClamped )
+		{
+			canStepUp = value < Range.y;
+			canStepDown = value > Range.x;
+		}
+
+		_stepUpButton.Enabled = canStepUp && !ReadOnly;
+		_stepDownButton.Enabled = canStepDown && !ReadOnly;
 	}
 
 	public void MakeRanged( Vector2 range, float step, bool clamped, bool slider )
@@ -103,11 +176,39 @@ public class FloatControlWidget : StringControlWidget
 
 		if ( SliderWidget is not null )
 		{
-			var sliderRect = rect.Shrink( 2, 0, 60, 0 );
+			var sliderRect = rect.Shrink( 2, 0, SliderDrawing.ValueWidth, 0 );
 			SliderWidget.Position = sliderRect.Position;
 			SliderWidget.Size = sliderRect.Size;
 
 			rect.Left += SliderWidget.Width + 2;
+		}
+
+		if ( _stepUpButton is not null )
+		{
+			var buttonWidth = Theme.RowHeight * 0.5f;
+			var padding = 2.0f;
+
+			var upRect = new Rect(
+				rect.Right - buttonWidth - padding,
+				rect.Top,
+				buttonWidth,
+				rect.Height * 0.5f
+			);
+
+			var downRect = new Rect(
+				rect.Right - buttonWidth - padding,
+				rect.Center.y,
+				buttonWidth,
+				rect.Height * 0.5f
+			);
+
+			_stepUpButton.Position = upRect.Position;
+			_stepUpButton.FixedSize = upRect.Size;
+
+			_stepDownButton.Position = downRect.Position;
+			_stepDownButton.FixedSize = downRect.Size;
+
+			rect.Right -= buttonWidth + padding + 2;
 		}
 
 		LineEdit.Position = rect.Position;
@@ -245,7 +346,7 @@ public class FloatControlWidget : StringControlWidget
 			if ( e.ButtonState.Contains( MouseButtons.Right ) ) delta *= 0.1f;
 
 			dragValue += delta;
-			if ( HasRange && RangeClamped ) dragValue = dragValue.Clamp( Range.x, Range.y );
+			if ( HasRange && (RangeClamped || SliderWidget is not null) ) dragValue = dragValue.Clamp( Range.x, Range.y );
 
 			var steppedValue = (RangeStep != 0.0f) ? dragValue.SnapToGrid( RangeStep ) : dragValue;
 			SerializedProperty.As.Float = steppedValue;
@@ -266,15 +367,61 @@ public class FloatControlWidget : StringControlWidget
 	{
 		base.OnValueChanged();
 
-		if ( SliderWidget is not null )
+		SliderWidget?.Value = SerializedProperty.As.Float;
+
+		UpdateStepButtonState();
+	}
+
+	bool _keyEditing;
+
+	protected override void OnKeyPress( KeyEvent e )
+	{
+		if ( ReadOnly || !SerializedProperty.IsEditable )
 		{
-			SliderWidget.Value = SerializedProperty.As.Float;
+			base.OnKeyPress( e );
+			return;
 		}
+
+		if ( LineEdit.IsFocused && !LineEdit.HasSelectedText &&
+			(e.Key == KeyCode.Up || e.Key == KeyCode.Down) )
+		{
+			if ( !_keyEditing )
+			{
+				PropertyStartEdit();
+				_keyEditing = true;
+			}
+
+			SerializedProperty.As.Float = ApplyStep( SerializedProperty.As.Float, (e.Key == KeyCode.Up) ? +1 : -1 );
+			LineEdit.Text = ValueToString();
+
+			SignalValuesChanged();
+
+			e.Accepted = true;
+			return;
+		}
+
+		base.OnKeyPress( e );
+	}
+
+	protected override void OnKeyRelease( KeyEvent e )
+	{
+		if ( _keyEditing && (e.Key == KeyCode.Up || e.Key == KeyCode.Down) && !e.IsAutoRepeat )
+		{
+			PropertyFinishEdit();
+			_keyEditing = false;
+		}
+
+		base.OnKeyRelease( e );
 	}
 }
 
 public class FloatSlider : Widget
 {
+	/// <summary>
+	/// Optional gradient across the whole track, replacing its value-dependent highlight.
+	/// </summary>
+	internal Gradient? TrackGradient { get; set; }
+
 	public float Minimum { get; set; }
 	public float Maximum { get; set; }
 	public Action OnValueEdited { get; set; }
@@ -317,11 +464,11 @@ public class FloatSlider : Widget
 
 	public float Step { get; set; } = 0.01f;
 
-	const float thumbWidth = 6;
-	const float thumbHeight = 12;
-
 	public FloatSlider( Widget parent ) : base( parent )
 	{
+		// Repaint thumb hover when the pointer moves without a button held.
+		MouseTracking = true;
+
 		Minimum = 0;
 		Maximum = 100;
 		Value = 25;
@@ -346,32 +493,26 @@ public class FloatSlider : Widget
 
 	internal void PaintSlider( Rect rect, float pos )
 	{
-		var trackWidth = 5.0f;
-		var center = rect.Height / 2.0f;
-		var halfThumb = thumbWidth * 0.5f;
-		var width = rect.Width;
-		var highlightColor = HighlightColor;
+		var halfHandle = SliderDrawing.HandleWidth * 0.5f;
+		var disabled = !Enabled || ReadOnly;
 
-		Paint.Antialiasing = true;
+		if ( TrackGradient is { Colors.Count: > 0 } gradient )
+		{
+			SliderDrawing.DrawGradientTrack( rect, gradient, disabled );
+		}
+		else
+		{
+			SliderDrawing.DrawTrack( rect, halfHandle, pos + halfHandle, HighlightColor, disabled );
+		}
 
-		Paint.ClearPen();
-
-		Paint.SetBrush( highlightColor.WithAlpha( 0.2f ) );
-		Paint.DrawRect( new( halfThumb, center - trackWidth * 0.5f, width - thumbWidth, trackWidth ), 3.0f );
-
-		Paint.SetBrush( highlightColor.WithAlpha( 0.8f ) );
-		Paint.DrawRect( new( halfThumb, center - trackWidth * 0.5f, pos, trackWidth ), 3.0f );
-
-		Paint.SetBrush( Theme.TextControl );
-		Paint.SetPen( Theme.WindowBackground.WithAlpha( 0.3f ), 1 );
-		Paint.DrawRect( new( pos, center - thumbHeight * 0.5f, thumbWidth, thumbHeight ), 2 );
+		SliderDrawing.DrawHandle( this, rect, pos + halfHandle );
 	}
 
 	protected override void OnPaint()
 	{
 		base.OnPaint();
 
-		var pos = DeltaValue * (Width - thumbWidth);
+		var pos = DeltaValue * (Width - SliderDrawing.HandleWidth);
 
 		if ( SliderPaint is null )
 		{
@@ -388,7 +529,7 @@ public class FloatSlider : Widget
 		if ( ReadOnly )
 			return;
 
-		var delta = (position - thumbWidth * 0.5f) / (Width - thumbWidth);
+		var delta = (position - SliderDrawing.HandleWidth * 0.5f) / (Width - SliderDrawing.HandleWidth);
 		DeltaValue = delta.Clamp( 0.0f, 1.0f );
 		OnValueEdited?.Invoke();
 
@@ -411,6 +552,8 @@ public class FloatSlider : Widget
 
 	protected override void OnMouseMove( MouseEvent e )
 	{
+		Update();
+
 		if ( ReadOnly )
 			return;
 

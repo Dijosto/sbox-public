@@ -5,10 +5,9 @@ namespace Sandbox;
 internal static partial class DebugOverlay
 {
 	static CommandList _overlay = new( "Engine Overlay" );
+	private const float OverlaySpacing = 16f;
 
 	public static CommandList CommandList => _overlay;
-
-	public static HudPainter Hud => new HudPainter( CommandList );
 
 	public static void Reset()
 	{
@@ -20,95 +19,42 @@ internal static partial class DebugOverlay
 		_overlay.ExecuteOnRenderThread();
 	}
 
-	[ConVar( "overlay_profile", Help = "Draws an overlay showing timings from the main profile categories" )]
-	internal static int overlay_profile { get; set; } = 0;
-
-	[ConVar( "overlay_alloc", Help = "Draws an overlay showing allocations and garbage collection" )]
-	internal static int overlay_alloc { get; set; } = 0;
-
-	[ConVar( "overlay_frame", Help = "Draws an overlay render frame stats" )]
-	internal static int overlay_frame { get; set; } = 0;
-
-	[ConVar( "overlay_network_graph", Help = "Draws an overlay showing a network usage summary" )]
-	internal static int overlay_network_graph { get; set; } = 0;
-
-	[ConVar( "overlay_network_calls", Help = "Draws an overlay showing most received network calls" )]
-	internal static int overlay_network_calls { get; set; } = 0;
-
-	[ConVar( "overlay_pp", Help = "Draws an overlay showing current post process stack" )]
-	internal static int overlay_pp { get; set; } = 0;
-
-	[ConVar( "overlay_gpu", Help = "Draws an overlay showing GPU timing for render passes" )]
-	internal static int overlay_gpu { get; set; } = 0;
-
-	[ConVar( "overlay_resources", Help = "Draws an overlay showing registered resources and native cache" )]
-	internal static int overlay_resources { get; set; } = 0;
-
+	/// <summary>
+	/// Draws what's left of the engine's own screen overlays. The performance stats that used to stack up here, one
+	/// <c>overlay_*</c> convar each, live in the dev tools now (<see cref="Diagnostics.DevTools"/>); its tabs call
+	/// the drawers in this class directly.
+	/// </summary>
 	public static void Draw()
 	{
-		Vector2 pos = new Vector2( 100, 130 );
-		var activeScene = Application.GetActiveScene();
+		using var painter = Painter.Begin( CommandList );
+		Vector2 pos = new Vector2( 64, 64 );
+
+		// First, since its image covers the view
+		if ( OcclusionDebug.View != OcclusionDebugView.Off )
+		{
+			DebugOverlay.OcclusionCulling.Draw( painter, ref pos );
+			pos.y += OverlaySpacing;
+		}
 
 		// Show current render debug mode on screen when not default
 		if ( ToolsVisualization.mat_toolsvis != SceneCameraDebugMode.Normal )
 		{
-			DebugOverlay.ToolsVisualization.Draw( ref pos );
+			DebugOverlay.ToolsVisualization.Draw( painter, ref pos );
+			pos.y += OverlaySpacing;
 		}
 
-		if ( overlay_network_calls == 1 )
-		{
-			DebugOverlay.NetworkCalls.Draw( ref pos );
-			pos.y += 20;
-		}
+		// Collectors that only run while a dev tools tab shows them
+		// Allocation tracking counts GC pauses frame by frame, so it samples every game frame rather than the dev tools'
+		if ( Diagnostics.DevTools.IsCollecting( "memory" ) ) DebugOverlay.Allocations.Sample();
+		else DebugOverlay.Allocations.Disabled();
 
-		if ( overlay_network_graph == 1 )
-		{
-			DebugOverlay.NetworkGraph.Draw( ref pos );
-			pos.y += 20;
-		}
+		if ( ShadowMapper.DebugEnabled )
+			ShadowMapper.Draw( ref pos, painter );
 
-		if ( overlay_profile == 1 )
-		{
-			DebugOverlay.Profiler.Draw( ref pos );
-			pos.y += 20;
-		}
+		// The panel the dev tools' UI inspector has picked
+		if ( Diagnostics.DevTools.IsShowing( "ui" ) ) Diagnostics.DevToolsUiTab.DrawHighlight( painter );
 
-		if ( overlay_frame == 1 )
-		{
-			DebugOverlay.Frame.Draw( ref pos );
-			pos.y += 20;
-		}
-
-		if ( overlay_pp == 1 )
-		{
-			activeScene?.Camera?.PrintPostProcessDebugOverlay( ref pos, Hud );
-			pos.y += 20;
-		}
-
-		if ( overlay_alloc == 1 )
-		{
-			DebugOverlay.Allocations.Draw( ref pos );
-			pos.y += 20;
-		}
-		else
-		{
-			DebugOverlay.Allocations.Disabled();
-		}
-
-		// GPU Profiler
-		Diagnostics.GpuProfilerStats.Enabled = overlay_gpu == 1;
-		Diagnostics.GpuProfilerStats.Update();
-
-		if ( overlay_gpu == 1 )
-		{
-			DebugOverlay.GpuProfiler.Draw( ref pos );
-			pos.y += 20;
-		}
-
-		if ( overlay_resources == 1 )
-		{
-			DebugOverlay.Resources.Draw( ref pos );
-			pos.y += 20;
-		}
+		// Warning icons are visible even when the dev tools is closed.
+		Warnings.Draw( painter );
 	}
 }

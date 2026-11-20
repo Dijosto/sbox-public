@@ -71,6 +71,9 @@ public class SelectionSystem : IEnumerable<object>
 	/// <returns>True if the object was added, false if it was already selected</returns>
 	public virtual bool Add( object obj )
 	{
+		if ( obj is null )
+			return false;
+
 		if ( _list.TryAdd( obj, false ) )
 		{
 			_hashCode++;
@@ -103,6 +106,9 @@ public class SelectionSystem : IEnumerable<object>
 	/// <returns>True if the object was removed, false if it wasn't selected</returns>
 	public virtual bool Remove( object obj )
 	{
+		if ( obj is null )
+			return false;
+
 		if ( _list.Remove( obj ) )
 		{
 			_hashCode++;

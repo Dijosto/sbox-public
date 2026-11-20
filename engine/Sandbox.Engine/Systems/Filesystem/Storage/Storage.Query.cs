@@ -1,5 +1,4 @@
 using Sandbox.Services.Players;
-using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Threading;
 
@@ -37,6 +36,12 @@ public static partial class Storage
 	public class Query
 	{
 		/// <summary>
+		/// Specific workshop file IDs to query. When set, other filters are ignored
+		/// and the query returns details for these specific items.
+		/// </summary>
+		public List<ulong> FileIds { get; set; }
+
+		/// <summary>
 		/// Tags that the item must have all of to be included in results.
 		/// </summary>
 		public HashSet<string> TagsRequired { get; set; } = new( StringComparer.OrdinalIgnoreCase );
@@ -67,6 +72,12 @@ public static partial class Storage
 		public SortOrder SortOrder { get; set; } = SortOrder.RankedByVote;
 
 		/// <summary>
+		/// Filter results to items published by this Steam ID. When set, uses
+		/// a user-specific query instead of a global one.
+		/// </summary>
+		public SteamId Author { get; set; }
+
+		/// <summary>
 		/// Number of days to consider for rank trend calculations
 		/// </summary>
 		public int RankTrendDays { get; set; } = 30;
@@ -85,17 +96,11 @@ public static partial class Storage
 		/// </summary>
 		internal async Task<QueryResult> RunEx( string nextToken, CancellationToken token = default )
 		{
-			var json = JsonSerializer.Serialize( this );
-			using var q = NativeEngine.CUgcQuery.CreateQuery( json, nextToken );
+			var result = await Workshop.RunQueryAsync<QueryResult>( this, nextToken, token ) ?? new QueryResult { Items = new() };
 
-			while ( !q.m_complete )
-			{
-				await Task.Delay( 100, token );
-			}
+			if ( !Workshop.HasNextPage( nextToken, result.NextCursor, result.Items?.Count ?? 0 ) )
+				result.NextCursor = null;
 
-			var resultJson = q.GetResultJson();
-
-			var result = Json.Deserialize<QueryResult>( resultJson );
 			result.SourceQuery = this;
 			return result;
 		}
@@ -166,7 +171,7 @@ public static partial class Storage
 		/// </summary>
 		public async Task<Entry> Install( CancellationToken token = default )
 		{
-			var fs = await InstallWorkshopFile( Id, token );
+			var fs = await Workshop.DownloadAsync( Id, token );
 			if ( fs == null ) return null;
 
 			return CreateEntryFromFileSystem( fs );

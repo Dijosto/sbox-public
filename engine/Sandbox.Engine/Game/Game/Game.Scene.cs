@@ -7,7 +7,7 @@ public static partial class Game
 	/// <summary>
 	/// Indicates whether the game is currently running and actively playing a scene.
 	/// </summary>
-	public static bool IsPlaying { get; internal set; }
+	public static bool IsPlaying { get; internal set; } = true;
 
 	/// <summary>
 	/// Indicates whether the game is currently paused.
@@ -21,6 +21,36 @@ public static partial class Game
 	{
 		get => GlobalContext.Current.ActiveScene;
 		internal set => GlobalContext.Current.ActiveScene = value;
+	}
+
+	/// <summary>
+	/// Change the active scene and optionally bring all connected clients to
+	/// the new scene (broadcast the scene change.) If we're in a networking
+	/// session, then only the host can change the scene.
+	/// </summary>
+	/// <param name="scene"></param>
+	/// <returns>Whether the scene was changed successfully.</returns>
+	public static bool ChangeScene( SceneFile scene )
+	{
+		var loadOptions = new SceneLoadOptions();
+		loadOptions.SetScene( scene );
+
+		return ChangeScene( loadOptions );
+	}
+
+	/// <summary>
+	/// Change the active scene and optionally bring all connected clients to
+	/// the new scene (broadcast the scene change.) If we're in a networking
+	/// session, then only the host can change the scene.
+	/// </summary>
+	/// <param name="scenePath">The relative path to the scene to load.</param>
+	/// <returns>Whether the scene was changed successfully.</returns>
+	public static bool ChangeScene( string scenePath )
+	{
+		var loadOptions = new SceneLoadOptions();
+		loadOptions.SetScene( scenePath );
+
+		return ChangeScene( loadOptions );
 	}
 
 	/// <summary>
@@ -65,11 +95,19 @@ public static partial class Game
 		if ( ActiveScene.IsLoading || LoadingScreen.IsVisible || Networking.IsConnecting )
 		{
 			ActiveScene.RenderEnvmaps();
+
+			// Make sure overlays are rendered even when we are loading
+			if ( ActiveScene.Camera is not null )
+			{
+				ActiveScene.Camera.SceneCamera.EnableEngineOverlays = true;
+				ActiveScene.Camera.AddToRenderList( swapChain, default );
+			}
+
 			return;
 		}
 
-		ActiveScene.Camera.SceneCamera.EnableEngineOverlays = true;
-		SceneCamera.RecordingCamera = ActiveScene.Camera.SceneCamera;
+		ActiveScene.Camera?.SceneCamera.EnableEngineOverlays = true;
+		SceneCamera.RecordingCamera = ActiveScene.Camera?.SceneCamera;
 
 		ActiveScene.Render( swapChain, default );
 	}

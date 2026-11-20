@@ -206,20 +206,27 @@ public partial class ClothingContainer
 	/// <summary>
 	/// Return a list of bodygroups and what their value should be
 	/// </summary>
-	public IEnumerable<(string name, int value)> GetBodyGroups( IEnumerable<Clothing> items )
+	public IEnumerable<(string name, int value)> GetBodyGroups( IEnumerable<Clothing> items, Model model = null )
 	{
 		var mask = items.Where( x => x.IsValid() ).Select( x => x.HideBody ).DefaultIfEmpty().Aggregate( ( a, b ) => a | b );
 
-		yield return ("head", (mask & Sandbox.Clothing.BodyGroups.Head) != 0 ? 1 : 0);
-		yield return ("Chest", (mask & Sandbox.Clothing.BodyGroups.Chest) != 0 ? 1 : 0);
-		yield return ("Legs", (mask & Sandbox.Clothing.BodyGroups.Legs) != 0 ? 1 : 0);
-		yield return ("Hands", (mask & Sandbox.Clothing.BodyGroups.Hands) != 0 ? 1 : 0);
-		yield return ("Feet", (mask & Sandbox.Clothing.BodyGroups.Feet) != 0 ? 1 : 0);
+		yield return ("Head", (mask & Sandbox.Clothing.BodyGroups.Head) != 0 ? HiddenChoice( model, "Head" ) : 0);
+		yield return ("Chest", (mask & Sandbox.Clothing.BodyGroups.Chest) != 0 ? HiddenChoice( model, "Chest" ) : 0);
+		yield return ("Legs", (mask & Sandbox.Clothing.BodyGroups.Legs) != 0 ? HiddenChoice( model, "Legs" ) : 0);
+		yield return ("Hands", (mask & Sandbox.Clothing.BodyGroups.Hands) != 0 ? HiddenChoice( model, "Hands" ) : 0);
+		yield return ("Feet", (mask & Sandbox.Clothing.BodyGroups.Feet) != 0 ? HiddenChoice( model, "Feet" ) : 0);
 	}
+
+	/// <summary>
+	/// The hidden choice is always the last bodygroup choice (empty mesh).
+	/// </summary>
+	static int HiddenChoice( Model model, string name ) =>
+		model?.Parts?.All?.FirstOrDefault( x => x.Name.Equals( name, StringComparison.OrdinalIgnoreCase ) )?.Choices?.Count - 1 ?? 1;
+
 
 	IEnumerable<Entry> GetSerializedEntities()
 	{
-		foreach ( var c in Clothing.OrderBy( x => x.Clothing?.ResourceId ).ThenBy( x => x.ItemDefinitionId ) )
+		foreach ( var c in Clothing.OrderBy( x => x.Clothing?.ResourcePath ).ThenBy( x => x.ItemDefinitionId ) )
 		{
 			yield return Entry.From( c );
 		}
@@ -239,6 +246,14 @@ public partial class ClothingContainer
 			Age,
 			Tint,
 			PrefersHuman,
+			EyeColor,
+			EyeAlign,
+			NeckSize,
+			WaistSize,
+			ChestSize,
+			HeadShape,
+			NoseSize,
+			ChinSize,
 		};
 
 		var options = new JsonSerializerOptions( JsonSerializerOptions.Default ) { DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull };
@@ -251,6 +266,14 @@ public partial class ClothingContainer
 	public void Deserialize( string json )
 	{
 		Clothing.Clear();
+		NeckSize = AvatarDefaults.NeckSize;
+		WaistSize = AvatarDefaults.WaistSize;
+		ChestSize = AvatarDefaults.ChestSize;
+		HeadShape = AvatarDefaults.HeadShape;
+		NoseSize = AvatarDefaults.NoseSize;
+		ChinSize = AvatarDefaults.ChinSize;
+		EyeColor = AvatarDefaults.EyeColor;
+		EyeAlign = AvatarDefaults.EyeAlign;
 
 		if ( string.IsNullOrWhiteSpace( json ) )
 			return;
@@ -271,7 +294,16 @@ public partial class ClothingContainer
 				DisplayName = (string)(jso["DisplayName"]);
 				Age = (float)(jso["Age"] ?? 0.0f);
 				Tint = (float)(jso["Tint"] ?? 0.0f);
+				EyeColor = (float)(jso["EyeColor"] ?? AvatarDefaults.EyeColor);
+				EyeAlign = (float)(jso["EyeAlign"] ?? AvatarDefaults.EyeAlign);
 				PrefersHuman = (bool)(jso["PrefersHuman"] ?? false);
+
+				NeckSize = (float)(jso["NeckSize"] ?? AvatarDefaults.NeckSize);
+				WaistSize = (float)(jso["WaistSize"] ?? AvatarDefaults.WaistSize);
+				ChestSize = (float)(jso["ChestSize"] ?? AvatarDefaults.ChestSize);
+				HeadShape = (float)(jso["HeadShape"] ?? AvatarDefaults.HeadShape);
+				NoseSize = (float)(jso["NoseSize"] ?? AvatarDefaults.NoseSize);
+				ChinSize = (float)(jso["ChinSize"] ?? AvatarDefaults.ChinSize);
 			}
 		}
 		catch ( System.Exception e )
@@ -297,7 +329,12 @@ public partial class ClothingContainer
 			}
 			else
 			{
-				add.Clothing = ResourceLibrary.Get<Clothing>( entry.Id );
+				// Try new path-based format first, then fall back to legacy int id for old saved avatars
+#pragma warning disable CS0618, CS0612 // Type or member is obsolete
+				add.Clothing = !string.IsNullOrEmpty( entry.Path )
+					? Game.Resources.Get<Clothing>( entry.Path )
+					: Game.Resources.Get<Clothing>( entry.LegacyId );
+#pragma warning restore CS0618, CS0612 // Type or member is obsolete
 				if ( add.Clothing == null ) continue;
 			}
 
@@ -309,13 +346,21 @@ public partial class ClothingContainer
 	/// <summary>
 	/// Used for serialization
 	/// </summary>
-	public class Entry
+	internal class Entry
 	{
 		/// <summary>
-		/// The resource id of this item. This means it's on disk somewhere.
+		/// The resource path of this item. This means it's on disk somewhere.
+		/// </summary>
+		[JsonPropertyName( "p" ), JsonIgnore( Condition = JsonIgnoreCondition.WhenWritingDefault )]
+		public string Path { get; set; }
+
+		/// <summary>
+		/// Legacy integer resource ID from before path-based serialization.
+		/// Kept for backwards compatibility when reading old saved avatars.
 		/// </summary>
 		[JsonPropertyName( "id" ), JsonIgnore( Condition = JsonIgnoreCondition.WhenWritingDefault )]
-		public int Id { get; set; }
+		[Obsolete]
+		public int LegacyId { get; set; }
 
 		/// <summary>
 		/// The Steam Inventory Item Definition Id. This means we should look up the item from the workshop.
@@ -331,18 +376,18 @@ public partial class ClothingContainer
 
 		internal static Entry From( ClothingEntry c )
 		{
-			var entry = new Entry { Id = c.Clothing?.ResourceId ?? default, Tint = c.Tint };
+			var entry = new Entry { Path = c.Clothing?.ResourcePath, Tint = c.Tint };
 
-			// If we have a itemid, store than instead of the resourceid
+			// If we have a Steam item id, store that instead of the path
 			if ( c.Clothing != null && c.Clothing.SteamItemDefinitionId.HasValue )
 			{
-				entry.Id = default;
+				entry.Path = default;
 				entry.ItemId = c.Clothing.SteamItemDefinitionId.Value;
 			}
 
 			if ( c.ItemDefinitionId != 0 )
 			{
-				entry.Id = default;
+				entry.Path = default;
 				entry.ItemId = c.ItemDefinitionId;
 			}
 
@@ -366,15 +411,83 @@ public partial class ClothingContainer
 	}
 
 	/// <summary>
-	/// Create the container from the local user's setup
+	/// Create the container from the local user's setup, stripped of any unowned items.
 	/// </summary>
 	public static ClothingContainer CreateFromLocalUser()
 	{
-		return CreateFromJson( Avatar.AvatarJson );
+		var container = CreateFromJson( Avatar.AvatarJson );
+		container.RemoveUnownedItems();
+		return container;
+	}
+
+	/// <summary>
+	/// Create the container from a connection's avatar, filtered to only items they are verified to own.
+	/// </summary>
+	public static ClothingContainer CreateFromConnection( Connection connection, bool removeUnowned = true )
+	{
+		var clothing = CreateFromJson( connection.GetUserData( "avatar" ) );
+		if ( removeUnowned )
+		{
+			clothing.RemoveUnownedItems( connection );
+		}
+		return clothing;
+	}
+
+	/// <summary>
+	/// Removes any clothing items that require Steam inventory ownership but the local user doesn't own.
+	/// </summary>
+	public void RemoveUnownedItems()
+	{
+		if ( !Services.Inventory.HasLoaded )
+			return;
+
+		Clothing.RemoveAll( entry =>
+		{
+			if ( entry.Clothing is not null )
+				return !entry.Clothing.HasPermissions();
+
+			if ( entry.ItemDefinitionId != 0 )
+				return !Services.Inventory.HasItem( entry.ItemDefinitionId );
+
+			return false;
+		} );
+	}
+
+	/// <summary>
+	/// Removes clothing items that the given connection is not verified to own.
+	/// Must be called from the host or from the local player, as clients don't have access to other player inventory data.
+	/// </summary>
+	public void RemoveUnownedItems( Connection connection )
+	{
+		if ( connection == Connection.Local )
+		{
+			// Use the local steam inventory for the local player
+			RemoveUnownedItems();
+			return;
+		}
+
+		// Clients don't have this data for remote players, so don't remove anything.
+		if ( !Networking.IsHost )
+			return;
+
+		// Use Connection.HasInventoryItem for remote players
+		Clothing.RemoveAll( entry =>
+		{
+			var defId = entry.ItemDefinitionId != 0
+				? entry.ItemDefinitionId
+				: (entry.Clothing?.SteamItemDefinitionId ?? 0);
+
+			if ( defId == 0 )
+				return false;
+
+			return !connection.HasInventoryItem( defId );
+		} );
 	}
 
 	internal async Task Store( bool active, int slot )
 	{
+		RemoveUnownedItems();
+
 		var json = Serialize();
 
 		try

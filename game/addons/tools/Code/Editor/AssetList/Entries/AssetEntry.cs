@@ -1,41 +1,23 @@
-﻿using System.Globalization;
-using System.IO;
-using System.Text.RegularExpressions;
+﻿using System.IO;
 
 namespace Editor;
 
 public class AssetEntry : IAssetListEntry
 {
 	private readonly Color TypeColor;
-
-	public readonly FileInfo FileInfo;
 	public readonly string TypeName;
+	public FileInfo FileInfo { get; private set; }
 	public Asset Asset { get; private set; }
 
 	public readonly Pixmap IconSmall;
 	public string Name => FileInfo.Name;
-	public string Date => FileInfo.Exists ? GetPrettyDate( FileInfo.LastWriteTime ) : default;
-	public string Size => FileInfo.Exists ? FileInfo.Length.SizeFormat() : default;
+	public DateTime? LastModified => FileInfo.Exists ? FileInfo.LastWriteTime : null;
+	public long? Size => FileInfo.Exists ? FileInfo.Length : null;
+
 	public string GetStatusText() => Asset?.AbsolutePath ?? FileInfo.FullName;
 
 	public string AbsolutePath => Asset?.AbsolutePath ?? FileInfo.FullName;
 	public AssetType AssetType => Asset?.AssetType ?? null;
-
-	public static string GetPrettyDate( DateTime timestamp )
-	{
-		// standardised date/time format that keeps the system date format (?)
-		// so it's a bit less ass to read in column view
-
-		CultureInfo culture = CultureInfo.InstalledUICulture;
-
-		string datePattern = culture.DateTimeFormat.ShortDatePattern;
-		datePattern = Regex.Replace( datePattern, @"\b(?<!d)d(?!d)\b", "dd" );
-		datePattern = Regex.Replace( datePattern, @"\b(?<!M)M(?!M)\b", "MM" );
-		datePattern = Regex.Replace( datePattern, @"\b(?<!y)y(?!y)\b", "yy" );
-
-		string timePattern = "hh:mm tt";
-		return timestamp.ToString( $"{datePattern} {timePattern}" );
-	}
 
 	public AssetEntry( Asset asset ) : this( new FileInfo( asset.AbsolutePath ), asset )
 	{
@@ -190,21 +172,21 @@ public class AssetEntry : IAssetListEntry
 
 	public void Rename( string newName )
 	{
-		string compiledPath = Asset?.GetCompiledFile( true );
-		if ( !string.IsNullOrEmpty( compiledPath ) )
-		{
-			var compiled = new FileInfo( compiledPath );
+		string newPath = Path.Combine( Path.GetDirectoryName( Asset.AbsolutePath ), newName.GetFilenameSafe() );
 
-			compiled.MoveTo( compiled.GetNewPath( $"{newName}_c" ) );
-		}
+		EditorUtility.MoveAsset( Asset, newPath );
 
-		FileInfo.MoveTo( FileInfo.GetNewPath( newName ) );
+		FileInfo = new FileInfo( newPath );
 		Asset = AssetSystem.RegisterFile( FileInfo.FullName );
 	}
 
 	public void Duplicate( string newName = null )
 	{
-		FileInfo.CopyTo( FileInfo.GetNewPath( newName ?? FileInfo.GetDefaultDuplicateName() ) );
+		var path = FileInfo.GetNewPath( newName ?? FileInfo.GetDefaultDuplicateName() );
+		if ( Asset is not null )
+			EditorUtility.CopyAsset( Asset, path, overwrite: false, rebuildFromSource: true );
+		else
+			FileInfo.CopyTo( path );
 	}
 
 	public bool OnDoubleClicked( AssetList list )

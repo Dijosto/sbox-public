@@ -1,4 +1,5 @@
-﻿using System.Diagnostics.Tracing;
+﻿using System.Collections.Frozen;
+using System.Diagnostics.Tracing;
 using System.Threading;
 
 namespace Sandbox.Diagnostics;
@@ -163,24 +164,26 @@ class GCEventListener : EventListener
 
 		switch ( eventData.EventName )
 		{
-			case "GCHeapStats_V1":
-				ProcessHeapStats( eventData );
-				break;
 			case "GCAllocationTick_V4":
 				ProcessAllocationEvent( eventData );
 				break;
 		}
 	}
 
+	// Allocated by this listener's own event dispatch, excluded so they don't pollute the report.
+	private static readonly FrozenSet<string> _selfNoise = new[]
+	{
+		"System.Diagnostics.Tracing.EventWrittenEventArgs",
+		"System.Diagnostics.Tracing.EventSource+MoreEventInfo",
+		"MoreEventInfo",
+	}.ToFrozenSet();
+
 	private void ProcessAllocationEvent( EventWrittenEventArgs eventData )
 	{
 		var tl = eventData.Payload[5] as string;
 
-		//if ( "System.String" == tl ) return;
-		//if ( "System.Diagnostics.StackFrame" == tl ) return;
-		//if ( "System.RuntimeMethodInfoStub" == tl ) return;
-		//if ( "System.Text.StringBuilder" == tl ) return;
-		//if ( "System.Diagnostics.Tracing.EventWrittenEventArgs" == tl ) return;
+		if ( tl is null || _selfNoise.Contains( tl ) )
+			return;
 
 		Stats value = default;
 		_writer.TryGetValue( tl, out value );
@@ -189,17 +192,5 @@ class GCEventListener : EventListener
 		value.Bytes += (ulong)eventData.Payload[3];
 
 		_writer[tl] = value;
-	}
-
-	private void ProcessHeapStats( EventWrittenEventArgs eventData )
-	{
-		//_gen0Size.TrackValue( (ulong)eventData.Payload[0] );
-		//_gen0Promoted.TrackValue( (ulong)eventData.Payload[1] );
-		//_gen1Size.TrackValue( (ulong)eventData.Payload[2] );
-		//_gen1Promoted.TrackValue( (ulong)eventData.Payload[3] );
-		//_gen2Size.TrackValue( (ulong)eventData.Payload[4] );
-		//_gen2Survived.TrackValue( (ulong)eventData.Payload[5] );
-		//_lohSize.TrackValue( (ulong)eventData.Payload[6] );
-		//_lohSurvived.TrackValue( (ulong)eventData.Payload[7] );
 	}
 }

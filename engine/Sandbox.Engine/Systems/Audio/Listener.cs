@@ -1,6 +1,4 @@
-﻿using System.Collections.Concurrent;
-
-namespace Sandbox.Audio;
+﻿namespace Sandbox.Audio;
 
 /// <summary>
 /// Listens for sounds in a scene.
@@ -11,7 +9,6 @@ internal class Listener : IValid, IDisposable
 
 	private static readonly List<Listener> _active = [];
 	private static readonly List<Listener> _removed = [];
-	private static readonly ConcurrentQueue<Listener> _removeQueue = [];
 
 	/// <summary>
 	/// Currently active listeners.
@@ -32,11 +29,6 @@ internal class Listener : IValid, IDisposable
 	/// Direct access to removed listeners list. Use for iteration without allocation.
 	/// </summary>
 	internal static List<Listener> RemovedList => _removed;
-
-	/// <summary>
-	/// For the mixing thread to know which listeners have been removed.
-	/// </summary>
-	public static ConcurrentQueue<Listener> RemoveQueue => _removeQueue;
 
 	private Transform _transform;
 
@@ -63,14 +55,25 @@ internal class Listener : IValid, IDisposable
 	internal Transform MixTransform { get; set; }
 
 	/// <summary>
+	/// How fast the listener moves, for the Doppler shift.
+	/// </summary>
+	internal VelocityTracker Motion;
+
+	/// <summary>
 	/// Listener's world position, where we are listening to sounds from.
 	/// </summary>
 	public Vector3 Position => Transform.Position;
 
 	/// <summary>
-	/// Scene this listener belongs to.
+	/// Weak reference to the scene, so we don't prevent GC of the scene
+	/// when listeners are held in static lists.
 	/// </summary>
-	public readonly Scene Scene;
+	private readonly WeakReference<Scene> _sceneRef;
+
+	/// <summary>
+	/// Scene this listener belongs to. May return null if the scene has been collected.
+	/// </summary>
+	public Scene Scene => _sceneRef is not null && _sceneRef.TryGetTarget( out var scene ) ? scene : null;
 
 	private bool _destroyed;
 
@@ -82,7 +85,7 @@ internal class Listener : IValid, IDisposable
 
 	public Listener( Scene scene )
 	{
-		Scene = scene;
+		_sceneRef = new WeakReference<Scene>( scene );
 
 		_active.Add( this );
 	}
@@ -91,8 +94,6 @@ internal class Listener : IValid, IDisposable
 	{
 		if ( _destroyed )
 			return;
-
-		RemoveQueue.Enqueue( this );
 
 		_removed.Add( this );
 		_active.Remove( this );
@@ -107,24 +108,9 @@ internal class Listener : IValid, IDisposable
 		Dispose();
 	}
 
-	/// <summary>
-	/// Get active sound listener states.
-	/// </summary>
-	public static void GetActive( List<Listener> listeners )
-	{
-		foreach ( var listener in _active )
-		{
-			listener.MixTransform = listener.Transform;
-			listeners.Add( listener );
-		}
-
-		_removed.Clear();
-	}
-
 	public static void Clear()
 	{
 		_active.Clear();
 		_removed.Clear();
-		_removeQueue.Clear();
 	}
 }

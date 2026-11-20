@@ -10,16 +10,9 @@ public sealed class StringBlockItem : PropertyBlockItem<string?>
 	{
 		base.OnPaint();
 
-		if ( Block is IPaintHintBlock hintBlock )
+		foreach ( var hintRange in GetPaintBlocks( Block.TimeRange ) )
 		{
-			foreach ( var hintRange in hintBlock.GetPaintHints( Block.TimeRange ) )
-			{
-				PaintRange( hintRange );
-			}
-		}
-		else
-		{
-			PaintRange( Block.TimeRange );
+			PaintRange( hintRange );
 		}
 	}
 
@@ -27,13 +20,6 @@ public sealed class StringBlockItem : PropertyBlockItem<string?>
 	{
 		if ( Block.GetValue( range.Start ) is not { } value ) return;
 
-		var timeline = Parent.Timeline;
-
-		var origin = timeline.TimeToPixels( Block.TimeRange.Start );
-		var left = timeline.TimeToPixels( range.Start ) - origin;
-		var right = timeline.TimeToPixels( range.End ) - origin;
-
-		Paint.SetPen( Color.White.WithAlpha( 0.5f ), 12f );
-		Paint.DrawText( new Rect( left, LocalRect.Top, right - left, LocalRect.Height ), value );
+		PaintText( GetRect( range ), value );
 	}
 }

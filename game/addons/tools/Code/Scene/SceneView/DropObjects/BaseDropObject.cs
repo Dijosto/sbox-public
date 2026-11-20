@@ -149,12 +149,34 @@ public abstract class BaseDropObject
 		if ( snap )
 		{
 			var spacing = settings.GridSpacing;
-			var localPos = rot.Inverse * pos;
+			var frame = WorkPlane.Current;
+			var basis = WorkPlane.IsActive ? frame.Rotation : rot;
+			var localPos = basis.Inverse * (pos - frame.Position);
 			localPos = localPos.SnapToGrid( spacing, true, true, false );
-			pos = rot * localPos;
+			pos = frame.Position + basis * localPos;
 		}
 
 		return new Transform( pos, rot, Scale );
+	}
+
+	/// <summary>
+	/// Checks whether a local file path matches a registered DropObject extension.
+	/// Does not handle cloud package URLs, only use this for quick validation only (like on hover).
+	/// </summary>
+	public static bool CanCreateDropFor( string path )
+	{
+		if ( string.IsNullOrEmpty( path ) )
+			return false;
+
+		var dropObjs = EditorTypeLibrary.GetTypesWithAttribute<DropObjectAttribute>();
+
+		foreach ( var obj in dropObjs )
+		{
+			if ( obj.Attribute.Extensions.Any( path.EndsWith ) )
+				return true;
+		}
+
+		return false;
 	}
 
 	public static async Task<BaseDropObject> CreateDropFor( string text )

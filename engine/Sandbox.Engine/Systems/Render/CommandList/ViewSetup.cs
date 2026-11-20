@@ -5,8 +5,34 @@
 /// elements of that render. This means you can use most of the camera's
 /// properties, but override some without disturbing the camera itself.
 /// </summary>
+[Expose]
 public struct ViewSetup
 {
+	/// <summary>
+	/// Enables world-space light modulators for this view. Null uses the scene's normal lighting.
+	/// </summary>
+	public bool? EnableLightModulators;
+
+	/// <summary>
+	/// Overrides shader time (g_flTime), in seconds, for this view and its child views.
+	/// Null inherits the parent view's time, or the normal frame time for a top-level view.
+	/// </summary>
+	public float? Time;
+
+	/// <summary>
+	/// Overrides the camera's inclusion tags for this view. Null inherits the camera's filter;
+	/// an empty set includes all tags, subject to exclusions. This does not change the camera.
+	/// When used in a command list, keep the set unchanged while the list can execute.
+	/// </summary>
+	public TagSet RenderTags;
+
+	/// <summary>
+	/// Additional tags to exclude from this view, alongside the camera's existing exclusions.
+	/// Null or an empty set adds no exclusions. This does not change the camera's tags.
+	/// When used in a command list, keep the set unchanged while the list can execute.
+	/// </summary>
+	public TagSet ExcludeTags;
+
 	/// <summary>
 	/// Overrides the camera's position and rotation
 	/// </summary>
@@ -43,6 +69,13 @@ public struct ViewSetup
 	public GradientFogSetup? GradientFog;
 
 	/// <summary>
+	/// Overrides camera-local fog for this view, even when post processing is disabled.
+	/// Null inherits the camera when its post processing is enabled and GradientFog has no explicit override.
+	/// A full-weight setup replaces both legacy gradient and cubemap fog; volumetric fog is separate.
+	/// </summary>
+	public FogSetup? Fog;
+
+	/// <summary>
 	/// If set then the regular scene's ambient light will be multiplied by this
 	/// </summary>
 	public Color? AmbientLightTint;
@@ -75,14 +108,34 @@ public struct ViewSetup
 	public bool? EnablePostprocessing;
 
 	/// <summary>
+	/// Whether UI should be rendered in this view. Null inherits the camera's setting.
+	/// </summary>
+	public bool? EnableUI;
+
+	/// <summary>
+	/// Whether debug drawing is rendered in this view: engine overlays, editor gizmos and the scene's
+	/// debug world. False renders the game only. Null keeps the debug worlds and inherits the camera's
+	/// engine overlay setting.
+	/// </summary>
+	public bool? EnableDebugOverlays;
+
+	/// <summary>
 	/// If you're rendering a subview this will allow the renderer to find the same view again next frame
 	/// </summary>
 	public int ViewHash;
+
+	/// <summary>
+	/// Render as a reflection, which nobody looks at closely: no planar reflections of its own, a depth-only prepass,
+	/// and no contact shadows, volumetric fog, auto exposure or bloom objects. It's unshadowed unless
+	/// <c>r.reflections.shadows</c> is on.
+	/// </summary>
+	internal bool Reflection;
 }
 
 /// <summary>
 /// Setup for defining gradient fog in a view
 /// </summary>
+[Expose]
 public struct GradientFogSetup
 {
 	/// <summary>
@@ -172,6 +225,7 @@ public struct GradientFogSetup
 /// <summary>
 /// Allows special setup for reflections, such as offsetting the reflection plane
 /// </summary>
+[Expose]
 public struct ReflectionSetup
 {
 	/// <summary>
@@ -201,6 +255,7 @@ public struct ReflectionSetup
 /// <summary>
 /// Allows special setup for refraction, such as offsetting the clip plane
 /// </summary>
+[Expose]
 public struct RefractionSetup
 {
 	/// <summary>
@@ -232,6 +287,7 @@ public struct RefractionSetup
 /// elements of that render. This means you can use most of the Renderer's
 /// properties, but override some without disturbing the Renderer itself.
 /// </summary>
+[Expose]
 public struct RendererSetup
 {
 	/// <summary>

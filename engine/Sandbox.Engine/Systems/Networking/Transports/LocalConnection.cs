@@ -1,4 +1,4 @@
-﻿namespace Sandbox.Network;
+namespace Sandbox.Network;
 
 /// <summary>
 /// A mock channel. Allows passing this to RPCs when they're being called locally.
@@ -6,12 +6,11 @@
 internal class LocalConnection : Connection
 {
 	public override string Address => "local";
-	public override string Name => "local";
 	public override bool IsHost => Networking.System?.IsHost ?? true;
 
 	internal override void InternalClose( int closeCode, string closeReason ) { }
 	internal override void InternalRecv( NetworkSystem.MessageHandler handler ) { }
-	internal override void InternalSend( ByteStream stream, NetFlags flags ) { }
+	internal override void InternalSend( NetPacket packet, NetFlags flags ) { }
 
 	public LocalConnection( Guid id )
 	{
@@ -27,40 +26,15 @@ internal class LocalConnection : Connection
 internal class MockConnection : Connection
 {
 	public override string Address => "";
-	public override string Name => $"{Id}";
 	public override bool IsHost => false;
 
 	internal override void InternalClose( int closeCode, string closeReason ) { }
 	internal override void InternalRecv( NetworkSystem.MessageHandler handler ) { }
-	internal override void InternalSend( ByteStream stream, NetFlags flags ) { }
+	internal override void InternalSend( NetPacket packet, NetFlags flags ) { }
 
-	internal override void SendRawMessage( ByteStream stream, NetFlags flags = NetFlags.Reliable )
-	{
-		// If we're a mock connection - we don't have a direct connection. We're probably
-		// on a dedicated server, so let's route through the host.
+	// No transport of our own, everything goes through the host
+	internal override bool RoutesThroughHost => true;
 
-		var availableHost = Host;
-
-		if ( availableHost is null or MockConnection )
-		{
-			if ( Networking.Debug )
-			{
-				Log.Warning( "MockConnection.SendRawMessage: no available host to route through!" );
-			}
-
-			return;
-		}
-
-		var wrapper = new TargetedMessage
-		{
-			SenderId = Local.Id,
-			TargetId = Id,
-			Message = stream.ToArray(),
-			Flags = (byte)flags
-		};
-
-		availableHost.SendMessage( wrapper, flags );
-	}
 
 	public MockConnection( Guid id )
 	{

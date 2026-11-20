@@ -1,12 +1,60 @@
-using System.Collections.Concurrent;
+using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 
 namespace Sandbox.Rendering;
 
 public sealed partial class CommandList
 {
-	public unsafe class AttributeAccess
+	RenderAttributes drawAttributes;
+	AttributeAccess drawAttributeAccess;
+
+	/// <summary>Starts a private attribute set for one draw, inheriting the caller's attributes at playback.</summary>
+	internal unsafe AttributeAccess BeginDrawAttributes()
 	{
-		private readonly ConcurrentDictionary<string, RenderTarget> _renderTargets = new();
+		drawAttributes ??= new();
+		drawAttributeAccess ??= new( this, () => drawAttributes );
+		static void Execute( ref Entry entry, CommandList list )
+		{
+			list.drawAttributes.Clear( false );
+			Graphics.Attributes.MergeTo( list.drawAttributes );
+		}
+		AddEntry( &Execute, default );
+		return drawAttributeAccess;
+	}
+
+	internal unsafe void DrawQuad( Rect rect, Material material, Color color, AttributeAccess attributes )
+	{
+		static void Execute( ref Entry entry, CommandList list )
+		{
+			Graphics.DrawQuad( new Rect( entry.Data1.x, entry.Data1.y, entry.Data1.z, entry.Data1.w ),
+				(Material)entry.Object1, new Color( entry.Data2.x, entry.Data2.y, entry.Data2.z, entry.Data2.w ),
+				((AttributeAccess)entry.Object2)._get() );
+		}
+		AddEntry( &Execute, new Entry
+		{
+			Data1 = new Vector4( rect.Left, rect.Top, rect.Width, rect.Height ),
+			Data2 = new Vector4( color.r, color.g, color.b, color.a ),
+			Object1 = material,
+			Object2 = attributes
+		} );
+	}
+
+	internal unsafe void DrawIndexedInstanced( GpuBuffer indices, Material material, int count, AttributeAccess attributes )
+	{
+		static void Execute( ref Entry entry, CommandList list )
+		{
+			Graphics.DrawIndexedInstanced( (GpuBuffer)entry.Object1, (Material)entry.Object2, entry.Count,
+				((AttributeAccess)entry.Object3)._get() );
+		}
+		AddEntry( &Execute, new Entry { Object1 = indices, Object2 = material, Object3 = attributes, Count = count } );
+	}
+
+	public unsafe partial class AttributeAccess
+	{
+		// Writes (Grab*Texture) and the clear (Reset) happen under the owning CommandList's _lock,
+		// so they're already serialized. GetRenderTarget is the only access not already under that
+		// lock, so it takes it explicitly - see below.
+		private readonly Dictionary<string, RenderTarget> _renderTargets = new();
 
 		internal Func<RenderAttributes> _get;
 		internal CommandList list;
@@ -17,6 +65,16 @@ public sealed partial class CommandList
 		{
 			list = cmdlist;
 			_get = _getter;
+		}
+
+		public void Clear()
+		{
+			static void Execute( ref Entry entry, CommandList commandList )
+			{
+				var attrAccess = (AttributeAccess)entry.Object1;
+				attrAccess.attributes.Clear();
+			}
+			list.AddEntry( &Execute, new Entry { Object1 = this } );
 		}
 
 		public void Set( StringToken token, float f )
@@ -86,9 +144,11 @@ public sealed partial class CommandList
 			static void Execute( ref Entry entry, CommandList commandList )
 			{
 				var attrAccess = (AttributeAccess)entry.Object4;
-				attrAccess.attributes.Set( entry.Token, (Matrix)entry.Object2 );
+				attrAccess.attributes.Set( entry.Token, Unsafe.As<Vector4, Matrix>( ref entry.Data1 ) );
 			}
-			list.AddEntry( &Execute, new Entry { Token = token, Object2 = matrix, Object4 = this } );
+			var e = new Entry { Token = token, Object4 = this };
+			Unsafe.As<Vector4, Matrix>( ref e.Data1 ) = matrix;
+			list.AddEntry( &Execute, e );
 		}
 
 		public void Set( StringToken token, GpuBuffer buffer )
@@ -146,9 +206,19 @@ public sealed partial class CommandList
 			static void Execute( ref Entry entry, CommandList commandList )
 			{
 				var attrAccess = (AttributeAccess)entry.Object4;
-				attrAccess.attributes.SetComboEnum( entry.Token, (T)entry.Object2 );
+				attrAccess.attributes.SetCombo( entry.Token, (int)entry.Data1.x );
 			}
-			list.AddEntry( &Execute, new Entry { Token = token, Object2 = t, Object4 = this } );
+			// Store the enum as its integer value in Data1.x to avoid boxing into Object2.
+			// SetCombo(int) and SetComboEnum<T> both ultimately call SetComboValue(byte),
+			// so the GPU behaviour is identical.
+			var intValue = Unsafe.SizeOf<T>() switch
+			{
+				1 => Unsafe.As<T, byte>( ref t ),
+				2 => (int)Unsafe.As<T, short>( ref t ),
+				8 => (int)Unsafe.As<T, long>( ref t ),
+				_ => Unsafe.As<T, int>( ref t )
+			};
+			list.AddEntry( &Execute, new Entry { Token = token, Object4 = this, Data1 = new Vector4( intValue, 0, 0, 0 ) } );
 		}
 
 		public void SetData<T>( StringToken token, T data ) where T : unmanaged
@@ -156,9 +226,9 @@ public sealed partial class CommandList
 			static void Execute( ref Entry entry, CommandList commandList )
 			{
 				var attrAccess = (AttributeAccess)entry.Object4;
-				attrAccess.attributes.SetData( entry.Token, (T)entry.Object2 );
+				attrAccess.attributes.SetData( entry.Token, commandList.ReadPayload<T>( entry ) );
 			}
-			list.AddEntry( &Execute, new Entry { Token = token, Object2 = data, Object4 = this } );
+			list.AddEntry( &Execute, new Entry { Token = token, Object4 = this }, data );
 		}
 
 		/// <summary>
@@ -173,7 +243,10 @@ public sealed partial class CommandList
 						static void Execute( ref Entry entry, CommandList commandList )
 						{
 							var attrAccess = (AttributeAccess)entry.Object4;
-							attrAccess.attributes.Set( entry.Token, Graphics.SceneLayer.GetColorTarget() );
+
+							var handle = Graphics.GetColorTarget( out var owned );
+							attrAccess.attributes.Set( entry.Token, handle );
+							if ( owned && !handle.IsNull ) handle.DestroyStrongHandle();
 						}
 						list.AddEntry( &Execute, new Entry { Token = token, Object4 = this } );
 					}
@@ -184,7 +257,10 @@ public sealed partial class CommandList
 						static void Execute( ref Entry entry, CommandList commandList )
 						{
 							var attrAccess = (AttributeAccess)entry.Object4;
-							attrAccess.attributes.Set( entry.Token, Graphics.SceneLayer.GetDepthTarget() );
+
+							var handle = Graphics.GetDepthTarget( out var owned );
+							attrAccess.attributes.Set( entry.Token, handle );
+							if ( owned && !handle.IsNull ) handle.DestroyStrongHandle();
 						}
 						list.AddEntry( &Execute, new Entry { Token = token, Object4 = this } );
 					}
@@ -216,8 +292,29 @@ public sealed partial class CommandList
 					return;
 				}
 
+				// GetTemporary caps the mips a small target asks for, so a mip past the last one binds the last one
 				var attrAccess = (AttributeAccess)entry.Object4;
-				attrAccess.attributes.Set( entry.Token, target.ColorTarget, (int)entry.Data1.x );
+				attrAccess.attributes.Set( entry.Token, target.ColorTarget, Math.Min( (int)entry.Data1.x, target.ColorTarget.Mips - 1 ) );
+			}
+
+			list.AddEntry( &Execute, new Entry { Token = token, Object5 = buffer.Name, Object4 = this, Data1 = new Vector4( mip, 0, 0, 0 ) } );
+		}
+
+		/// <summary>
+		/// Set the depth texture from this named render target to this attribute
+		/// </summary>
+		public void Set( StringToken token, RenderTargetHandle.DepthTextureRef buffer, int mip = -1 )
+		{
+			static void Execute( ref Entry entry, CommandList commandList )
+			{
+				if ( commandList.state.GetRenderTarget( (string)entry.Object5 ) is not { } target )
+				{
+					Log.Warning( $"[{commandList.DebugName ?? "CommandList"}] Unknown rt: {(string)entry.Object5}" );
+					return;
+				}
+
+				var attrAccess = (AttributeAccess)entry.Object4;
+				attrAccess.attributes.Set( entry.Token, target.DepthTarget, (int)entry.Data1.x );
 			}
 
 			list.AddEntry( &Execute, new Entry { Token = token, Object5 = buffer.Name, Object4 = this, Data1 = new Vector4( mip, 0, 0, 0 ) } );
@@ -277,19 +374,45 @@ public sealed partial class CommandList
 		/// <summary>
 		/// Takes a copy of the current viewport's color texture and stores it in targetName on renderAttributes.
 		/// </summary>
-		public RenderTargetHandle GrabFrameTexture( string token, Graphics.DownsampleMethod downsampleMethod )
+		public RenderTargetHandle GrabFrameTexture( string token, Graphics.DownsampleMethod downsampleMethod, int maxMips = 0 )
+		{
+			return GrabFrameTexture( token, downsampleMethod, maxMips, out _ );
+		}
+
+		/// <summary>
+		/// Takes a copy of the current viewport's color texture, like <see cref="GrabFrameTexture(string, Graphics.DownsampleMethod, int)"/>,
+		/// and outputs the recorded command for <see cref="RaiseGrabFrameTextureMips"/>.
+		/// </summary>
+		internal RenderTargetHandle GrabFrameTexture( string token, Graphics.DownsampleMethod downsampleMethod, int maxMips, out int entry )
 		{
 			static void Execute( ref Entry entry, CommandList commandList )
 			{
 				var attrAccess = (AttributeAccess)entry.Object2;
-				var temp = Graphics.GrabFrameTexture( (string)entry.Object5, attrAccess.attributes, (Graphics.DownsampleMethod)(int)entry.Data1.x );
+				var temp = Graphics.GrabFrameTexture( (string)entry.Object5, attrAccess.attributes, (Graphics.DownsampleMethod)(int)entry.Data1.x, (int)entry.Data1.y );
 				commandList.state.renderTargets[(string)entry.Object5] = temp;
 				attrAccess._renderTargets[(string)entry.Object5] = temp;
 			}
 
-			list.AddEntry( &Execute, new Entry { Object5 = token, Object2 = this, Data1 = new Vector4( (int)downsampleMethod, 0, 0, 0 ) } );
+			lock ( list._lock )
+			{
+				entry = list._entries.Count;
+				list.AddEntry( &Execute, new Entry { Object5 = token, Object2 = this, Data1 = new Vector4( (int)downsampleMethod, maxMips, 0, 0 ) } );
+			}
 
 			return new RenderTargetHandle { Name = token };
+		}
+
+		/// <summary>
+		/// Lets a grab recorded by <see cref="GrabFrameTexture(string, Graphics.DownsampleMethod, int, out int)"/> generate at least
+		/// <paramref name="mips"/> mips, for later draws that sample it more deeply.
+		/// </summary>
+		internal void RaiseGrabFrameTextureMips( int entry, int mips )
+		{
+			lock ( list._lock )
+			{
+				ref var grab = ref CollectionsMarshal.AsSpan( list._entries )[entry];
+				grab.Data1.y = Math.Max( grab.Data1.y, mips );
+			}
 		}
 
 		/// <summary>
@@ -315,13 +438,18 @@ public sealed partial class CommandList
 		/// </summary>
 		public RenderTarget GetRenderTarget( string name )
 		{
-			if ( _renderTargets.TryGetValue( name, out var rt ) )
-				return rt;
-			return null;
+			// Serialize against execute-thread writes / Reset clears, which hold the CommandList's _lock.
+			lock ( list._lock )
+			{
+				if ( _renderTargets.TryGetValue( name, out var rt ) )
+					return rt;
+				return null;
+			}
 		}
 
 		internal void ClearRenderTargets()
 		{
+			// Caller (Reset) already holds the CommandList's _lock.
 			_renderTargets.Clear();
 		}
 	}
@@ -330,7 +458,8 @@ public sealed partial class CommandList
 	/// These are the attributes for the current view. Setting a variable here will let you pass it down to
 	/// other places in the render pipeline.
 	/// </summary>
-	public AttributeAccess GlobalAttributes { get; private set; }
+	[Obsolete( "Global/frame attributes are deprecated. Use a local Attributes set or pipeline texture slots instead." )]
+	public AttributeAccess GlobalAttributes => Attributes;
 
 	/// <summary>
 	/// Access to the local attributes. What these are depends on where the command list is being called.
@@ -338,7 +467,6 @@ public sealed partial class CommandList
 	/// </summary>
 	public AttributeAccess Attributes { get; private set; }
 
-	RenderAttributes GetFrameAttributes() => Graphics.FrameAttributes;
 	RenderAttributes GetLocalAttributes() => Graphics.Attributes;
 
 }
@@ -360,6 +488,30 @@ public enum RenderValue
 	/// Will set the named combo to 1 if MSAA is active, otherwise 0.
 	/// </summary>
 	MsaaCombo,
+}
+
+/// <summary>
+/// Bindless texture slots within each view's pipeline texture range. AO/SSR producers publish
+/// into their view's range; consumers use its PipelineTextureOffset to read the same slots.
+/// New ranges start at index 0 ("none"), so skipped producers cannot inherit another view's results.
+/// Values must match the <c>PipelineTextureSlot</c> enum in common/classes/Bindless.hlsl and fit
+/// CSceneSystem's per-view stride.
+/// </summary>
+internal enum PipelineTextureSlot
+{
+	/// <summary>
+	/// Screen-space ambient occlusion. When no AO is produced for this view the slot stays at index 0,
+	/// which consumers treat as disabled (no occlusion).
+	/// </summary>
+	AmbientOcclusion = 0,
+
+	/// <summary>
+	/// Dynamic reflections / screen-space reflections. When none is produced for this view the slot stays
+	/// at index 0, which consumers treat as disabled (no reflections).
+	/// </summary>
+	Reflections = 1,
+
+	Count
 }
 
 

@@ -1,4 +1,5 @@
 ﻿using Sandbox.Internal;
+using Sandbox.UI;
 using Sandbox.Utility;
 
 namespace Sandbox;
@@ -26,6 +27,30 @@ public partial class Scene : GameObject
 	internal HashSetEx<Component> updateComponents = new();
 	internal HashSetEx<Component> fixedUpdateComponents = new();
 	internal HashSetEx<Component> preRenderComponents = new();
+
+	// Per-type cache: maps a concrete type to the flat array of all indexable types
+	// (the type itself + base types up to the stop types, plus all their interfaces).
+	// Avoids repeated Type.GetInterfaces() allocations on every Add/Remove.
+	// ReflectionCache is IHotloadManaged and clears itself automatically after a hotload.
+	static readonly ReflectionCache<Type, Type[]> indexableTypesCache = new( rootType =>
+	{
+		var types = new List<Type>();
+		var t = rootType;
+		while ( t is not null )
+		{
+			if ( t == typeof( object ) ) break;
+			if ( t == typeof( Component ) ) break;
+			if ( t == typeof( GameObjectSystem ) ) break;
+			if ( t == typeof( Panel ) ) break;
+			if ( t == typeof( Label ) ) break;
+
+			types.Add( t );
+			types.AddRange( t.GetInterfaces() );
+
+			t = t.BaseType;
+		}
+		return types.ToArray();
+	} );
 
 	/// <summary>
 	/// Should only be called when destroying the scene. This here just to avoid unregistering
@@ -84,23 +109,9 @@ public partial class Scene : GameObject
 	{
 		if ( !objectsInIndex.Add( obj ) ) return;
 
-		var t = obj.GetType();
-		while ( t is not null )
+		foreach ( var t in indexableTypesCache[obj.GetType()] )
 		{
-			// We stop short of adding these base types because right now they
-			// have no value. I can see a use in the future for getting all components.
-			if ( t == typeof( object ) ) break;
-			if ( t == typeof( Component ) ) break;
-			if ( t == typeof( GameObjectSystem ) ) break;
-
 			objectIndex.GetOrCreate( t ).Add( obj );
-
-			foreach ( var i in t.GetInterfaces() )
-			{
-				objectIndex.GetOrCreate( i ).Add( obj );
-			}
-
-			t = t.BaseType;
 		}
 
 		// little bit of magic for components
@@ -119,21 +130,9 @@ public partial class Scene : GameObject
 	{
 		if ( !objectsInIndex.Remove( obj ) ) return;
 
-		var t = obj.GetType();
-		while ( t is not null )
+		foreach ( var t in indexableTypesCache[obj.GetType()] )
 		{
-			if ( t == typeof( object ) ) break;
-			if ( t == typeof( Component ) ) break;
-			if ( t == typeof( GameObjectSystem ) ) break;
-
 			objectIndex.GetOrCreate( t ).Remove( obj );
-
-			foreach ( var i in t.GetInterfaces() )
-			{
-				objectIndex.GetOrCreate( i ).Remove( obj );
-			}
-
-			t = t.BaseType;
 		}
 
 		// little bit of magic for components
@@ -145,23 +144,24 @@ public partial class Scene : GameObject
 		}
 	}
 
+	// The index set for a type, or null if nothing of that type is registered.
+	internal HashSetEx<object> GetIndexSet( Type type )
+		=> objectIndex.TryGetValue( type, out var set ) && set.Count > 0 ? set : null;
+
 	/// <summary>
 	/// Get all objects of this type. This could be a component or a GameObjectSystem, or other stuff in the future.
 	/// </summary>
+	/// <remarks>
+	/// Allocates once per call. Engine code should prefer <see cref="Query{T}"/> for direct iteration.
+	/// </remarks>
 	[Pure]
-	public IEnumerable<T> GetAll<T>()
-	{
-		if ( !objectIndex.TryGetValue( typeof( T ), out var set ) || set.Count == 0 )
-			yield break;
+	public IEnumerable<T> GetAll<T>() => Query<T>();
 
-		foreach ( var e in set.EnumerateLocked() )
-		{
-			T c = (T)e;
-			if ( c is null ) continue;
-			if ( c is IValid v && !v.IsValid ) continue;
-			yield return c;
-		}
-	}
+	/// <summary>
+	/// Gets all objects of this type as a struct enumerable. Direct <c>foreach</c> iteration is allocation-free.
+	/// </summary>
+	[Pure]
+	internal SceneObjectQuery<T> Query<T>() => new( this );
 
 	/// <summary>
 	/// Get all objects of this type. This could be a component or a GameObjectSystem, or other stuff in the future.
@@ -203,4 +203,86 @@ public partial class Scene : GameObject
 
 		return default;
 	}
+}
+
+/// <summary>
+/// Struct query used by engine code so direct <c>foreach</c> iteration doesn't allocate.
+/// </summary>
+internal readonly struct SceneObjectQuery<T> : IEnumerable<T>
+{
+	private readonly Scene scene;
+
+	public SceneObjectQuery( Scene scene )
+	{
+		this.scene = scene;
+	}
+
+	public SceneObjectEnumerator<T> GetEnumerator() => new( scene );
+	IEnumerator<T> IEnumerable<T>.GetEnumerator() => new SceneObjectEnumerator<T>( scene );
+	System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => new SceneObjectEnumerator<T>( scene );
+}
+
+internal struct SceneObjectEnumerator<T> : IEnumerator<T>
+{
+	private readonly Scene scene;
+	private HashSetEx<object>.LockedEnumerator inner;
+	private bool started;
+	private bool holdsLock;
+	private bool disposed;
+
+	public SceneObjectEnumerator( Scene scene )
+	{
+		this.scene = scene;
+		inner = default;
+		started = false;
+		holdsLock = false;
+		disposed = false;
+		Current = default;
+	}
+
+	public T Current { get; private set; }
+	object System.Collections.IEnumerator.Current => Current;
+
+	public bool MoveNext()
+	{
+		// Looked up here rather than in the constructor so the query stays lazy, like the iterator was.
+		if ( !started )
+		{
+			started = true;
+
+			var set = scene?.GetIndexSet( typeof( T ) );
+			if ( set is null ) return false;
+
+			inner = set.EnumerateLocked().GetEnumerator();
+			holdsLock = true;
+		}
+
+		// Nothing was indexed, so there's no inner enumerator to step. Keeps returning false rather than throwing.
+		if ( !holdsLock )
+			return false;
+
+		while ( inner.MoveNext() )
+		{
+			T c = (T)inner.Current;
+			if ( c is null ) continue;
+			if ( c is IValid v && !v.IsValid ) continue;
+
+			Current = c;
+			return true;
+		}
+
+		Current = default;
+		return false;
+	}
+
+	// foreach disposes even if nothing was enumerated, and a default LockedEnumerator has no set to release.
+	public void Dispose()
+	{
+		if ( disposed ) return;
+
+		disposed = true;
+		if ( holdsLock ) inner.Dispose();
+	}
+
+	public void Reset() => throw new NotSupportedException();
 }

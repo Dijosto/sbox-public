@@ -29,15 +29,26 @@ public class ProjectConfig
 	/// The human readable title, for example "Sandbox", "Counter-Strike"
 	/// </summary>
 	[Display( GroupName = "Setup", Order = -100, Name = "Title", Description = "The human readable title, for example \"Sandbox\", \"Counter - Strike\"" )]
-	[MaxLength( 32 )]
+	[MaxLength( 64 )]
 	[MinLength( 3 )]
 	public string Title { get; set; }
 
 	/// <summary>
-	/// The type of addon. Current valid values are "game"
+	/// The project type can be game, map, menu, tool, library, addon or content.
+	/// Menus load automatically on clients and in editor contexts; tools load only in editor contexts.
 	/// </summary>
 	[Display( GroupName = "Setup", Order = -90, Name = "Addon Type", Description = "Don't change this for christ's sake" )]
 	public string Type { get; set; }
+
+	/// <summary>
+	/// Whether this project type loads in the specified engine environment.
+	/// </summary>
+	internal bool ShouldLoad( bool isEditor, bool isHeadless ) => Type switch
+	{
+		"tool" => isEditor,
+		"menu" => isEditor || !isHeadless,
+		_ => true
+	};
 
 	/// <summary>
 	/// The ident of the org that owns this addon. For example "facepunch", "valve".
@@ -47,12 +58,19 @@ public class ProjectConfig
 	public string Org { get; set; }
 
 	/// <summary>
+	/// Optional organization display name for local packages. Falls back to <see cref="Org"/> when blank.
+	/// Published packages use their organization's title from the backend.
+	/// </summary>
+	[Display( GroupName = "Setup", Order = -100, Name = "Organization Title", Description = "Display name for local packages. Defaults to the organization ident." )]
+	public string OrgTitle { get; set; }
+
+	/// <summary>
 	/// The ident of this addon. For example "sandbox", "cs" or "dm98"
 	/// </summary>
 	[Display( GroupName = "Setup", Order = -100, Name = "Package Ident", Description = "The ident of this addon. A short name with no special characters." )]
 	[MaxLength( 64 )]
 	[MinLength( 2 )]
-	[RegularExpression( @"^[a-z0-9_\-]+$", ErrorMessage = "Lower case letters and underscores, no spaces or other special characters" )]
+	[RegularExpression( @"^[a-z0-9_\-]+$", ErrorMessage = "Lower case letters, numbers, dashes and underscores, no spaces or other special characters" )]
 	public string Ident { get; set; }
 
 	/// <summary>
@@ -82,9 +100,17 @@ public class ProjectConfig
 	public bool IncludeSourceFiles { get; set; }
 
 	/// <summary>
-	/// A list of paths in which to look for extra assets to upload with the addon. Note that compiled asset files are automatically included.
+	/// Paths and wildcard patterns for files to always publish. Matching assets and their dependencies are included
+	/// even when PublishUsedAssetsOnly is enabled. Matching loose files are included unchanged.
 	/// </summary>
 	public string Resources { get; set; }
+
+	/// <summary>
+	/// Publish assets referenced by configured scenes and project settings, assets in the Resources folder at the
+	/// root of each asset directory, explicit Resources patterns, and their dependencies. Code is not scanned.
+	/// Enabled for new games; existing projects continue publishing all assets until they opt in.
+	/// </summary>
+	public bool PublishUsedAssetsOnly { get; set; }
 
 	/// <summary>
 	/// A list of packages that this package depends on. These should be installed alongside this package.
@@ -125,6 +151,12 @@ public class ProjectConfig
 	public bool IsStandaloneOnly { get; set; }
 
 	/// <summary>
+	/// Shared preferences for agent instructions and local editor automation.
+	/// </summary>
+	[Hide]
+	public ProjectAISettings AI { get; set; } = new();
+
+	/// <summary>
 	/// Custom key-value storage for this project.
 	/// </summary>
 	[Hide]
@@ -143,7 +175,9 @@ public class ProjectConfig
 		Ident ??= Directory.Name.ToLower();
 		PackageReferences ??= new List<string>();
 
-		if ( Type == "map" ) Type = "content";
+		// Older map projects were content collections without a launchable asset.
+		if ( Type == "map" && string.IsNullOrWhiteSpace( GetMetaOrDefault<string>( "PrimaryAsset", null ) ) )
+			Type = "content";
 	}
 
 	internal bool Upgrade()

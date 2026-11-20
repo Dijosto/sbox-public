@@ -10,13 +10,28 @@ namespace Sandbox;
 [SkipHotload]
 public class MemberDescription : ISourceLineProvider, IMemberNameProvider, ITitleProvider, ICategoryProvider
 {
+	readonly TypeLibrary library;
 	internal MemberInfo MemberInfo;
 	internal DisplayInfo displayInfo;
 
 	/// <summary>
+	/// Whether this member has a real CLR reflection handle that can be embedded in
+	/// compiled expressions. Logical members must use their virtual reflection accessors.
+	/// </summary>
+	internal bool IsRuntimeMember => MemberInfo?.GetType().Assembly == typeof( Type ).Assembly;
+
+	/// <summary>
 	/// The type that we're a member of
 	/// </summary>
-	public TypeDescription TypeDescription { get; internal set; }
+	public TypeDescription TypeDescription { get; protected set; }
+
+	/// <summary>
+	/// The type that actually defined this member. This may be different from <see cref="TypeDescription"/> if this member is inherited from a base class.
+	/// </summary>
+	public TypeDescription DeclaringType
+	{
+		get => library.GetType( MemberInfo.DeclaringType );
+	}
 
 	/// <summary>
 	/// Unique identifier based on full name
@@ -96,6 +111,9 @@ public class MemberDescription : ISourceLineProvider, IMemberNameProvider, ITitl
 	/// <inheritdoc cref="MethodBase.IsFamily"/>
 	public bool IsFamily { get; protected set; }
 
+	// Inherited members keep the rules of the type that declared them, not of the derived description.
+	internal bool IsDeclaredInDynamicAssembly => DeclaringType?.IsDynamicAssembly == true;
+
 	/// <summary>
 	/// True if we're a method
 	/// </summary>
@@ -128,14 +146,15 @@ public class MemberDescription : ISourceLineProvider, IMemberNameProvider, ITitl
 	string ITitleProvider.Value => Title;
 	string ICategoryProvider.Value => Group;
 
-	internal MemberDescription()
+	internal MemberDescription( TypeLibrary tl )
 	{
+		library = tl;
 	}
 
 	protected void Init( MemberInfo x )
 	{
 		MemberInfo = x;
-		Name = MemberInfo.Name;
+		Name = StringPool.Get( MemberInfo.Name );
 
 		CaptureAttributes( MemberInfo );
 
@@ -257,7 +276,16 @@ public class MemberDescription : ISourceLineProvider, IMemberNameProvider, ITitl
 	/// </summary>
 	public T GetCustomAttribute<T>() where T : System.Attribute
 	{
-		return Attributes?.OfType<T>().FirstOrDefault() ?? null;
+		var attributes = Attributes;
+		if ( attributes is null ) return null;
+
+		foreach ( var attribute in attributes )
+		{
+			if ( attribute is T t )
+				return t;
+		}
+
+		return null;
 	}
 
 	internal virtual void Dispose()

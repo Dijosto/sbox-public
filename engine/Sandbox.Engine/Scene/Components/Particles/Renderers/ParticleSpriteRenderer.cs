@@ -7,7 +7,7 @@ namespace Sandbox;
 /// </summary>
 [Expose]
 [Title( "Particle Sprite Renderer" )]
-[Category( "Particles" )]
+[Category( "Effects" )]
 [Icon( "favorite" )]
 public sealed partial class ParticleSpriteRenderer : ParticleRenderer, Component.ExecuteInEditor, IBatchedParticleSpriteRenderer
 {
@@ -103,16 +103,79 @@ public sealed partial class ParticleSpriteRenderer : ParticleRenderer, Component
 	[Property, Range( 0, 50 )] public float DepthFeather { get; set; } = 0.0f;
 
 	/// <summary>
+	/// Sprites closer to the camera than this are completely invisible.
+	/// </summary>
+	[Group( "Rendering" )]
+	[Property, Range( 0, 64 )] public float CameraFadeNear { get; set; } = 0.0f;
+
+	/// <summary>
+	/// Sprites further from the camera than this are fully opaque. Between this and
+	/// <see cref="CameraFadeNear"/> they fade out. Leave at zero to disable the fade.
+	/// </summary>
+	[Group( "Rendering" )]
+	[Property, Range( 0, 256 )] public float CameraFadeFar { get; set; } = 0.0f;
+
+	/// <summary>
 	/// The strength of the fog effect applied to the sprite. This determines how much the sprite blends with any fog in the scene.
 	/// </summary>
 	[Group( "Rendering" )]
 	[Property, Range( 0, 1 )] public float FogStrength { get; set; } = 1.0f;
 
 	/// <summary>
+	/// Draw the sprite artwork over a refracted background in one pass. Alpha controls the artwork only.
+	/// Requires a normal texture and translucent, non-additive rendering. The captured scene is already lit and fogged.
+	/// </summary>
+	[Property, ToggleGroup( "Refraction" )]
+	public bool Refraction { get; set; }
+
+	/// <summary>
+	/// Tangent-space normal map sampled in linear space. Use the same UV layout as the sprite texture:
+	/// particle sheet sequences, frame blending and rotation are shared with the alpha mask.
+	/// For sprites that change texture between frames, this map is shared by every frame.
+	/// </summary>
+	[Property, ToggleGroup( "Refraction" )]
+	public Texture NormalTexture { get; set; }
+
+	/// <summary>
+	/// Maximum refraction offset in render pixels before the normal is applied. Alpha, depth feathering
+	/// and camera fading affect artwork opacity only, never the refraction.
+	/// Supports constants, random ranges and lifetime curves, like particle alpha.
+	/// Zero leaves the captured background undistorted. Refraction must be disabled to return to ordinary sprite rendering.
+	/// </summary>
+	[Property, ToggleGroup( "Refraction" ), Range( 0, 64 )]
+	public ParticleFloat RefractionStrength { get; set; } = 8.0f;
+
+	/// <summary>
+	/// Whether this renderer can use scene-color refraction with its current blend settings and normal map.
+	/// </summary>
+	internal bool IsRefractive => Refraction && NormalTexture is not null && !Opaque && !Additive;
+
+	/// <summary>
+	/// Supply the normal map to the batch only when this renderer uses refraction.
+	/// </summary>
+	Texture IBatchedParticleSpriteRenderer.RefractionNormalTexture => IsRefractive ? NormalTexture : null;
+
+	/// <summary>
 	/// Aligns the sprite to face its velocity direction.
 	/// </summary>
 	[Property, ToggleGroup( "FaceVelocity" ), Order( 2 )]
 	public bool FaceVelocity { get; set; }
+
+	/// <summary>Draw each particle as a camera-facing ribbon extending behind its velocity, never wider than it is long.</summary>
+	[Property, ToggleGroup( "VelocityStretch" )]
+	public bool VelocityStretch { get; set; }
+
+	/// <summary>Seconds of travel represented by the ribbon's length.</summary>
+	[Property, ToggleGroup( "VelocityStretch" )]
+	public ParticleFloat StretchTime { get; set; } = 0.1f;
+
+	/// <summary>Minimum and maximum ribbon length, in world units before renderer scale.</summary>
+	[Property, ToggleGroup( "VelocityStretch" )]
+	public Vector2 StretchLengthLimits { get; set; } = new( 0, 2000 );
+
+	/// <summary>Time after birth to reach the full ribbon length.</summary>
+	[Property, ToggleGroup( "VelocityStretch" )]
+	public float StretchFadeIn { get; set; }
 
 	/// <summary>
 	/// Offset applied to the rotation when facing velocity.

@@ -35,7 +35,10 @@ public enum SceneRenderLayer
 	/// <summary>
 	/// Overlay - after post processing - without depth (draw over)
 	/// </summary>
-	OverlayWithoutDepth = 30
+	OverlayWithoutDepth = 30,
+
+	ToolOverlay = 40,
+	ToolScreenOverlay = 50
 }
 
 
@@ -49,7 +52,9 @@ internal static class SceneRenderLayerHelper
 	{
 		{ SceneRenderLayer.ViewModel, "viewmodel" },
 		{ SceneRenderLayer.OverlayWithDepth, "OverlayWithDepth" },
-		{ SceneRenderLayer.OverlayWithoutDepth, "OverlayWithoutDepth" }
+		{ SceneRenderLayer.OverlayWithoutDepth, "OverlayWithoutDepth" },
+		{ SceneRenderLayer.ToolOverlay, "ToolOverlay" },
+		{ SceneRenderLayer.ToolScreenOverlay, "ToolScreenOverlay" }
 	};
 }
 
@@ -75,11 +80,15 @@ public partial class SceneObject
 			if ( !SceneRenderLayerHelper.Names.TryGetValue( value, out var layer ) )
 			{
 				native.SetLayerMatchID( null );
+				NotifyChanged( Rendering.SceneObjectChange.Flags );
 				return;
 			}
 
 			_renderLayer = value;
 			native.SetLayerMatchID( layer );
+
+			// The layers that take it changed, as a flag changing does
+			NotifyChanged( Rendering.SceneObjectChange.Flags );
 		}
 	}
 

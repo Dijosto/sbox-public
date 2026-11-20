@@ -99,11 +99,11 @@ namespace Editor
 		/// </summary>
 		float SmoothValue;
 
-		protected override void OnWheel( WheelEvent e )
+		protected override void OnMouseWheel( WheelEvent e )
 		{
 			if ( !SmoothScrolling )
 			{
-				base.OnWheel( e );
+				base.OnMouseWheel( e );
 				return;
 			}
 
@@ -155,6 +155,12 @@ namespace Editor
 		[EditorEvent.Frame]
 		public virtual void ScrollingFrame()
 		{
+			if ( !IsValid )
+				return;
+
+			if ( VerticalScrollbar is not { IsValid: true } )
+				return;
+
 			const float scrollTime = 0.2f;
 
 			//

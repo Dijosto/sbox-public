@@ -18,14 +18,14 @@ public sealed partial class ProjectSequenceTrack( MovieProject project, Guid id,
 	private readonly HashSet<IProjectSequencePropertyTrack> _propertyTracks = new();
 	private bool _tracksInvalid = true;
 
-	public override int Order => -2000;
+	public override int Order => -0x2000_0000;
 
 	public override bool IsEmpty => _blocks.Count == 0;
 	public override IEnumerable<MovieResource> References => _blocks.Select( x => x.Resource ).Distinct();
 
 	public MovieTimeRange TimeRange => _blocks
 		.Select( x => x.TimeRange.End )
-		.DefaultIfEmpty( 0d )
+		.DefaultIfEmpty()
 		.Max();
 
 	public IReadOnlyList<ProjectSequenceBlock> Blocks => _blocks;
@@ -51,6 +51,8 @@ public sealed partial class ProjectSequenceTrack( MovieProject project, Guid id,
 	public void Invalidate()
 	{
 		_tracksInvalid = true;
+
+		Project.InvalidateDuration();
 	}
 
 	public ProjectSequenceBlock AddBlock( MovieTimeRange timeRange, MovieTransform transform, MovieResource resource )
@@ -62,6 +64,9 @@ public sealed partial class ProjectSequenceTrack( MovieProject project, Guid id,
 
 		return block;
 	}
+
+	public ProjectSequenceBlock AddBlock( MovieTime startTime, MovieResource resource ) =>
+		AddBlock( (startTime, startTime + resource.GetDuration()), new MovieTransform( startTime ), resource );
 
 	public void RemoveBlock( ProjectSequenceBlock block )
 	{
@@ -85,7 +90,7 @@ public sealed partial class ProjectSequenceTrack( MovieProject project, Guid id,
 		var resourceGroups = Blocks
 			.GroupBy( x => x.Resource );
 
-		var propertyTrackGenericType = typeof(ProjectSequencePropertyTrack<>);
+		var propertyTrackGenericType = typeof( ProjectSequencePropertyTrack<> );
 
 		foreach ( var group in resourceGroups )
 		{
@@ -151,7 +156,7 @@ file sealed class ProjectSequencePropertyTrack<T> : IProjectSequencePropertyTrac
 		Blocks = [.. blocks];
 	}
 
-	public ICompiledPropertyTrack Compile() => SourceTrack with { Blocks = [..CompileBlocks()] };
+	public ICompiledPropertyTrack Compile() => SourceTrack with { Blocks = [.. CompileBlocks()] };
 
 	private IEnumerable<ICompiledPropertyBlock<T>> CompileBlocks()
 	{

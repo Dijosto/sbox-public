@@ -40,16 +40,22 @@ internal class DedicatedServerConsole
 			width = 80;
 		}
 
+		// On Linux BufferWidth returns 0 rather than throwing when the terminal size is
+		// unknown (detached tmux/screen, unset TERM, a pty with no winsize), which leaves
+		// us with a negative width. Nothing sensible to draw, so skip the status bar.
+		if ( width < 1 ) return;
+
 		var name = string.IsNullOrEmpty( Networking.ServerName ) ? "s&box server" : Networking.ServerName;
-		var maxPlayers = Application.GamePackage?.GetCachedMeta( "MaxPlayers", 32 ) ?? 32;
-		var topLeft = $"{name} ({Connection.All.Count}/{maxPlayers}) [{uptimeString}]";
+		var status = Networking.IsActive ? $"{Connection.All.Count}/{Networking.MaxPlayers}" : "OFFLINE";
+
+		var topLeft = $"{name} ({status}) [{uptimeString}]";
 		var topRight = $"Network {PerformanceStats.Timings.Network.AverageMs( 1 ):0.00}ms";
 
 		var bottomLeft = $"Physics {PerformanceStats.Timings.Physics.AverageMs( 1 ):0.00}ms,";
 		bottomLeft += $" NavMesh {PerformanceStats.Timings.NavMesh.AverageMs( 1 ):0.00}ms,";
 		bottomLeft += $" Animation {PerformanceStats.Timings.Animation.AverageMs( 1 ):0.00}ms";
 
-		var bottomRight = $"Scene {PerformanceStats.Timings.Scene.AverageMs( 60 ):0.00}ms";
+		var bottomRight = $"Update {PerformanceStats.Timings.Update.AverageMs( 60 ):0.00}ms";
 
 		var lineA = topRight.PadLeft( width );
 		lineA = topLeft + ((topLeft.Length < lineA.Length) ? lineA.Substring( topLeft.Length ) : "");

@@ -74,8 +74,8 @@ public class HomeWidget : Widget
 			Sort = _sort;
 
 			{
-				var search = menuRow.Add( new LineEdit() { PlaceholderText = "⌕  Search" }, 2 );
-				search.SetStyles( "border-radius: 3px;" );
+				var search = menuRow.Add( new LineEdit() { PlaceholderText = "⌕  Search" }, 1 );
+				search.SetStyles( $"border: 1px solid {Theme.ButtonBackground.Hex};" );
 				search.TextChanged += _ =>
 				{
 					Filter = search.Value;
@@ -84,7 +84,6 @@ public class HomeWidget : Widget
 				search.Blur();
 			}
 
-			menuRow.AddStretchCell( 1 );
 			//menuRow.Add( new IconButton( "cloud_download" )
 			//{
 			//	OnClick = ProjectDownload.OpenWindow,
@@ -130,6 +129,8 @@ public class HomeWidget : Widget
 			RefreshLocalProjects();
 		}
 
+		// Fill the taskbar jump list so recent projects are there before you open anything.
+		TaskbarJumpList.Refresh();
 	}
 
 	private void RefreshLocalProjects()
@@ -184,14 +185,22 @@ public class HomeWidget : Widget
 		using var suspend = SuspendUpdates.For( this );
 
 		List<Project> sampleProjects = new List<Project>();
-		foreach ( var dir in System.IO.Directory.EnumerateDirectories( "samples/" ) )
+		// An install that never got the content depot has no samples folder at all
+		try
 		{
-			var projFile = System.IO.Directory.EnumerateFiles( dir, "*.sbproj" ).FirstOrDefault();
-			if ( projFile is null ) continue;
-			var project = ProjectList.TryAddFromFile( projFile );
-			if ( project is null ) continue;
+			foreach ( var dir in System.IO.Directory.EnumerateDirectories( "samples/" ) )
+			{
+				var projFile = System.IO.Directory.EnumerateFiles( dir, "*.sbproj" ).FirstOrDefault();
+				if ( projFile is null ) continue;
+				var project = ProjectList.TryAddFromFile( projFile );
+				if ( project is null ) continue;
 
-			sampleProjects.Add( project );
+				sampleProjects.Add( project );
+			}
+		}
+		catch ( Exception e )
+		{
+			Log.Info( $"Couldn't read the samples folder: {e.Message}" );
 		}
 
 		//
@@ -405,8 +414,14 @@ public class HomeWidget : Widget
 
 	public void OpenProject( Project project, string args = null )
 	{
-		ProcessStartInfo info = new ProcessStartInfo( "sbox-dev.exe", $"{Environment.CommandLine} -project \"{project.ConfigFilePath}\" {args ?? ""}" );
-		info.UseShellExecute = true;
+		// LastOpened's already been bumped and saved, so this project is now top of the jump list.
+		TaskbarJumpList.Refresh();
+
+		ProcessStartInfo info = new ProcessStartInfo( NetCore.GetExecutablePath( "sbox-dev" ), $"{Environment.CommandLine} -project \"{project.ConfigFilePath}\" {args ?? ""}" );
+
+		// Only let the shell start it on Windows - on Linux UseShellExecute goes through
+		// xdg-open, which opens the editor in a web browser rather than running it.
+		info.UseShellExecute = OperatingSystem.IsWindows();
 		info.CreateNoWindow = true;
 		info.WorkingDirectory = System.Environment.CurrentDirectory;
 

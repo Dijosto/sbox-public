@@ -1,184 +1,554 @@
-﻿@using Sandbox;
-@using Sandbox.UI;
-@using System;
+﻿@using Sandbox
+@using Sandbox.UI
+@using System
+@using System.Collections.Generic
+@using System.IO
+@using System.Linq
 @namespace MenuProject.Settings
 @inherits Panel
-@page "/settings/storage"
 
 <root class="page-inner">
+	<div class="page-content">
+		<div class="storage-content">
+			@if ( WorkshopKind == CachePage )
+			{
+				@* The cache's page - content games download as they load, apart from the Workshop's. Its sizes counted up as
+				   it's read: what's unused to clear, then what kinds of thing are in it. *@
+				<div class="storage-section">
+					@* Its name's in the bar - what's in it, on the right *@
+					<div class="storage-section-heading end">
+						<div class="storage-heading-side">
+							<label class="storage-secondary">@(IsRefreshing ? $"Scanning… {Files:N0} files" : $"{Files:N0} files · {FormatSize( Size )}")</label>
+							@if ( OldSize > 0 && !ConfirmCleanup )
+							{
+								<Button class="storage-refresh" Icon="auto_delete" Disabled=@(!CanClear) onclick=@RequestCleanup title="@($"Not opened in the last {DaysAgo} days")">@(IsClearing ? "#menu.settings.removing" : $"Clear unused · {FormatSize( OldSize )}")</Button>
+							}
+						</div>
+					</div>
 
-    <div class="page-content">
+					@if ( ConfirmCleanup )
+					{
+						<div class="storage-group storage-confirmation">
+							<div class="storage-recommendation-copy">
+								<label class="storage-heading">Remove @FormatSize( OldSize ) not opened in the last @DaysAgo days?</label>
+								<label class="storage-secondary">It downloads again when it's needed. Saved data isn't touched.</label>
+							</div>
+							<Button class="storage-action" onclick=@CancelCleanup>#menu.common.cancel</Button>
+							<Button class="storage-action storage-destructive" Disabled=@(!CanClear) onclick=@ClearUnused>#menu.settings.remove</Button>
+						</div>
+					}
 
-        <h2>Storage Usage</h2>
+					@* A table (Sandbox.UI.Table) sorted by its headings - biggest first to start with *@
+					<table class="storage-table" columns="30px 1fr 120px" align="left left right" sortcolumn=@sortBy sortdescending=@sortDescending onsort=@Sort>
+						<thead>
+							<tr>
+								<th></th>
+								<th sort="type">Type</th>
+								<th sort="size" sortfirst="descending">Size</th>
+							</tr>
+						</thead>
+						<tbody>
+							@foreach ( var entry in SortedTypes )
+							{
+								<tr>
+									<td><div class="storage-type-icon file-type-@Slug( entry.Key )"><i>@TypeIcon( entry.Key )</i></div></td>
+									<td class="storage-type-name">@TypeTitle( entry.Key )</td>
+									<td class="storage-type-size">@(entry.Value > 0 || !IsRefreshing ? FormatSize( entry.Value ) : "…")</td>
+								</tr>
+							}
+							@if ( Files == 0 && !IsRefreshing )
+							{
+								<div class="storage-empty">
+									<label class="storage-heading">#menu.settings.no_downloaded_content</label>
+									<label class="storage-secondary">#menu.settings.content_will_appear_here_as_you_play</label>
+								</div>
+							}
+						</tbody>
+					</table>
+					<label class="storage-footnote">#menu.settings.this_includes_downloaded_content_only_not_the_s_box</label>
+				</div>
+			}
+			else if ( WorkshopKind is not null )
+			{
+				@* A kind's own page - each of its items, and the way back *@
+				<div class="storage-section">
+					@* Its name's in the bar - what's in it, on the right *@
+					<div class="storage-section-heading end">
+						<label class="storage-secondary">@(WorkshopItems is null ? "…" : $"{ShownItems.Count():N0} items · {FormatSize( ShownItems.Sum( x => x.Size ) )}")</label>
+					</div>
 
-        <div>
+					<table class="storage-table workshop-table @(Selected.Count > 0 ? "selecting" : "")" columns="36px 1fr 100px 130px" align="left left right right">
+						<thead>
+							<tr>
+								<th></th>
+								<th>Item</th>
+								<th>Size</th>
+								<th></th>
+							</tr>
+						</thead>
+						<tbody>
+							@foreach ( var entry in ShownItems )
+							{
+								<tr class="@(Selected.Contains( entry.Item.Id ) ? "selected" : "")" onclick=@(() => ClickItem( entry ))>
+									@* Its picture, a tick box over it on hover - and always while anything's ticked *@
+									<td><div class="workshop-thumb" style="@MenuHelpers.BackgroundImage( entry.Item.Thumb )" onclick=@(( PanelEvent e ) => { e.StopPropagation(); ToggleSelected( entry ); })><div class="workshop-tick"><i>check</i></div></div></td>
+									<td class="storage-type-name workshop-name">@entry.Item.Title</td>
+									<td class="storage-type-size">@FormatSize( entry.Size )</td>
+									<td>
+										@if ( Removed.Contains( entry.Item.Id ) )
+										{
+											<label class="storage-secondary">Gone when you quit</label>
+										}
+										else
+										{
+											<Button class="storage-action workshop-remove" onclick=@(( PanelEvent e ) => { e.StopPropagation(); RemoveWorkshop( entry ); })>@(entry.Subscribed ? "Unsubscribe" : "Remove")</Button>
+										}
+									</td>
+								</tr>
+							}
+							@if ( !ShownItems.Any() )
+							{
+								<div class="storage-empty">
+									<label class="storage-heading">None downloaded</label>
+									<label class="storage-secondary">They show up here as you play them</label>
+								</div>
+							}
+						</tbody>
+					</table>
+					@if ( SelectedItems.Any() )
+					{
+						@* What's ticked, and letting it all go *@
+						<div class="workshop-selection">
+							<label class="storage-secondary">@($"{SelectedItems.Count():N0} selected · {FormatSize( SelectedItems.Sum( x => x.Size ) )}")</label>
+							<Button class="storage-action" onclick=@ClearSelected>#menu.common.cancel</Button>
+							<Button class="storage-action storage-destructive" onclick=@RemoveSelected>@RemoveSelectedLabel</Button>
+						</div>
+					}
+					else
+					{
+						<label class="storage-footnote">Steam keeps these. Removed items are deleted once s&box closes, and download again when you play them.</label>
+					}
+				</div>
+			}
+			else
+			{
+				@* Everything this takes on the device - what's from the Workshop by kind, then the cache *@
+				<div class="storage-overview">
+					<div class="storage-overview-heading">
+						<div class="storage-drive"><i>storage</i></div>
+						<div class="storage-overview-title">
+							<label class="storage-heading">Storage</label>
+							<label class="storage-secondary">Workshop downloads and cached content on this device</label>
+						</div>
+						<div class="storage-total">
+							<label class="storage-value">@FormatSize( WorkshopSize + Size )</label>
+							<label class="storage-secondary">@(IsRefreshing || WorkshopItems is null ? "Counting…" : "Used in all")</label>
+						</div>
+					</div>
 
-            <div class="file-surround">
+					<div class="storage-usage-bar">
+						@foreach ( var kind in WorkshopKinds )
+						{
+							<div class="storage-segment workshop-kind-@Slug( kind )" style="flex-grow: @KindSize( kind );"></div>
+						}
+						<div class="storage-segment cache" style="flex-grow: @Size;"></div>
+					</div>
+					<div class="storage-overview-footer">
+						<div class="storage-legend">
+							@foreach ( var kind in WorkshopKinds )
+							{
+								<div class="storage-legend-entry"><div class="storage-legend-dot workshop-kind-@Slug( kind )"></div><label>@KindTitle( kind )</label><label class="storage-secondary">@(WorkshopItems is null ? "…" : FormatSize( KindSize( kind ) ))</label></div>
+							}
+							<div class="storage-legend-entry"><div class="storage-legend-dot cache"></div><label>Cache</label><label class="storage-secondary">@FormatSize( Size )</label></div>
+						</div>
+						<Button class="storage-refresh" Disabled=@Busy onclick=@TryRefresh>#menu.common.refresh</Button>
+					</div>
+				</div>
 
-                @foreach (var entry in SizeBreakdown.OrderByDescending( x => x.Value ) )
-                {
-                    <div class="file-category file-type-@entry.Key" style="flex-grow: @entry.Value;">
-                        <div class="title">@entry.Key</div>
-                        <div class="size">@entry.Value.FormatBytes()</div>
-                    </div>
-                }
+				@if ( !string.IsNullOrEmpty( ErrorMessage ) )
+				{
+					<div class="storage-error"><i>error_outline</i><label>@ErrorMessage</label></div>
+				}
 
-            </div>
+				@* Each kind from the Workshop, then the cache - click one for its own page *@
+				<table class="storage-table workshop-kinds" columns="30px 1fr 100px 120px 24px" align="left left right right right">
+					<thead>
+						<tr>
+							<th></th>
+							<th>Kind</th>
+							<th>Items</th>
+							<th>Size</th>
+							<th></th>
+						</tr>
+					</thead>
+					<tbody>
+						@foreach ( var kind in WorkshopKinds )
+						{
+							var items = (WorkshopItems ?? []).Where( x => x.Kind == kind ).ToArray();
 
-        </div>
-
-        <column>
-
-            <div class="file-surround">
-
-                <div class="file-category file-type-recent" style="flex-grow: @(1 + (Size - OldSize));">
-                </div>
-
-                @if (OldSize > 1024)
-                {
-                    <div class="file-category file-type-older" style="flex-grow: @OldSize;">
-                    </div>
-                }
-
-            </div>
-
-            <div class="summary">
-
-                <div class="used">
-                    <span>@Size.FormatBytes()</span>
-                    <span>total storage used</span>
-                </div>
-
-                @if (OldSize > 1024)
-                {
-                    <div class="freeable">
-                        <span>@OldSize.FormatBytes()</span>
-                        <span>ready to delete</span>
-                    </div>
-                }
-
-            </div>
-
-        </column>
-
+							<tr class="@(items.Length > 0 ? "" : "none")" onclick=@(() => ShowKind( kind ))>
+								<td><div class="storage-type-icon workshop-kind-@Slug( kind )"><i>@KindIcon( kind )</i></div></td>
+								<td class="storage-type-name">@KindTitle( kind )</td>
+								<td class="storage-type-size">@(WorkshopItems is null ? "…" : items.Length.ToString( "N0" ))</td>
+								<td class="storage-type-size">@(WorkshopItems is null ? "…" : FormatSize( items.Sum( x => x.Size ) ))</td>
+								<td><i class="workshop-chevron">chevron_right</i></td>
+							</tr>
+						}
+						<tr onclick=@(() => ShowKind( CachePage ))>
+							<td><div class="storage-type-icon cache"><i>cached</i></div></td>
+							<td class="storage-type-name">Cache</td>
+							<td class="storage-type-size">@(IsRefreshing && Files == 0 ? "…" : $"{Files:N0} files")</td>
+							<td class="storage-type-size">@(IsRefreshing && Size == 0 ? "…" : FormatSize( Size ))</td>
+							<td><i class="workshop-chevron">chevron_right</i></td>
+						</tr>
+					</tbody>
+				</table>
+				<label class="storage-footnote">Workshop items are kept by Steam. The cache is what games download as they load.</label>
+			}
+		</div>
 	</div>
-
-    <div class="page-footer">
-
-        @if (refreshTask == null || refreshTask.IsCompleted)
-        {
-            <Button Icon="restore" @onclick=@TryRefresh>Refresh</Button>
-        }
-
-        @if (clearTask?.IsCompleted ?? true)
-        {
-            <Button Icon="delete" @onclick=@ClearUnused>Delete Unused</Button>
-        }
-    </div>
-
 </root>
 
 @code
 {
-    /// <summary>
-    /// The default dead period. If a file hasn't been used in this many days assume it's dead
-    /// </summary>
-    const int DaysAgo = 7;
-
-    Task refreshTask;
-    Task clearTask;
-
-    Dictionary<string, long> SizeBreakdown = new Dictionary<string, long>();
-
-    long Files;
-    long Size;
-    long OldSize;
-
-    protected override void OnAfterTreeRender(bool firstTime)
-    {
-        base.OnAfterTreeRender(firstTime);
-
-        if (!firstTime)
-            return;
-
-        TryRefresh();
-    }
-
-    /// <summary>
-    /// Delete everything that hasn't been used for x days, and then refresh
-    /// </summary>
-    async Task ClearUnused()
-    {
-        clearTask = MenuUtility.Storage.FlushAsync(DateTime.Now.AddDays(-DaysAgo));
-        await clearTask;
-        clearTask = null;
-
-        TryRefresh();
-    }
-
-    /// <summary>
-    /// Refresh the file usage (if there isn't already a refresh in progress)
-    /// </summary>
-    void TryRefresh()
-    {
-        if (refreshTask != null && !refreshTask.IsCompleted ) return;
-
-        refreshTask = Refresh();
-    }
-
-    async Task Refresh()
-    {
-        SizeBreakdown.Clear();
-        Files = 0;
-        Size = 0;
-        OldSize = 0;
-
-        DateTime cutoff = DateTime.Now.AddDays(-DaysAgo);
-
-        StateHasChanged();
-
-        var sw = System.Diagnostics.Stopwatch.StartNew();
-
-        foreach (var entry in MenuUtility.Storage.GetStorageFiles())
-        {
-            Files++;
-            Size += entry.Size;
-
-            if (entry.LastAccessed < cutoff)
-                OldSize += entry.Size;
-
-            var type = "Other";
-
-            if (entry.Filename.Contains(".vpk", StringComparison.OrdinalIgnoreCase)) type = "Map";
-            else if (entry.Filename.Contains(".vtex", StringComparison.OrdinalIgnoreCase)) type = "Texture";
-            else if (entry.Filename.Contains(".shader", StringComparison.OrdinalIgnoreCase)) type = "Shader";
-            else if (entry.Filename.Contains(".png", StringComparison.OrdinalIgnoreCase)) type = "Image";
-            else if (entry.Filename.Contains(".jpg", StringComparison.OrdinalIgnoreCase)) type = "Image";
-            else if (entry.Filename.Contains(".gif", StringComparison.OrdinalIgnoreCase)) type = "Image";
-            else if (entry.Filename.Contains(".mp4", StringComparison.OrdinalIgnoreCase)) type = "Video";
-            else if (entry.Filename.Contains(".vmt", StringComparison.OrdinalIgnoreCase)) type = "Material";
-            else if (entry.Filename.Contains(".vmdl", StringComparison.OrdinalIgnoreCase)) type = "Model";
-            else if (entry.Filename.Contains(".vsnd", StringComparison.OrdinalIgnoreCase)) type = "Sound";
-
-            if (type == "Other")
-            {
-             //   type = System.IO.Path.GetExtension( entry.Filename );
-            }
-
-            if (!SizeBreakdown.ContainsKey(type))
-                SizeBreakdown[type] = 0;
-
-            SizeBreakdown[type] += entry.Size;
+	const int DaysAgo = 7;
 
 
-            if (sw.ElapsedMilliseconds > 1 )
-            {
-                sw.Restart();
-                await Task.DelayRealtime( 1 );
-                StateHasChanged();
-            }
-        }
+	string sortBy = "size";
+	bool sortDescending = true;
 
-        StateHasChanged();
-    }
+	void Sort( PanelEvent e )
+	{
+		if ( e.Value is not TableSort sort ) return;
+
+		sortBy = sort.Column;
+		sortDescending = sort.Descending;
+	}
+
+	/// <summary>
+	/// Every kind there is, so the table's all there before anything's counted
+	/// </summary>
+	static readonly string[] AllTypes = ["Textures", "Models", "Sounds", "Maps", "Materials", "Shaders", "Images", "Videos", "Other"];
+
+	/// <summary>
+	/// The types in the table's order - biggest first to start with. While it's counting, each kind there is in a fixed
+	/// order, so the rows fill in rather than jump about; after, just the ones there are, sorted.
+	/// </summary>
+	IEnumerable<KeyValuePair<string, long>> SortedTypes => IsRefreshing
+		? AllTypes.Select( x => new KeyValuePair<string, long>( x, SizeBreakdown.GetValueOrDefault( x ) ) )
+		: sortBy == "type"
+		? (sortDescending ? SizeBreakdown.OrderByDescending( x => TypeTitle( x.Key ) ) : SizeBreakdown.OrderBy( x => TypeTitle( x.Key ) ))
+		: (sortDescending ? SizeBreakdown.OrderByDescending( x => x.Value ) : SizeBreakdown.OrderBy( x => x.Value ));
+
+	Dictionary<string, long> SizeBreakdown = new();
+	bool IsRefreshing = true;
+	bool IsClearing;
+	bool HasSnapshot;
+	bool ConfirmCleanup;
+	DateTime ScanCutoff;
+	string ErrorMessage = "";
+	long Files;
+	long Size;
+	long OldSize;
+	bool Busy => IsRefreshing || IsClearing;
+	bool CanClear => HasSnapshot && !Busy && OldSize > 0 && string.IsNullOrEmpty( ErrorMessage );
+
+	protected override void OnAfterTreeRender( bool firstTime )
+	{
+		base.OnAfterTreeRender( firstTime );
+		if ( !firstTime ) return;
+
+		if ( ReturnKind is { } kind )
+		{
+			ReturnKind = null;
+			ShowKind( kind );
+		}
+
+		_ = Refresh();
+		_ = RefreshWorkshop();
+	}
+
+	/// <summary>
+	/// What's downloaded from the Workshop, biggest first - null while it's asked for
+	/// </summary>
+	WorkshopStorageItem[] WorkshopItems;
+
+	static readonly string[] WorkshopKinds = ["Game", "Map", "Addon"];
+
+	/// <summary>
+	/// The cache's page, beside the Workshop kinds'
+	/// </summary>
+	const string CachePage = "Cache";
+
+	long WorkshopSize => (WorkshopItems ?? []).Sum( x => x.Size );
+
+	long KindSize( string kind ) => (WorkshopItems ?? []).Where( x => x.Kind == kind ).Sum( x => x.Size );
+
+	/// <summary>
+	/// The kind whose items are shown - null for each kind's total
+	/// </summary>
+	string WorkshopKind;
+
+	IEnumerable<WorkshopStorageItem> ShownItems => (WorkshopItems ?? []).Where( x => WorkshopKind is null || x.Kind == WorkshopKind );
+
+	/// <summary>
+	/// Onto a kind's page, or back off it with null - from its top, as a page is
+	/// </summary>
+	void ShowKind( string kind )
+	{
+		WorkshopKind = kind;
+		Selected.Clear();
+
+		// Its name in the bar, and the bar's back to here
+		if ( Ancestors.OfType<SettingsView>().FirstOrDefault() is { } view )
+			view.SubPage = kind is null ? null : new SettingsView.SubPageInfo( KindTitle( kind ), KindIcon( kind ), () => ShowKind( null ) );
+
+		if ( ChildrenCount > 0 ) GetChild( 0 ).ScrollOffset = 0;
+		StateHasChanged();
+	}
+
+	static string KindTitle( string kind ) => kind switch { "Game" => "Games", "Map" => "Maps", CachePage => "Cache", _ => "Addons" };
+
+	static string KindIcon( string kind ) => kind switch { "Game" => "sports_esports", "Map" => "map", CachePage => "cached", _ => "extension" };
+
+	/// <summary>
+	/// Let go this session - Steam deletes them once the game's closed
+	/// </summary>
+	readonly HashSet<ulong> Removed = new();
+
+	async Task RefreshWorkshop()
+	{
+		WorkshopItems = null;
+		StateHasChanged();
+
+		try
+		{
+			WorkshopItems = await MenuUtility.GetWorkshopStorageAsync();
+		}
+		catch ( Exception e )
+		{
+			Log.Warning( e, "Couldn't list Workshop downloads" );
+			WorkshopItems = [];
+		}
+
+		StateHasChanged();
+	}
+
+	/// <summary>
+	/// Its page in the menu - or on the Steam Workshop, if it isn't a package
+	/// </summary>
+	/// <summary>
+	/// Ticked to go - by its picture, then any row while anything is
+	/// </summary>
+	readonly HashSet<ulong> Selected = new();
+
+	IEnumerable<WorkshopStorageItem> SelectedItems => ShownItems.Where( x => Selected.Contains( x.Item.Id ) && !Removed.Contains( x.Item.Id ) );
+
+	string RemoveSelectedLabel => SelectedItems.All( x => x.Subscribed ) ? "Unsubscribe all"
+		: SelectedItems.Any( x => x.Subscribed ) ? "Remove and unsubscribe all" : "Remove all";
+
+	void ToggleSelected( WorkshopStorageItem entry )
+	{
+		if ( Removed.Contains( entry.Item.Id ) ) return;
+		if ( !Selected.Add( entry.Item.Id ) ) Selected.Remove( entry.Item.Id );
+		StateHasChanged();
+	}
+
+	void ClickItem( WorkshopStorageItem entry )
+	{
+		if ( Selected.Count > 0 ) ToggleSelected( entry );
+		else OpenItem( entry );
+	}
+
+	void ClearSelected()
+	{
+		Selected.Clear();
+		StateHasChanged();
+	}
+
+	void RemoveSelected()
+	{
+		foreach ( var entry in SelectedItems.ToArray() )
+		{
+			MenuUtility.RemoveWorkshopDownload( entry );
+			Removed.Add( entry.Item.Id );
+		}
+
+		Selected.Clear();
+		StateHasChanged();
+	}
+
+	void OpenItem( WorkshopStorageItem entry )
+	{
+		if ( entry.Item.KeyValues.GetValueOrDefault( "package" ) is not { Length: > 0 } ident )
+		{
+			MenuUtility.OpenUrl( entry.Item.Url );
+			return;
+		}
+
+		ModalSystem.Instance?.Package( ident );
+
+		// Back from its page comes back here, on this kind - after, as the page going up puts settings away
+		ReturnKind = WorkshopKind;
+	}
+
+	/// <summary>
+	/// The kind to open on when it's come back to from an item's page
+	/// </summary>
+	public static string ReturnKind;
+
+	void RemoveWorkshop( WorkshopStorageItem entry )
+	{
+		MenuUtility.RemoveWorkshopDownload( entry );
+		Removed.Add( entry.Item.Id );
+		StateHasChanged();
+	}
+
+	void RequestCleanup()
+	{
+		if ( !CanClear ) return;
+		ConfirmCleanup = true;
+		StateHasChanged();
+	}
+
+	void CancelCleanup()
+	{
+		ConfirmCleanup = false;
+		StateHasChanged();
+	}
+
+	async Task ClearUnused()
+	{
+		if ( !CanClear || !ConfirmCleanup ) return;
+
+		IsClearing = true;
+		ConfirmCleanup = false;
+		ErrorMessage = "";
+		StateHasChanged();
+
+		try
+		{
+			await MenuUtility.Storage.FlushAsync( ScanCutoff );
+			await Refresh();
+		}
+		catch ( Exception e )
+		{
+			ErrorMessage = $"Couldn't remove unused files: {e.Message}";
+		}
+		finally
+		{
+			IsClearing = false;
+			StateHasChanged();
+		}
+	}
+
+	void TryRefresh()
+	{
+		if ( IsRefreshing || IsClearing ) return;
+		_ = Refresh();
+		_ = RefreshWorkshop();
+	}
+
+	async Task Refresh()
+	{
+		IsRefreshing = true;
+		ConfirmCleanup = false;
+		ErrorMessage = "";
+
+		// Counted up from nothing, shown as it goes
+		SizeBreakdown = new();
+		Files = 0;
+		Size = 0;
+		OldSize = 0;
+		StateHasChanged();
+
+		try
+		{
+			var cutoff = DateTime.Now.AddDays( -DaysAgo );
+			var sw = System.Diagnostics.Stopwatch.StartNew();
+
+			foreach ( var entry in MenuUtility.Storage.GetStorageFiles() )
+			{
+				Files++;
+				Size += entry.Size;
+				if ( entry.LastAccessed < cutoff ) OldSize += entry.Size;
+
+				var type = FileType( entry.Filename );
+				SizeBreakdown[type] = SizeBreakdown.GetValueOrDefault( type ) + entry.Size;
+
+				if ( sw.ElapsedMilliseconds < 16 ) continue;
+				sw.Restart();
+				await Task.DelayRealtime( 1 );
+				StateHasChanged();
+			}
+
+			ScanCutoff = cutoff;
+			HasSnapshot = true;
+		}
+		catch ( Exception e )
+		{
+			ErrorMessage = $"Couldn't read storage: {e.Message}";
+		}
+		finally
+		{
+			IsRefreshing = false;
+			StateHasChanged();
+		}
+	}
+
+	static string FileType( string filename ) => Path.GetExtension( filename ).ToLowerInvariant() switch
+	{
+		".vpk" => "Maps",
+		".vtex" or ".vtex_c" => "Textures",
+		".shader" or ".shader_c" => "Shaders",
+		".png" or ".jpg" or ".jpeg" or ".gif" or ".webp" => "Images",
+		".mp4" or ".webm" => "Videos",
+		".vmt" or ".vmat" or ".vmat_c" => "Materials",
+		".vmdl" or ".vmdl_c" => "Models",
+		".vsnd" or ".vsnd_c" or ".sound" or ".sound_c" => "Sounds",
+		_ => "Other"
+	};
+
+	/// <summary>
+	/// Localized display name for a stable cache bucket identifier.
+	/// </summary>
+	static string TypeTitle( string type ) => Language.GetPhrase( type switch
+	{
+		"Maps" => "menu.maps",
+		"Textures" => "menu.settings.textures",
+		"Shaders" => "menu.settings.shaders",
+		"Images" => "menu.settings.images",
+		"Videos" => "menu.settings.videos",
+		"Materials" => "menu.settings.materials",
+		"Models" => "menu.settings.models",
+		"Sounds" => "menu.settings.sounds",
+		"Other" => "menu.store.other",
+		_ => type
+	} );
+
+	static string Slug( string value ) => value.ToLowerInvariant();
+
+	static string FormatSize( long bytes ) => MenuHelpers.FormatSize( bytes );
+
+	static string TypeIcon( string type ) => type switch
+	{
+		"Textures" => "texture",
+		"Models" => "view_in_ar",
+		"Sounds" => "music_note",
+		"Maps" => "map",
+		"Materials" => "palette",
+		"Images" => "image",
+		"Shaders" => "auto_awesome",
+		"Videos" => "videocam",
+		_ => "folder"
+	};
+
+	/// <summary>
+	/// Rebuild composed text when translations change.
+	/// </summary>
+	public override void LanguageChanged()
+	{
+		base.LanguageChanged();
+		StateHasChanged();
+	}
 }

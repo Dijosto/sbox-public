@@ -11,6 +11,8 @@ public class SceneRenderingWidget : Frame
 	private static readonly HashSet<SceneRenderingWidget> All = new();
 
 	internal SwapChainHandle_t SwapChain;
+	bool renderingStopped;
+	bool renderFailed;
 
 	/// <summary>
 	/// The active scene that we're rendering
@@ -29,6 +31,38 @@ public class SceneRenderingWidget : Frame
 
 	public bool EnableEngineOverlays { get; set; } = false;
 
+	protected override void OnMousePress( MouseEvent e )
+	{
+		QueueGizmoPointerEvent( e, true );
+		base.OnMousePress( e );
+	}
+
+	protected override void OnMouseReleased( MouseEvent e )
+	{
+		QueueGizmoPointerEvent( e, false );
+		base.OnMouseReleased( e );
+	}
+
+	protected override void OnBlur( FocusChangeReason reason )
+	{
+		GizmoInstance.CancelPointerInput();
+		base.OnBlur( reason );
+	}
+
+	void QueueGizmoPointerEvent( MouseEvent e, bool pressed )
+	{
+		if ( !e.LeftMouseButton || GetSceneCamera() is not { } camera ) return;
+		var input = GizmoInstance.Input;
+		input.Camera = camera;
+		input.CursorPosition = e.LocalPosition;
+		input.CursorRay = camera.GetRay( e.LocalPosition, Size );
+		input.Modifiers = e.KeyboardModifiers;
+		input.IsHovered = LocalRect.IsInside( e.LocalPosition );
+		input.LeftMouse = pressed;
+		input.DoubleClick = e.IsDoubleClick;
+		GizmoInstance.QueuePointerEvent( input );
+	}
+
 	// Track if we've locked this widget's size for recording
 	private bool _sizeLockedForRecording;
 	private Vector2 _savedMinSize;
@@ -41,6 +75,12 @@ public class SceneRenderingWidget : Frame
 		SetFlag( Flag.WA_NoSystemBackground, true );
 		SetFlag( Flag.WA_OpaquePaintEvent, true );
 
+		// On Linux/XWayland, Qt's software paint cycle fires on mouse-enter and click
+		// expose events, briefly clearing the native window before the next SwapChain
+		// present and causing a visible flash. Since all rendering goes through the
+		// SwapChain, the Qt paint path serves no purpose and can be suppressed entirely.
+		OnPaintOverride = () => true;
+
 		SwapChain = WidgetUtil.CreateSwapChain( _widget, RenderSettings.Instance.AntiAliasQuality.ToEngine() );
 		RenderSettings.Instance.OnVideoSettingsChanged += HandleVideoChanged;
 
@@ -49,17 +89,42 @@ public class SceneRenderingWidget : Frame
 		All.Add( this );
 	}
 
+	internal override void OnDestroyingLater()
+	{
+		ReleaseSwapChain();
+		base.OnDestroyingLater();
+	}
+
+	internal override void NativeDestroying() => ReleaseSwapChain();
+
+	internal static void ShutdownRendering()
+	{
+		foreach ( var widget in All.ToArray() )
+			widget.ReleaseSwapChain();
+	}
+
+	void ReleaseSwapChain()
+	{
+		if ( renderingStopped ) return;
+		renderingStopped = true;
+
+		if ( GameMode.IsPlayWidget( this ) )
+			GameMode.ClearPlayMode();
+
+		RenderSettings.Instance.OnVideoSettingsChanged -= HandleVideoChanged;
+
+		if ( SwapChain == default ) return;
+		// Finish outstanding rendering while the native window is still alive.
+		g_pRenderDevice.Flush();
+		g_pRenderDevice.ForceFlushGPU( SwapChain );
+		g_pRenderDevice.DestroySwapChain( SwapChain );
+		SwapChain = default;
+	}
+
 	internal override void NativeShutdown()
 	{
 		base.NativeShutdown();
-
 		All.Remove( this );
-		RenderSettings.Instance.OnVideoSettingsChanged -= HandleVideoChanged;
-
-		// The swapchain might still be in use by native, so defer its destruction until the end of the frame.
-		// Otherwise, a race condition could occur where render targets are accessed after destruction, causing a delayed crash.
-		EngineLoop.DisposeAtFrameEnd( new Sandbox.Utility.DisposeAction( () => g_pRenderDevice.DestroySwapChain( SwapChain ) ) );
-		SwapChain = default;
 
 		GizmoInstance?.Dispose();
 		GizmoInstance = default;
@@ -77,6 +142,7 @@ public class SceneRenderingWidget : Frame
 			var go = new GameObject( true, "editor_camera" );
 			go.Flags = GameObjectFlags.Hidden | GameObjectFlags.NotSaved | GameObjectFlags.EditorOnly | GameObjectFlags.Absolute;
 			var camera = go.AddComponent<CameraComponent>();
+			camera.RenderExcludeTags.Add( "hidden" );
 			camera.IsMainCamera = false;
 			camera.IsSceneEditorCamera = true;
 			return camera;
@@ -148,7 +214,12 @@ public class SceneRenderingWidget : Frame
 		var camera = GetSceneCamera();
 		if ( camera is null ) return;
 
+		var component = Camera.IsValid() ? Camera : Scene.Camera;
+		component.UpdateSceneCameraTransform( camera );
+
 		UpdateGizmoInputs( ref GizmoInstance.Input, camera, hasMouseFocus );
+		if ( Gizmo.Active == GizmoInstance )
+			GizmoInstance.RefreshInput();
 	}
 
 	void Render()
@@ -158,16 +229,26 @@ public class SceneRenderingWidget : Frame
 
 		if ( SwapChain == default ) return;
 
-		using ( Scene.Push() )
+		using ( Scene.PushScope() )
 		{
-			using ( GizmoInstance.Push() )
+			UpdateGizmoInputs();
+			using ( GizmoInstance.PushScope() )
 			{
 				PreFrame();
+				Gizmo.Draw.End();
 				RenderScene();
 			}
 		}
 
+		if ( SwapChain == default ) return;
+
+		if ( GameMode.IsPlayWidget( this ) )
+		{
+			CCameraRenderer.RenderOverlay( SwapChain );
+		}
+
 		g_pRenderDevice.Present( SwapChain );
+		renderFailed = false;
 	}
 
 	private void UpdateGizmoInputs( ref Gizmo.Inputs input, SceneCamera camera, bool hasMouseFocus )
@@ -179,6 +260,9 @@ public class SceneRenderingWidget : Frame
 
 		if ( !hasMouseFocus )
 		{
+			GizmoInstance.CancelPointerInput();
+			input.LeftMouse = false;
+			input.RightMouse = false;
 			input.CursorRay = new Ray();
 			return;
 		}
@@ -190,11 +274,6 @@ public class SceneRenderingWidget : Frame
 		input.CursorPosition -= ScreenPosition;
 		input.CursorRay = camera.GetRay( input.CursorPosition, Size );
 
-		if ( !input.IsHovered )
-		{
-			input.LeftMouse = false;
-			input.RightMouse = false;
-		}
 	}
 
 	private SceneCamera GetSceneCamera()
@@ -233,15 +312,16 @@ public class SceneRenderingWidget : Frame
 
 	internal void HandleVideoChanged()
 	{
-		var msaaAmount = RenderSettings.Instance.AntiAliasQuality.ToEngine();
+		if ( renderingStopped ) return;
+		var aa = RenderSettings.Instance.AntiAliasQuality.ToEngine();
 
 		if ( SwapChain == default )
 		{
-			SwapChain = WidgetUtil.CreateSwapChain( _widget, msaaAmount );
+			SwapChain = WidgetUtil.CreateSwapChain( _widget, aa );
 			return;
 		}
 
-		WidgetUtil.UpdateSwapChainMSAA( SwapChain, msaaAmount );
+		WidgetUtil.UpdateSwapChainMSAA( SwapChain, aa );
 	}
 
 	internal static void RenderAll()
@@ -250,7 +330,16 @@ public class SceneRenderingWidget : Frame
 		{
 			if ( !widget.Visible ) continue;
 
-			widget.Render();
+			try
+			{
+				widget.Render();
+			}
+			catch ( Exception e )
+			{
+				if ( widget.renderFailed ) continue;
+				widget.renderFailed = true;
+				Log.Error( e, $"Exception rendering {widget.Scene}" );
+			}
 		}
 	}
 }

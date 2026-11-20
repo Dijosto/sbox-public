@@ -1,19 +1,63 @@
 ﻿using NativeEngine;
 using Sandbox.Engine;
+using System.IO;
 using System.Reflection;
 using System.Runtime.InteropServices;
+using System.Threading;
 using static Sandbox.ResourceLibrary;
 
 namespace Sandbox;
 
-public class ResourceSystem
+public partial class ResourceSystem
 {
+	// Strong references to managed file resources, including uncompiled assets.
 	private Dictionary<int, Resource> ResourceIndex { get; } = new();
+	private Dictionary<ulong, Resource> ResourceIndexLong { get; } = new();
+	private Dictionary<Guid, Resource> GuidIndex { get; } = new();
+
+	// Weak references to native resources (Model, Material, Texture, Shader, etc.) — GC-friendly.
 	private Dictionary<int, WeakReference<Resource>> WeakIndex { get; } = new();
+	private Dictionary<ulong, WeakReference<Resource>> WeakIndexLong { get; } = new();
+	private Dictionary<Guid, WeakReference<Resource>> WeakGuidIndex { get; } = new();
+
+	/// Maps ResourceIdLong → path for all resources that exist on disk.
+	/// Populated at startup without loading anything; used as on-demand load fallback during
+	/// network deserialization when a resource hasn't been loaded on the client yet.
+	private Dictionary<ulong, string> PathIndex { get; } = new();
+
+	// Used to register resources path for use in networking
+	internal void RegisterPath( string path )
+	{
+		path = Resource.FixPath( path );
+		if ( string.IsNullOrEmpty( path ) ) return;
+		PathIndex[path.FastHash64()] = path;
+	}
 
 	internal void Register( Resource resource )
 	{
-		ResourceIndex[resource.ResourceId] = resource;
+		ThreadSafe.AssertIsMainThread();
+
+		if ( !string.IsNullOrEmpty( resource.ResourcePath ) )
+		{
+#pragma warning disable CS0618 // Type or member is obsolete
+			ResourceIndex[resource.ResourceId] = resource;
+#pragma warning restore CS0618 // Type or member is obsolete
+			ResourceIndexLong[resource.ResourceIdLong] = resource;
+		}
+
+		if ( resource.Guid != Guid.Empty )
+		{
+			if ( GuidIndex.TryGetValue( resource.Guid, out var existing )
+			&& !ReferenceEquals( existing, resource )
+			&& resource.ResourceIdLong != existing.ResourceIdLong // Asset.SaveToDisk recreates?
+			&& !existing.IsError )
+			{
+				Log.Warning( $"GUID not unique! Assigning temp new GUID to: {resource.ResourcePath}" );
+				resource.Guid = Guid.NewGuid();
+			}
+
+			GuidIndex[resource.Guid] = resource;
+		}
 
 		if ( resource is GameResource gameResource && !gameResource.IsPromise )
 		{
@@ -26,31 +70,149 @@ public class ResourceSystem
 	/// </summary>
 	internal void RegisterWeak( Resource resource )
 	{
-		WeakIndex[resource.ResourceId] = new WeakReference<Resource>( resource );
+		if ( !string.IsNullOrEmpty( resource.ResourcePath ) )
+		{
+#pragma warning disable CS0618 // Type or member is obsolete
+			WeakIndex[resource.ResourceId] = new WeakReference<Resource>( resource );
+#pragma warning restore CS0618 // Type or member is obsolete
+			WeakIndexLong[resource.ResourceIdLong] = new WeakReference<Resource>( resource );
+		}
+
+		if ( resource.Guid != Guid.Empty )
+		{
+			WeakGuidIndex[resource.Guid] = new WeakReference<Resource>( resource );
+		}
 	}
 
 	internal void Unregister( Resource resource )
 	{
-		// This isn't thread safe
 		ThreadSafe.AssertIsMainThread();
 
-		// Make sure we're unregistering the currently indexed resource
+		// Only remove entries that index this exact resource. A stale instance whose index
+		// entry was replaced (e.g. re-registered under the same path) must not unregister
+		// the live resource when it gets finalized.
+		var removed = RemoveIndexed( ResourceIndexLong, resource.ResourceIdLong, resource );
+		removed |= RemoveIndexedWeak( WeakIndexLong, resource.ResourceIdLong, resource );
 
-		if ( ResourceIndex.TryGetValue( resource.ResourceId, out var existing ) && existing == resource )
-		{
-			// native asset system doesn't support asset removal right now,
-			// so just remove it from the index to ensure we don't retrieve it anymore
+#pragma warning disable CS0618 // Type or member is obsolete
+		removed |= RemoveIndexed( ResourceIndex, resource.ResourceId, resource );
+		removed |= RemoveIndexedWeak( WeakIndex, resource.ResourceId, resource );
+#pragma warning restore CS0618 // Type or member is obsolete
 
-			ResourceIndex.Remove( resource.ResourceId );
-		}
+		removed |= RemoveIndexed( GuidIndex, resource.Guid, resource );
+		removed |= RemoveIndexedWeak( WeakGuidIndex, resource.Guid, resource );
 
-		WeakIndex.Remove( resource.ResourceId );
-
-		if ( resource is GameResource gameResource && !gameResource.IsPromise )
+		if ( removed && resource is GameResource gameResource && !gameResource.IsPromise )
 		{
 			IToolsDll.Current?.RunEvent<IEventListener>( i => i.OnUnregister( gameResource ) );
 		}
 	}
+
+	private static bool RemoveIndexed<TKey>( Dictionary<TKey, Resource> index, TKey key, Resource resource )
+	{
+		if ( !index.TryGetValue( key, out var indexed ) || indexed != resource )
+			return false;
+
+		return index.Remove( key );
+	}
+
+	private static bool RemoveIndexedWeak<TKey>( Dictionary<TKey, WeakReference<Resource>> index, TKey key, Resource resource )
+	{
+		if ( !index.TryGetValue( key, out var weakRef ) )
+			return false;
+
+		if ( !weakRef.TryGetTarget( out var target ) )
+		{
+			// A dead entry can't be this resource - we hold a live reference to it.
+			// Prune it, but it doesn't count as unregistering this resource.
+			index.Remove( key );
+			return false;
+		}
+
+		if ( target != resource )
+			return false;
+
+		return index.Remove( key );
+	}
+
+	/// <summary>
+	/// Update the path of a resource, updating the index and re-registering it.
+	/// </summary>
+	internal void MoveResource( Resource resource, string newPath )
+	{
+		ThreadSafe.AssertIsMainThread();
+
+		newPath = Resource.FixPath( newPath );
+
+		if ( string.Equals( resource.ResourcePath, newPath ) )
+			return; // already known at this path, nothing to do
+
+		ThreadSafe.AssertIsMainThread();
+
+		if ( !string.IsNullOrEmpty( resource.ResourcePath ) )
+		{
+			Log.Info( $"Resource moved: {resource.ResourcePath} -> {newPath} ({resource.Guid})" );
+		}
+
+		var isStrong = ResourceIndexLong.GetValueOrDefault( resource.ResourceIdLong ) == resource;
+		Unregister( resource );
+
+		if ( resource is GameResource gr )
+		{
+			gr.Register( newPath );
+		}
+		else if ( isStrong )
+		{
+			resource.SetResourceIdentity( newPath );
+			Register( resource );
+		}
+		else
+		{
+			resource.RegisterWeakResourceId( newPath );
+		}
+	}
+
+	/// <summary>
+	/// Grant a new GUID to a resource, updating the index.
+	/// </summary>
+	internal void AssignGuid( Resource resource, Guid newGuid )
+	{
+		if ( newGuid == Guid.Empty || newGuid == resource.Guid )
+			return;
+
+		var isStrong = resource is GameResource || ResourceIndexLong.GetValueOrDefault( resource.ResourceIdLong ) == resource;
+		if ( isStrong )
+		{
+			RemoveIndexed( GuidIndex, resource.Guid, resource );
+		}
+		else
+		{
+			RemoveIndexedWeak( WeakGuidIndex, resource.Guid, resource );
+		}
+
+		resource.Guid = newGuid;
+
+		if ( resource.Guid == Guid.Empty )
+			return;
+
+		Resource existing;
+		if ( (GuidIndex.TryGetValue( newGuid, out existing ) || WeakGuidIndex.TryGetValue( newGuid, out var existingRef ) && existingRef.TryGetTarget( out existing ))
+			&& !ReferenceEquals( existing, resource ) )
+		{
+			// this should not happen - it would mean we're not updating an existing instance from whatever path, and instead creating a new one with the same ID.
+			Log.Error( $"GUID collision! ({newGuid}) incoming: {resource.ResourcePath}, existing: {existing.ResourcePath}" );
+		}
+
+		if ( isStrong )
+		{
+			GuidIndex[newGuid] = resource;
+		}
+		else
+		{
+			WeakGuidIndex[resource.Guid] = new WeakReference<Resource>( resource );
+		}
+	}
+
 
 	internal void OnHotload()
 	{
@@ -75,6 +237,12 @@ public class ResourceSystem
 		{
 			WeakIndex.Remove( key );
 		}
+
+		var deadNative = WeakIndexLong.Where( kvp => !kvp.Value.TryGetTarget( out _ ) ).Select( kvp => kvp.Key ).ToList();
+		foreach ( var key in deadNative )
+		{
+			WeakIndexLong.Remove( key );
+		}
 	}
 
 	internal void Clear()
@@ -91,32 +259,24 @@ public class ResourceSystem
 		foreach ( var resource in toDispose )
 		{
 			// Don't wait/rely for finalizer get rid of this immediately
-			resource.Destroy();
+			resource?.Destroy();
 		}
+
+		GuidIndex.Clear();
+		WeakGuidIndex.Clear();
 
 		ResourceIndex.Clear();
 		WeakIndex.Clear();
 
+		ResourceIndexLong.Clear();
+		WeakIndexLong.Clear();
+		PathIndex.Clear();
+
 		TypeCache.Clear();
-	}
 
-	internal Resource Get( System.Type t, int identifier )
-	{
-		if ( ResourceIndex.TryGetValue( identifier, out var resource ) )
-		{
-			if ( resource.GetType().IsAssignableTo( t ) )
-				return resource;
-
-			return null;
-		}
-
-		if ( WeakIndex.TryGetValue( identifier, out var weakRef ) && weakRef.TryGetTarget( out var weakResource ) )
-		{
-			if ( weakResource.GetType().IsAssignableTo( t ) )
-				return weakResource;
-		}
-
-		return null;
+		_referenceInstallCancel.Cancel();
+		_referenceInstallCancel = new();
+		_pendingReferenceInstalls.Clear();
 	}
 
 	/// <summary>
@@ -138,11 +298,52 @@ public class ResourceSystem
 		}
 	}
 
-	internal Resource Get( System.Type t, string filepath )
+	internal Resource Get( System.Type t, ResourceId id )
 	{
-		filepath = Resource.FixPath( filepath );
+		// try to load by GUID first
+		if ( id.Guid is Guid guid && guid != default )
+		{
+			Resource resource;
 
-		return Get( t, filepath.FastHash() );
+			if ( GuidIndex.TryGetValue( guid, out resource ) )
+			{
+				if ( resource.GetType().IsAssignableTo( t ) )
+					return resource;
+
+				return null;
+			}
+
+			if ( WeakGuidIndex.TryGetValue( guid, out var weakRef ) && weakRef.TryGetTarget( out resource ) )
+			{
+				if ( resource.GetType().IsAssignableTo( t ) )
+					return resource;
+
+				return null;
+			}
+		}
+
+		// no GUID match, try to load by path
+		if ( !string.IsNullOrEmpty( id.Path ) )
+		{
+			string filepath = Resource.FixPath( id.Path );
+			ulong identifier = filepath.FastHash64();
+
+			if ( ResourceIndexLong.TryGetValue( identifier, out var resource ) )
+			{
+				if ( resource.GetType().IsAssignableTo( t ) )
+					return resource;
+
+				return null;
+			}
+
+			if ( WeakIndexLong.TryGetValue( identifier, out var weakRef ) && weakRef.TryGetTarget( out var weakResource ) )
+			{
+				if ( weakResource.GetType().IsAssignableTo( t ) )
+					return weakResource;
+			}
+		}
+
+		return null;
 	}
 
 	/// <summary>
@@ -150,6 +351,7 @@ public class ResourceSystem
 	/// </summary>
 	/// <typeparam name="T">Resource type to get.</typeparam>
 	/// <param name="identifier">Resource hash to look up.</param>
+	[Obsolete( "Use Get<T>(path) instead. Identifier based access will be removed in a future update." )]
 	public T Get<T>( int identifier ) where T : Resource
 	{
 		if ( ResourceIndex.TryGetValue( identifier, out var resource ) )
@@ -161,6 +363,39 @@ public class ResourceSystem
 		return default;
 	}
 
+	// Internal use only — do not expose ulong IDs publicly.
+	internal T GetByIdLong<T>( ulong idLong ) where T : Resource
+	{
+		if ( ResourceIndexLong.TryGetValue( idLong, out var resource ) )
+			return resource as T;
+
+		if ( WeakIndexLong.TryGetValue( idLong, out var weakRef ) && weakRef.TryGetTarget( out var weakResource ) )
+			return weakResource as T;
+
+		return default;
+	}
+
+	/// <summary>
+	/// Get a cached resource by GUID.
+	/// </summary>
+	/// <typeparam name="T">Resource type to get.</typeparam>
+	/// <param name="id">GUID of the resource.</param>
+	public T Get<T>( Guid id ) where T : Resource
+	{
+		if ( GuidIndex.TryGetValue( id, out var resource ) )
+			return resource as T;
+
+		if ( WeakGuidIndex.TryGetValue( id, out var weakRef ) && weakRef.TryGetTarget( out var weakResource ) )
+			return weakResource as T;
+
+		return default;
+	}
+
+	internal string LookupPath( ulong idLong )
+	{
+		return PathIndex.GetValueOrDefault( idLong );
+	}
+
 	/// <summary>
 	/// Get a cached resource by its file path.
 	/// </summary>
@@ -170,7 +405,15 @@ public class ResourceSystem
 	{
 		filepath = Resource.FixPath( filepath );
 
-		return Get<T>( filepath.FastHash() );
+		return GetByIdLong<T>( filepath.FastHash64() );
+	}
+
+	/// <summary>
+	/// Get a cached resource
+	/// </summary>
+	internal T Get<T>( ResourceId id ) where T : Resource
+	{
+		return Get( typeof( T ), id ) as T;
 	}
 
 	/// <summary>
@@ -183,6 +426,19 @@ public class ResourceSystem
 	public bool TryGet<T>( string filepath, out T resource ) where T : Resource
 	{
 		resource = Get<T>( filepath );
+		return resource != null;
+	}
+
+	/// <summary>
+	/// Try to get a cached resource by its GUID.
+	/// </summary>
+	/// <typeparam name="T">Resource type to get.</typeparam>
+	/// <param name="id">GUID of the resource.</param>
+	/// <param name="resource">The retrieved resource, if any.</param>
+	/// <returns>True if resource was retrieved successfully.</returns>
+	public bool TryGet<T>( Guid id, out T resource ) where T : Resource
+	{
+		resource = Get<T>( id );
 		return resource != null;
 	}
 
@@ -265,31 +521,27 @@ public class ResourceSystem
 	{
 		fixed ( byte* ptr = data )
 		{
-			return EngineGlue.ReadCompiledResourceFileJson( (IntPtr)ptr );
+			return EngineGlue.ReadCompiledResourceFileJson( (IntPtr)ptr, data.Length )
+				?? throw new InvalidDataException( "Compiled resource has invalid JSON data or an invalid container." );
 		}
 	}
 
 	/// <summary>
 	/// Read compiled resource as JSON from the provided file path.
 	/// </summary>
-	internal unsafe string ReadCompiledResourceJson( BaseFileSystem fs, string fileName )
+	internal string ReadCompiledResourceJson( BaseFileSystem fs, string fileName )
 	{
 		if ( !fs.FileExists( fileName ) )
 			return string.Empty;
 
-		var data = fs.ReadAllBytes( fileName );
-
-		fixed ( byte* ptr = data )
-		{
-			return EngineGlue.ReadCompiledResourceFileJson( (IntPtr)ptr );
-		}
+		return ReadCompiledResourceJson( fs.ReadAllBytes( fileName ) );
 	}
 
 	internal unsafe byte[] ReadCompiledResourceBlock( string blockName, Span<byte> data )
 	{
 		fixed ( byte* ptr = data )
 		{
-			IntPtr blockData = EngineGlue.ReadCompiledResourceFileBlock( blockName, (IntPtr)ptr, out var size );
+			IntPtr blockData = EngineGlue.ReadCompiledResourceFileBlock( blockName, (IntPtr)ptr, data.Length, out var size );
 			if ( blockData == IntPtr.Zero || size <= 0 )
 				return null;
 
@@ -312,7 +564,7 @@ public class ResourceSystem
 		if ( TypeCache.TryGetValue( extension, out resourceAttribute ) )
 			return true;
 
-		resourceAttribute = Game.TypeLibrary.GetAttributes<AssetTypeAttribute>()
+		resourceAttribute = GlobalContext.Current.TypeLibrary.GetAttributes<AssetTypeAttribute>()
 			.FirstOrDefault( x => string.Equals( x.Extension, extension, StringComparison.OrdinalIgnoreCase ) );
 
 		if ( resourceAttribute != null )
@@ -366,7 +618,7 @@ public class ResourceSystem
 		return null;
 	}
 
-	internal T LoadGameResource<T>( string file, BaseFileSystem fs, bool deferPostload = false ) where T : GameResource
+	internal T LoadGameResource<T>( string file, BaseFileSystem fs, bool deferPostload = false, Package sourcePackage = null ) where T : GameResource
 	{
 		var attr = typeof( T ).GetCustomAttribute<AssetTypeAttribute>();
 		if ( attr == null ) return default;
@@ -375,13 +627,14 @@ public class ResourceSystem
 		// but this ain't TypeLibrary kiddo
 		attr.TargetType = typeof( T );
 
-		return LoadGameResource( attr, file, fs, deferPostload ) as T;
+		return LoadGameResource( attr, file, fs, deferPostload, sourcePackage ) as T;
 	}
 
 	/// <summary>
 	/// Loads a Gameresource from disk. Doesn't look at cache. Registers the resource if successful.
+	/// Pass <c>knownToExist</c> for files that came from a directory listing, to skip checking they exist.
 	/// </summary>
-	internal GameResource LoadGameResource( AssetTypeAttribute type, string file, BaseFileSystem fs, bool deferPostload = false )
+	internal GameResource LoadGameResource( AssetTypeAttribute type, string file, BaseFileSystem fs, bool deferPostload = false, Package sourcePackage = null, bool knownToExist = false )
 	{
 		Assert.NotNull( type );
 		Assert.NotNull( file );
@@ -392,7 +645,7 @@ public class ResourceSystem
 
 		try
 		{
-			if ( fs.FileExists( file ) )
+			if ( knownToExist || fs.FileExists( file ) )
 			{
 				data = fs.ReadAllBytes( file );
 			}
@@ -403,8 +656,20 @@ public class ResourceSystem
 				return null;
 			}
 
-			var se = GameResource.GetPromise( type.TargetType, file );
+			ResourceId resourceId = file;
+			if ( g_pResourceSystem.ResolvePathToGuid( file, out Guid resolvedGuid ) )
+			{
+				resourceId.Guid = resolvedGuid;
+			}
+
+			var se = GameResource.GetPromise( type.TargetType, resourceId );
 			if ( se is null ) return null;
+
+			// Attribute the resource to the package it was loaded from (null = local project).
+			// Only overwrite when a package is supplied so aggregate reloads don't clobber a
+			// previously attributed cloud package.
+			if ( sourcePackage is not null )
+				se.Package = sourcePackage;
 
 			se.TryLoadFromData( data );
 
@@ -426,7 +691,20 @@ public class ResourceSystem
 				InstallReferences( se );
 			}
 
-			Register( se );
+			if ( resourceId.Guid is Guid guid && guid != default )
+			{
+				AssignGuid( se, guid );
+			}
+
+			if ( se.ResourcePath != file )
+			{
+				// if the resource was loaded from a different path than it's now on, move it to the new path
+				MoveResource( se, file );
+			}
+			else
+			{
+				Register( se );
+			}
 
 			if ( !deferPostload )
 				se.PostLoadInternal();
@@ -436,13 +714,24 @@ public class ResourceSystem
 		catch ( System.Exception ex )
 		{
 			Log.Warning( ex, $"		Error when deserializing {file} ({ex.Message})" );
+			return null;
 		}
-
-		return null;
 	}
 
 	/// <summary>
-	/// Installs all references for a GameResource 
+	/// Reference installs started by <see cref="InstallReferences"/> that haven't finished yet
+	/// </summary>
+	private readonly List<Task> _pendingReferenceInstalls = new();
+
+	/// <summary>
+	/// Cancelled when this resource system is cleared, so reference installs from a game that's
+	/// closing don't keep going and load their resources into the next one
+	/// </summary>
+	private CancellationTokenSource _referenceInstallCancel = new();
+
+	/// <summary>
+	/// Installs all references for a GameResource. This goes through <see cref="ServerPackages.DownloadAndMount"/>
+	/// so the package's GameResources get loaded too, not just its files mounted.
 	/// </summary>
 	private void InstallReferences( GameResource se )
 	{
@@ -450,7 +739,22 @@ public class ResourceSystem
 
 		foreach ( var r in references )
 		{
-			_ = PackageManager.InstallAsync( new PackageLoadOptions() { PackageIdent = r, ContextTag = "server" } );
+			_pendingReferenceInstalls.Add( ServerPackages.DownloadAndMount( r, _referenceInstallCancel.Token ).AsTask() );
+		}
+	}
+
+	/// <summary>
+	/// Wait for every package install started by <see cref="InstallReferences"/>. Loading a referenced
+	/// package's resources can start more installs, so keep going until there's nothing left.
+	/// </summary>
+	internal async Task WaitForReferencedPackagesAsync( CancellationToken token = default )
+	{
+		while ( _pendingReferenceInstalls.Count > 0 )
+		{
+			var pending = _pendingReferenceInstalls.ToArray();
+			_pendingReferenceInstalls.Clear();
+
+			await Task.WhenAll( pending ).WaitAsync( token );
 		}
 	}
 }
@@ -465,6 +769,7 @@ public static class ResourceLibrary
 	/// </summary>
 	/// <typeparam name="T">Resource type to get.</typeparam>
 	/// <param name="identifier">Resource hash to look up.</param>
+	[Obsolete( "Use Get<T>(filepath) instead. Identifier based access will be removed in a future update." )]
 	public static T Get<T>( int identifier ) where T : Resource => Game.Resources.Get<T>( identifier );
 
 	/// <summary>
@@ -473,6 +778,11 @@ public static class ResourceLibrary
 	/// <typeparam name="T">Resource type to get.</typeparam>
 	/// <param name="filepath">File path to the resource.</param>
 	public static T Get<T>( string filepath ) where T : Resource => Game.Resources.Get<T>( filepath );
+
+	/// <summary>
+	/// Get a cached resource
+	/// </summary>
+	internal static T Get<T>( ResourceId id ) where T : Resource => Game.Resources.Get<T>( id );
 
 	/// <summary>
 	/// Try to get a cached resource by its file path.
@@ -498,30 +808,55 @@ public static class ResourceLibrary
 	public static IEnumerable<T> GetAll<T>( string filepath, bool recursive = true ) where T : Resource => Game.Resources.GetAll<T>( filepath, recursive );
 
 	/// <summary>
-	/// Load a resource by its file path.
+	/// Load a resource by its file path. Abstract resource types resolve to the file's concrete type.
 	/// </summary>
 	public static async Task<T> LoadAsync<T>( string path ) where T : Resource
 	{
-		// try to load cached version first
+		// Validate source paths before cache lookup can normalize a nonexistent _c alias.
+		var type = typeof( T );
+		if ( Game.Resources.TryLoadUncompiledResource( type, path, FileSystem.Mounted, out var uncompiled ) )
+		{
+			return uncompiled as T;
+		}
+
+		path = Resource.FixPath( path );
 		if ( TryGet<T>( path, out var cached ) )
 			return cached;
 
-		// Check if the type is a GameResource, and handle it accordingly
-		var type = typeof( T );
-		if ( type.IsSubclassOf( typeof( GameResource ) ) )
+		// Mounts know their resource types. Disk resources use their file extension.
+		if ( type.IsAbstract && !Mounting.MountUtility.IsMountPath( path ) )
 		{
-			// Really should be loaded already I think?
-			return Get<T>( path );
+			var resolvedType = ResolveResourceType( path );
+			if ( resolvedType is null || !resolvedType.IsAssignableTo( type ) ) return null;
+			type = resolvedType;
 		}
 
 		if ( type == typeof( Model ) )
-		{
 			return (T)(object)(await Sandbox.Model.LoadAsync( path ));
-		}
 
 		if ( type == typeof( Material ) )
-		{
 			return (T)(object)(await Sandbox.Material.LoadAsync( path ));
+
+		if ( Mounting.MountUtility.IsMountPath( path ) )
+		{
+			var mounted = await Mounting.Directory.TryLoadAsync( path );
+			if ( mounted is null || mounted is T )
+				return mounted as T;
+
+			Log.Warning( $"Mounted resource '{path}' is not a '{type.FullName}'." );
+			return null;
+		}
+
+		// Check if the type is a GameResource, and handle it accordingly
+		if ( type.IsAssignableTo( typeof( GameResource ) ) )
+		{
+			if ( type == typeof( PrefabFile ) )
+			{
+				return (T)(object)PrefabFile.Load( path );
+			}
+
+			// Really should be loaded already I think?
+			return Get<T>( path );
 		}
 
 		if ( type == typeof( Shader ) )
@@ -529,7 +864,39 @@ public static class ResourceLibrary
 			return (T)(object)(Sandbox.Shader.Load( path ));
 		}
 
-		return default;
+		using var manifest = AsyncResourceLoader.Load( path );
+		if ( manifest is not null )
+			await manifest.WaitForLoad();
+
+		return Resource.LoadNative( type, path ) as T;
+	}
+
+	/// <summary>
+	/// Resolve native formats without editor services, then check declared game resource types.
+	/// </summary>
+	private static Type ResolveResourceType( string path )
+	{
+		var extension = System.IO.Path.GetExtension( path );
+		var nativeType = extension switch
+		{
+			".vmdl" => typeof( Model ),
+			".vmat" => typeof( Material ),
+			".vtex" => typeof( Texture ),
+			".vsnd" or ".wav" or ".mp3" or ".ogg" => typeof( SoundFile ),
+#pragma warning disable CS0618
+			".vanmgrph" => typeof( AnimationGraph ),
+#pragma warning restore CS0618
+			".ag" => typeof( Animation.Graph ),
+			".anim" => typeof( Animation.Clip ),
+			".skel" => typeof( Animation.Skeleton ),
+			".shader" => typeof( Shader ),
+			".vphys" => typeof( PhysicsGroupDescription ),
+			_ => null
+		};
+
+		if ( nativeType is not null ) return nativeType;
+
+		return Game.Resources.TryGetType( extension, out var attribute ) ? attribute.TargetType : null;
 	}
 
 	/// <summary>

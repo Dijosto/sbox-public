@@ -3,6 +3,7 @@
 /// <summary>
 /// Single source for creating sounds
 /// </summary>
+[Expose]
 public static partial class Sound
 {
 	/// <summary>
@@ -35,7 +36,7 @@ public static partial class Sound
 
 	internal static void Clear()
 	{
-		Audio.Listener.Clear();
+		Game.Music.ClearDucks();
 	}
 
 
@@ -65,8 +66,9 @@ public static partial class Sound
 
 
 	/// <summary>
-	/// Uncompress the voice data
+	/// Uncompress the voice data. Shares one decoder between everyone, so voice from more than one speaker gets garbled.
 	/// </summary>
+	[Obsolete( "Use SoundStream.WriteVoiceData, with one stream per speaker" )]
 	public static unsafe void UncompressVoiceData( byte[] buffer, Action<Memory<short>> ondata )
 	{
 		VoiceManager.Uncompress( buffer, ondata );
